@@ -37,6 +37,9 @@ export const documentationLinks = {
   metricbeat: {
     base: `${ELASTIC_WEBSITE_URL}guide/en/beats/metricbeat/${DOC_LINK_VERSION}`
   },
+  heartbeat: {
+    base: `${ELASTIC_WEBSITE_URL}guide/en/beats/heartbeat/${DOC_LINK_VERSION}`
+  },
   logstash: {
     base: `${ELASTIC_WEBSITE_URL}guide/en/logstash/${DOC_LINK_VERSION}`
   },
