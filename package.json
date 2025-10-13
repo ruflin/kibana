@@ -1078,6 +1078,7 @@
     "@kbn/ui-theme": "link:src/platform/packages/shared/kbn-ui-theme",
     "@kbn/unified-data-table": "link:src/platform/packages/shared/kbn-unified-data-table",
     "@kbn/unified-doc-viewer": "link:src/platform/packages/shared/kbn-unified-doc-viewer",
+    "@kbn/unified-doc-viewer-ai-plugin": "link:x-pack/platform/plugins/shared/unified_doc_viewer_ai",
     "@kbn/unified-doc-viewer-examples": "link:examples/unified_doc_viewer",
     "@kbn/unified-doc-viewer-plugin": "link:src/platform/plugins/shared/unified_doc_viewer",
     "@kbn/unified-field-list": "link:src/platform/packages/shared/kbn-unified-field-list",

@@ -1,0 +1,9 @@
+{
+    "name": "@kbn/unified-doc-viewer-ai-plugin",
+    "private": true,
+    "version": "1.0.0",
+    "description": "AI-powered document analysis for Discover",
+    "license": "Elastic License 2.0",
+    "scripts": {},
+    "devDependencies": {}
+}

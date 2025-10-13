@@ -1,0 +1,17 @@
+{
+  "type": "plugin",
+  "id": "@kbn/unified-doc-viewer-ai-plugin",
+  "owner": ["@elastic/kibana-data-discovery"],
+  "group": "platform",
+  "visibility": "shared",
+  "description": "AI-powered document analysis for Discover",
+  "plugin": {
+    "id": "unifiedDocViewerAi",
+    "browser": true,
+    "server": true,
+    "requiredPlugins": ["unifiedDocViewer", "actions", "data"],
+    "optionalPlugins": [],
+    "requiredBundles": ["kibanaReact"]
+  }
+}
+
