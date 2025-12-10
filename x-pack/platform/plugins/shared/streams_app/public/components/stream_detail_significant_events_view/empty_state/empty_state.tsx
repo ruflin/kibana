@@ -5,9 +5,9 @@
  * 2.0.
  */
 import {
-  EuiButton,
   EuiButtonEmpty,
   EuiFlexGroup,
+  EuiFlexItem,
   EuiSpacer,
   EuiText,
   EuiTitle,
@@ -17,6 +17,7 @@ import React from 'react';
 import { AssetImage } from '../../asset_image';
 import { FeaturesSelector, type FeatureSelectorProps } from '../feature_selector';
 import { useAIFeatures } from '../add_significant_event_flyout/generated_flow_form/use_ai_features';
+import { GenerateSuggestionButton } from '../../data_management/stream_detail_routing/review_suggestions_form/generate_suggestions_button';
 
 export function NoSignificantEventsEmptyState({
   onGenerateSuggestionsClick,
@@ -25,10 +26,14 @@ export function NoSignificantEventsEmptyState({
   selectedFeatures,
   onFeaturesChange,
 }: {
-  onGenerateSuggestionsClick: () => void;
+  onGenerateSuggestionsClick: (connectorId: string) => void;
   onManualEntryClick: () => void;
 } & FeatureSelectorProps) {
   const aiFeatures = useAIFeatures();
+
+  if (!aiFeatures) {
+    return null;
+  }
 
   return (
     <EuiFlexGroup direction="column" alignItems="center" justifyContent="center">
@@ -44,7 +49,7 @@ export function NoSignificantEventsEmptyState({
       <EuiText size="s" textAlign="center" css={{ maxWidth: 480 }}>
         {i18n.translate('xpack.streams.significantEvents.emptyState.description', {
           defaultMessage:
-            "A Significant Event is a single, ‘interesting’ log event identified by an automated rule as being important for understanding a system's behaviour. Select feature context, to generate suggestions.",
+            "A Significant Event is a single, 'interesting' log event identified by an automated rule as being important for understanding a system's behaviour. Select feature context, to generate suggestions.",
         })}
       </EuiText>
       <FeaturesSelector
@@ -52,31 +57,32 @@ export function NoSignificantEventsEmptyState({
         selectedFeatures={selectedFeatures}
         onFeaturesChange={onFeaturesChange}
       />
-      <EuiFlexGroup direction="row" gutterSize="s">
-        <EuiButton
-          iconType="sparkles"
-          fill
-          disabled={
-            selectedFeatures.length === 0 || !aiFeatures?.genAiConnectors?.selectedConnector
-          }
-          onClick={() => onGenerateSuggestionsClick()}
-          data-test-subj="significant_events_generate_suggestions_button"
-        >
-          {i18n.translate(
-            'xpack.streams.significantEvents.emptyState.generateSuggestionsButtonLabel',
-            {
-              defaultMessage: 'Generate suggestions',
-            }
-          )}
-        </EuiButton>
-        <EuiButtonEmpty
-          onClick={onManualEntryClick}
-          data-test-subj="significant_events_manual_entry_button"
-        >
-          {i18n.translate('xpack.streams.significantEvents.emptyState.manualEntryButtonLabel', {
-            defaultMessage: 'Manual entry',
-          })}
-        </EuiButtonEmpty>
+      <EuiFlexGroup direction="row" gutterSize="s" alignItems="center">
+        <EuiFlexItem grow={false}>
+          <GenerateSuggestionButton
+            aiFeatures={aiFeatures}
+            onClick={onGenerateSuggestionsClick}
+            isDisabled={selectedFeatures.length === 0}
+            data-test-subj="significant_events_generate_suggestions_button"
+          >
+            {i18n.translate(
+              'xpack.streams.significantEvents.emptyState.generateSuggestionsButtonLabel',
+              {
+                defaultMessage: 'Generate suggestions',
+              }
+            )}
+          </GenerateSuggestionButton>
+        </EuiFlexItem>
+        <EuiFlexItem grow={false}>
+          <EuiButtonEmpty
+            onClick={onManualEntryClick}
+            data-test-subj="significant_events_manual_entry_button"
+          >
+            {i18n.translate('xpack.streams.significantEvents.emptyState.manualEntryButtonLabel', {
+              defaultMessage: 'Manual entry',
+            })}
+          </EuiButtonEmpty>
+        </EuiFlexItem>
       </EuiFlexGroup>
     </EuiFlexGroup>
   );

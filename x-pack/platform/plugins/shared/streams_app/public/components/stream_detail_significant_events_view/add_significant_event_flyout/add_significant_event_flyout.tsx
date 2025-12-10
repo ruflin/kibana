@@ -41,6 +41,7 @@ import { useTimefilter } from '../../../hooks/use_timefilter';
 import { useAIFeatures } from './generated_flow_form/use_ai_features';
 import { validateQuery } from './common/validate_query';
 import { useStreamsAppFetch } from '../../../hooks/use_streams_app_fetch';
+import { GenerateSuggestionButton } from '../../data_management/stream_detail_routing/review_suggestions_form/generate_suggestions_button';
 
 interface Props {
   onClose: () => void;
@@ -114,15 +115,14 @@ export function AddSignificantEventFlyout({
     }
   }, [selectedFlow]);
 
-  const generateQueries = useCallback(() => {
+  const generateQueries = useCallback((connectorId: string) => {
     let numberOfGeneratedQueries = 0;
     const numberOfGeneratedQueriesByFeature: Record<FeatureType, number> = {
       system: 0,
     };
     let inputTokensUsed = 0;
     let outputTokensUsed = 0;
-    const connector = aiFeatures?.genAiConnectors.selectedConnector;
-    if (!connector || selectedFeatures.length === 0) {
+    if (!connectorId || selectedFeatures.length === 0) {
       return;
     }
 
@@ -133,7 +133,7 @@ export function AddSignificantEventFlyout({
     from(selectedFeatures)
       .pipe(
         concatMap((feature) =>
-          generate(connector, feature).pipe(
+          generate(connectorId, feature).pipe(
             concatMap(({ queries: nextQueries, tokensUsed }) => {
               numberOfGeneratedQueries += nextQueries.length;
               numberOfGeneratedQueriesByFeature[feature.type] += nextQueries.length;
@@ -204,7 +204,6 @@ export function AddSignificantEventFlyout({
         },
       });
   }, [
-    aiFeatures?.genAiConnectors.selectedConnector,
     selectedFeatures,
     generate,
     notifications,
@@ -214,11 +213,11 @@ export function AddSignificantEventFlyout({
   ]);
 
   useEffect(() => {
-    if (initialFlow === 'ai' && initialSelectedFeatures.length > 0) {
-      generateQueries();
+    if (initialFlow === 'ai' && initialSelectedFeatures.length > 0 && aiFeatures?.genAiConnectors.selectedConnector) {
+      generateQueries(aiFeatures.genAiConnectors.selectedConnector);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiFeatures?.enabled]);
+  }, [aiFeatures?.enabled, aiFeatures?.genAiConnectors.selectedConnector]);
 
   return (
     <EuiFlyout
@@ -288,25 +287,26 @@ export function AddSignificantEventFlyout({
                       selectedFeatures={selectedFeatures}
                       onFeaturesChange={setSelectedFeatures}
                     />
-                    <EuiButton
-                      iconType="sparkles"
-                      fill
-                      isLoading={isGenerating}
-                      disabled={
-                        isSubmitting ||
-                        selectedFeatures.length === 0 ||
-                        !aiFeatures?.genAiConnectors?.selectedConnector
-                      }
-                      onClick={generateQueries}
-                      data-test-subj="significant_events_flyout_generate_suggestions_button"
-                    >
-                      {i18n.translate(
-                        'xpack.streams.streamDetailView.addSignificantEventFlyout.generateSuggestionsButtonLabel',
-                        {
-                          defaultMessage: 'Generate suggestions',
+                    {aiFeatures && (
+                      <GenerateSuggestionButton
+                        aiFeatures={aiFeatures}
+                        onClick={generateQueries}
+                        isLoading={isGenerating}
+                        isDisabled={
+                          isSubmitting ||
+                          selectedFeatures.length === 0 ||
+                          !aiFeatures.genAiConnectors?.selectedConnector
                         }
-                      )}
-                    </EuiButton>
+                        data-test-subj="significant_events_flyout_generate_suggestions_button"
+                      >
+                        {i18n.translate(
+                          'xpack.streams.streamDetailView.addSignificantEventFlyout.generateSuggestionsButtonLabel',
+                          {
+                            defaultMessage: 'Generate suggestions',
+                          }
+                        )}
+                      </GenerateSuggestionButton>
+                    )}
                   </>
                 )}
               </EuiPanel>

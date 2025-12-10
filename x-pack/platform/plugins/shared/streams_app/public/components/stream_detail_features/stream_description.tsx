@@ -142,6 +142,7 @@ export const StreamDescription: React.FC<AISummaryProps> = ({ definition, refres
                       <ConnectorListButton
                         buttonProps={{
                           size: 's',
+                          fill: true,
                           iconType: 'sparkles',
                           children: GENERATE_DESCRIPTION_BUTTON_LABEL,
                           onClick: onGenerateDescription,

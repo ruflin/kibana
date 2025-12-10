@@ -145,11 +145,11 @@ export function StreamDetailSignificantEventsView({ definition }: Props) {
     return (
       <>
         <NoFeaturesEmptyState
-          onFeatureIdentificationClick={() => {
+          onFeatureIdentificationClick={(connectorId) => {
             setIsFeatureDetectionLoading(true);
             setIsFeatureDetectionFlyoutOpen(true);
 
-            identifyFeatures(aiFeatures?.genAiConnectors.selectedConnector!, 'now', 'now-24h')
+            identifyFeatures(connectorId, 'now', 'now-24h')
               .then((data) => {
                 setDetectedFeatures(data.features);
               })
@@ -173,7 +173,7 @@ export function StreamDetailSignificantEventsView({ definition }: Props) {
     return (
       <>
         <NoSignificantEventsEmptyState
-          onGenerateSuggestionsClick={() => {
+          onGenerateSuggestionsClick={(connectorId) => {
             setInitialFlow('ai');
             setIsEditFlyoutOpen(true);
           }}
