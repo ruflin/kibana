@@ -16,6 +16,9 @@ export const SummarizeQueriesPrompt = createPrompt({
   input: z.object({
     streamName: z.string(),
     queries: z.string(),
+    features: z.string().optional(),
+    previousInsights: z.string().optional(),
+    crossSignalContext: z.string().optional(),
   }),
 })
   .version({

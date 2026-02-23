@@ -30,6 +30,16 @@ const insightZodSchema = z.object({
     .describe(
       'Severity level: critical (service down), high (degraded), medium (potential issue), low (informational)'
     ),
+  confidence: z
+    .number()
+    .min(0)
+    .max(100)
+    .optional()
+    .describe('Confidence score 0-100 reflecting strength of evidence'),
+  category: z
+    .enum(['error_spike', 'performance', 'anomaly', 'trend', 'correlation', 'capacity', 'other'])
+    .optional()
+    .describe('Category of the issue'),
   evidence: z
     .array(insightEvidenceZodSchema)
     .describe('Evidence supporting this insight from streams and queries'),
@@ -46,8 +56,13 @@ export const insightsSchema = zodToJsonSchema(insightsToolArgsZodSchema, {
   $refStrategy: 'none',
 }) as unknown as ToolSchema;
 
+export type ParsedInsight = Insight & {
+  confidence?: number;
+  category?: string;
+};
+
 export function parseInsightsWithErrors(data: unknown): {
-  insights: Insight[];
+  insights: ParsedInsight[];
   errors: z.ZodError | null;
 } {
   const result = insightsToolArgsZodSchema.safeParse(data);

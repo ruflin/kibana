@@ -5,3 +5,18 @@ Analyze the significant events for this data stream and generate structured insi
 
 `queries with event data`
 {{{queries}}}
+
+{{#features}}
+`stream features (known system components)`
+{{{features}}}
+{{/features}}
+
+{{#previousInsights}}
+`recent insights (avoid duplicating these — update or reference them instead)`
+{{{previousInsights}}}
+{{/previousInsights}}
+
+{{#crossSignalContext}}
+`cross-signal context (active alerts from other sources, APM service health)`
+{{{crossSignalContext}}}
+{{/crossSignalContext}}

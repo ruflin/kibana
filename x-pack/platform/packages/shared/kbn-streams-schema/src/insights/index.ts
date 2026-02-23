@@ -75,16 +75,32 @@ export const basePersistedInsightSchema = z.object({
   recommendations: z.array(z.string()),
   related_features: z.array(z.string()).optional(),
   related_queries: z.array(z.string()).optional(),
+  parent_insight_id: z.string().optional(),
+  related_insight_ids: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   time_range: z.object({ start: z.string(), end: z.string() }).optional(),
 });
 
 export type BasePersistedInsight = z.infer<typeof basePersistedInsightSchema>;
 
+const insightFeedbackActions = ['acknowledged', 'dismissed', 'helpful', 'not_helpful'] as const;
+export const insightFeedbackActionSchema = z.enum(insightFeedbackActions);
+export type InsightFeedbackAction = z.infer<typeof insightFeedbackActionSchema>;
+
+export const insightFeedbackEntrySchema = z.object({
+  action: insightFeedbackActionSchema,
+  timestamp: z.string(),
+  user: z.string().optional(),
+  comment: z.string().optional(),
+});
+
+export type InsightFeedbackEntry = z.infer<typeof insightFeedbackEntrySchema>;
+
 export const persistedInsightSchema = basePersistedInsightSchema.and(
   z.object({
     uuid: z.string(),
     status: insightStatusSchema,
+    feedback: z.array(insightFeedbackEntrySchema).optional(),
     created_at: z.string(),
     updated_at: z.string(),
     expires_at: z.string().optional(),

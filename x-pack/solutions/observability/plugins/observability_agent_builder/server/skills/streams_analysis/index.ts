@@ -12,6 +12,9 @@ import { STREAMS_SEARCH_INSIGHTS_TOOL_ID } from '../../tools/streams/search_insi
 import { STREAMS_WRITE_INSIGHT_TOOL_ID } from '../../tools/streams/write_insight/tool';
 import { STREAMS_SUGGEST_QUERY_TOOL_ID } from '../../tools/streams/suggest_query/tool';
 import { STREAMS_ANNOTATE_FEATURE_TOOL_ID } from '../../tools/streams/annotate_feature/tool';
+import { STREAMS_UPDATE_INSIGHT_STATUS_TOOL_ID } from '../../tools/streams/update_insight_status/tool';
+import { STREAMS_LINK_INSIGHTS_TOOL_ID } from '../../tools/streams/link_insights/tool';
+import { STREAMS_GET_INSIGHT_QUALITY_TOOL_ID } from '../../tools/streams/get_insight_quality/tool';
 
 const ID = 'streams_analysis';
 const NAME = 'streams-analysis';
@@ -53,6 +56,11 @@ Use this skill when:
 - **${STREAMS_SUGGEST_QUERY_TOOL_ID}** — Propose a new significant event query for future detection
 - **${STREAMS_ANNOTATE_FEATURE_TOOL_ID}** — Enrich a feature with investigation notes, tags, or confidence adjustments
 
+### Insight lifecycle tools
+- **${STREAMS_UPDATE_INSIGHT_STATUS_TOOL_ID}** — Transition insight status (new → acknowledged → resolved/dismissed)
+- **${STREAMS_LINK_INSIGHTS_TOOL_ID}** — Link related insights together (parent/child or peer relationships)
+- **${STREAMS_GET_INSIGHT_QUALITY_TOOL_ID}** — Get feedback quality metrics to calibrate insight generation
+
 ## Tool Selection Strategy
 
 **Always prefer semantic search over bulk loading.** The search tools use Elasticsearch semantic_text
@@ -75,6 +83,11 @@ the system handles this automatically.
 ## Investigation Methodology
 
 Follow this structured approach for every investigation:
+
+### 0. Quality Calibration (optional but recommended)
+- Use \`${STREAMS_GET_INSIGHT_QUALITY_TOOL_ID}\` to check feedback metrics for the stream
+- If certain categories have high dismissal rates, avoid generating similar insights
+- Use average confidence scores from feedback to calibrate your own confidence assessments
 
 ### 1. Context Gathering (use semantic search)
 - Use \`${STREAMS_SEARCH_INSIGHTS_TOOL_ID}\` FIRST to check if similar issues have been investigated before
@@ -104,7 +117,18 @@ Follow this structured approach for every investigation:
   - Actionable recommendations
 - **Always call \`${STREAMS_WRITE_INSIGHT_TOOL_ID}\`** to persist the insight — this is mandatory
 
-### 5. Feedback Loop Actions
+### 5. Insight Lifecycle Management
+After recording the insight:
+
+- **Check for related open insights:** Search for existing insights about the same issue. If one
+  exists, use \`${STREAMS_LINK_INSIGHTS_TOOL_ID}\` to link them (parent/child or related).
+- **Update status:** If a previous insight described an issue that is now resolved, use
+  \`${STREAMS_UPDATE_INSIGHT_STATUS_TOOL_ID}\` to transition it to "resolved".
+- **Acknowledge reviewed insights:** When reviewing existing insights, transition them from
+  "new" to "acknowledged" using \`${STREAMS_UPDATE_INSIGHT_STATUS_TOOL_ID}\`.
+- **Dismiss false positives:** If an insight is no longer relevant, transition to "dismissed".
+
+### 6. Feedback Loop Actions
 After recording the insight, take these additional actions when appropriate:
 
 - **Suggest queries:** If you discovered a recurring pattern that is NOT already covered by an
@@ -308,6 +332,9 @@ export const createStreamsAnalysisSkill = (): SkillDefinition<typeof NAME, typeo
       STREAMS_WRITE_INSIGHT_TOOL_ID,
       STREAMS_SUGGEST_QUERY_TOOL_ID,
       STREAMS_ANNOTATE_FEATURE_TOOL_ID,
+      STREAMS_UPDATE_INSIGHT_STATUS_TOOL_ID,
+      STREAMS_LINK_INSIGHTS_TOOL_ID,
+      STREAMS_GET_INSIGHT_QUALITY_TOOL_ID,
     ],
     getInlineTools: () => [],
   });

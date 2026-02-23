@@ -16,17 +16,20 @@ import { generateInsights } from '../../significant_events/insights/generate_ins
 import { getErrorMessage } from '../../streams/errors/parse_error';
 import { formatInferenceProviderError } from '../../../routes/utils/create_connector_sse_error';
 
-export interface InsightsDiscoveryTaskParams {
+export interface AutoInvestigationTaskParams {
   connectorId: string;
-  /** When provided, only generate insights for these stream names. Otherwise all streams are used. */
-  streamNames?: string[];
+  streamName: string;
+  alertId?: string;
+  triggerReason?: string;
 }
 
-export const STREAMS_INSIGHTS_DISCOVERY_TASK_TYPE = 'streams_insights_discovery';
+export const STREAMS_AUTO_INVESTIGATION_TASK_TYPE = 'streams_auto_investigation';
 
-export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
+const DEBOUNCE_WINDOW_MS = 5 * 60 * 1000;
+
+export function createStreamsAutoInvestigationTask(taskContext: TaskContext) {
   return {
-    [STREAMS_INSIGHTS_DISCOVERY_TASK_TYPE]: {
+    [STREAMS_AUTO_INVESTIGATION_TASK_TYPE]: {
       createTaskRunner: (runContext) => {
         return {
           run: cancellableTask(
@@ -35,8 +38,8 @@ export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
                 throw new Error('Request is required to run this task');
               }
 
-              const { connectorId, streamNames, _task } = runContext.taskInstance
-                .params as TaskParams<InsightsDiscoveryTaskParams>;
+              const { connectorId, streamName, alertId, triggerReason, _task } = runContext
+                .taskInstance.params as TaskParams<AutoInvestigationTaskParams>;
 
               const {
                 taskClient,
@@ -50,6 +53,34 @@ export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
                 request: runContext.fakeRequest,
               });
 
+              if (insightClient) {
+                const { hits: recentInsights } = await insightClient.getInsights(streamName, {
+                  limit: 5,
+                  status: 'new',
+                });
+
+                const recentAutoInsight = recentInsights.find(
+                  (i) =>
+                    i.source === 'task' &&
+                    new Date(i.created_at).getTime() > Date.now() - DEBOUNCE_WINDOW_MS
+                );
+
+                if (recentAutoInsight) {
+                  taskContext.logger.info(
+                    `Skipping auto-investigation for ${streamName}: recent investigation exists (${recentAutoInsight.uuid})`
+                  );
+                  await taskClient.complete<AutoInvestigationTaskParams, InsightsResult>(
+                    _task,
+                    { connectorId, streamName, alertId, triggerReason },
+                    {
+                      insights: [],
+                      tokensUsed: { prompt: 0, completion: 0, total: 0 },
+                    }
+                  );
+                  return getDeleteTaskRunResult();
+                }
+              }
+
               const boundInferenceClient = inferenceClient.bindTo({ connectorId });
 
               try {
@@ -61,8 +92,8 @@ export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
                   insightClient,
                   featureClient,
                   signal: runContext.abortController.signal,
-                  logger: taskContext.logger.get('insights_discovery'),
-                  streamNames,
+                  logger: taskContext.logger.get('auto_investigation'),
+                  streamNames: [streamName],
                 });
 
                 taskContext.telemetry.trackInsightsGenerated({
@@ -71,13 +102,12 @@ export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
                   cached_tokens_used: result.tokensUsed?.cached ?? 0,
                 });
 
-                await taskClient.complete<InsightsDiscoveryTaskParams, InsightsResult>(
+                await taskClient.complete<AutoInvestigationTaskParams, InsightsResult>(
                   _task,
-                  { connectorId, streamNames },
+                  { connectorId, streamName, alertId, triggerReason },
                   result
                 );
               } catch (error) {
-                // Get connector info for error enrichment
                 const connector = await inferenceClient.getConnectorById(connectorId);
 
                 const errorMessage = isInferenceProviderError(error)
@@ -92,12 +122,12 @@ export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
                 }
 
                 taskContext.logger.error(
-                  `Task ${runContext.taskInstance.id} failed: ${errorMessage}`
+                  `Auto-investigation task ${runContext.taskInstance.id} failed: ${errorMessage}`
                 );
 
-                await taskClient.fail<InsightsDiscoveryTaskParams>(
+                await taskClient.fail<AutoInvestigationTaskParams>(
                   _task,
-                  { connectorId, streamNames },
+                  { connectorId, streamName, alertId, triggerReason },
                   errorMessage
                 );
                 return getDeleteTaskRunResult();

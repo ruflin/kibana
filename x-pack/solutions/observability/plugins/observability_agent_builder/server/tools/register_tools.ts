@@ -91,6 +91,18 @@ import {
   STREAMS_ANNOTATE_FEATURE_TOOL_ID,
   createAnnotateFeatureTool,
 } from './streams/annotate_feature/tool';
+import {
+  STREAMS_UPDATE_INSIGHT_STATUS_TOOL_ID,
+  createUpdateInsightStatusTool,
+} from './streams/update_insight_status/tool';
+import {
+  STREAMS_LINK_INSIGHTS_TOOL_ID,
+  createLinkInsightsTool,
+} from './streams/link_insights/tool';
+import {
+  STREAMS_GET_INSIGHT_QUALITY_TOOL_ID,
+  createGetInsightQualityTool,
+} from './streams/get_insight_quality/tool';
 
 const PLATFORM_TOOL_IDS = [
   platformCoreTools.listIndices,
@@ -124,6 +136,9 @@ const OBSERVABILITY_TOOL_IDS = [
   STREAMS_WRITE_INSIGHT_TOOL_ID,
   STREAMS_SUGGEST_QUERY_TOOL_ID,
   STREAMS_ANNOTATE_FEATURE_TOOL_ID,
+  STREAMS_UPDATE_INSIGHT_STATUS_TOOL_ID,
+  STREAMS_LINK_INSIGHTS_TOOL_ID,
+  STREAMS_GET_INSIGHT_QUALITY_TOOL_ID,
 ];
 
 export const OBSERVABILITY_AGENT_TOOL_IDS = [...PLATFORM_TOOL_IDS, ...OBSERVABILITY_TOOL_IDS];
@@ -164,6 +179,9 @@ export async function registerTools({
     createWriteInsightTool({ core, logger }),
     createSuggestQueryTool({ core, logger }),
     createAnnotateFeatureTool({ core, logger }),
+    createUpdateInsightStatusTool({ core, logger }),
+    createLinkInsightsTool({ core, logger }),
+    createGetInsightQualityTool({ core, logger }),
   ];
 
   for (const tool of observabilityTools) {

@@ -26,6 +26,10 @@ export const INSIGHT_CREATED_AT = 'insight.created_at';
 export const INSIGHT_UPDATED_AT = 'insight.updated_at';
 export const INSIGHT_EXPIRES_AT = 'insight.expires_at';
 
+export const INSIGHT_PARENT_INSIGHT_ID = 'insight.parent_insight_id';
+export const INSIGHT_RELATED_INSIGHT_IDS = 'insight.related_insight_ids';
+export const INSIGHT_FEEDBACK = 'insight.feedback';
+
 export const INSIGHT_TITLE_SEMANTIC = 'insight.title_semantic';
 export const INSIGHT_DESCRIPTION_SEMANTIC = 'insight.description_semantic';
 export const INSIGHT_RECOMMENDATIONS_SEMANTIC = 'insight.recommendations_semantic';

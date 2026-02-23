@@ -9,6 +9,7 @@ import { z } from '@kbn/zod';
 import {
   basePersistedInsightSchema,
   insightStatusSchema,
+  insightFeedbackActionSchema,
   type PersistedInsight,
 } from '@kbn/streams-schema';
 import { createServerRoute } from '../../../create_server_route';
@@ -205,6 +206,121 @@ const updateInsightStatusRoute = createServerRoute({
   },
 });
 
+const feedbackInsightRoute = createServerRoute({
+  endpoint: 'POST /internal/streams/{name}/insights/{uuid}/_feedback',
+  options: {
+    access: 'internal',
+    summary: 'Adds feedback to an insight',
+    description:
+      'Records user feedback (helpful, not_helpful, acknowledged, dismissed) on an insight',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.manage],
+    },
+  },
+  params: z.object({
+    path: z.object({ name: z.string(), uuid: z.string() }),
+    body: z.object({
+      action: insightFeedbackActionSchema,
+      comment: z.string().optional(),
+    }),
+  }),
+  handler: async ({
+    params,
+    request,
+    getScopedClients,
+    server,
+  }): Promise<{ insight: PersistedInsight }> => {
+    const { insightClient, licensing, uiSettingsClient, streamsClient } = await getScopedClients({
+      request,
+    });
+
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+    await streamsClient.ensureStream(params.path.name);
+
+    const entry = {
+      action: params.body.action,
+      timestamp: new Date().toISOString(),
+      user: request.headers['x-elastic-user'] as string | undefined,
+      comment: params.body.comment,
+    };
+
+    const insight = await insightClient.addFeedback(params.path.name, params.path.uuid, entry);
+
+    return { insight };
+  },
+});
+
+const insightQualityRoute = createServerRoute({
+  endpoint: 'GET /internal/streams/{name}/insights/_quality',
+  options: {
+    access: 'internal',
+    summary: 'Gets insight quality metrics',
+    description: 'Returns aggregated feedback metrics for insights in a stream',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.read],
+    },
+  },
+  params: z.object({
+    path: z.object({ name: z.string() }),
+  }),
+  handler: async ({ params, request, getScopedClients, server }) => {
+    const { insightClient, licensing, uiSettingsClient, streamsClient } = await getScopedClients({
+      request,
+    });
+
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+    await streamsClient.ensureStream(params.path.name);
+
+    return insightClient.getInsightQuality(params.path.name);
+  },
+});
+
+const linkInsightsRoute = createServerRoute({
+  endpoint: 'POST /internal/streams/{name}/insights/{uuid}/_link',
+  options: {
+    access: 'internal',
+    summary: 'Links insights together',
+    description: 'Sets parent/child or related relationships between insights',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.manage],
+    },
+  },
+  params: z.object({
+    path: z.object({ name: z.string(), uuid: z.string() }),
+    body: z.object({
+      parent_insight_id: z.string().optional(),
+      related_insight_ids: z.array(z.string()).optional(),
+    }),
+  }),
+  handler: async ({
+    params,
+    request,
+    getScopedClients,
+    server,
+  }): Promise<{ insight: PersistedInsight }> => {
+    const { insightClient, licensing, uiSettingsClient, streamsClient } = await getScopedClients({
+      request,
+    });
+
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+    await streamsClient.ensureStream(params.path.name);
+
+    const insight = await insightClient.linkInsights(
+      params.path.name,
+      params.path.uuid,
+      params.body
+    );
+
+    return { insight };
+  },
+});
+
 const deleteInsightRoute = createServerRoute({
   endpoint: 'DELETE /internal/streams/{name}/insights/{uuid}',
   options: {
@@ -245,5 +361,8 @@ export const internalInsightsCrudRoutes = {
   ...listInsightsRoute,
   ...listAllInsightsRoute,
   ...updateInsightStatusRoute,
+  ...feedbackInsightRoute,
+  ...insightQualityRoute,
+  ...linkInsightsRoute,
   ...deleteInsightRoute,
 };

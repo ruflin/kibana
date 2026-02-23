@@ -8,12 +8,11 @@
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import { omit } from 'lodash';
 import type { Condition } from '@kbn/streamlang';
-import type { Insight } from '@kbn/streams-schema';
 import type { Query } from '../../../../common/queries';
 import { getRuleIdFromQueryLink } from '../../streams/assets/query/helpers/query';
 import { parseError } from '../../streams/errors/parse_error';
 import { SecurityError } from '../../streams/errors/security_error';
-import { SUBMIT_INSIGHTS_TOOL_NAME, parseInsightsWithErrors } from './schema';
+import { SUBMIT_INSIGHTS_TOOL_NAME, parseInsightsWithErrors, type ParsedInsight } from './schema';
 
 export interface QueryData {
   title: string;
@@ -23,11 +22,14 @@ export interface QueryData {
     filter: Condition;
   };
   currentCount: number;
+  baselineCount: number;
+  changePercent: number | null;
   sampleEvents: string[];
 }
 
 const SAMPLE_EVENTS_COUNT = 5;
-const CURRENT_WINDOW_MINUTES = 15;
+const CURRENT_WINDOW_MINUTES = 60;
+const BASELINE_WINDOW_HOURS = 24;
 
 /**
  * Safely extracts insights from an LLM response.
@@ -35,7 +37,7 @@ const CURRENT_WINDOW_MINUTES = 15;
 export function extractInsightsFromResponse(
   response: { toolCalls?: Array<{ function: { name: string; arguments: unknown } }> },
   logger: Logger
-): Insight[] {
+): ParsedInsight[] {
   if (!response.toolCalls || response.toolCalls.length === 0) {
     logger.warn('LLM response has no tool calls');
     return [];
@@ -117,6 +119,10 @@ export async function collectQueryData({
     JSON.stringify(omit(hit._source?.original_source ?? {}, '_id'))
   );
 
+  const baselineCount = await collectBaselineCount({ ruleId, esClient });
+  const changePercent =
+    baselineCount > 0 ? Math.round(((currentCount - baselineCount) / baselineCount) * 100) : null;
+
   return {
     title: query.query.title,
     kql: query.query.kql.query,
@@ -124,6 +130,42 @@ export async function collectQueryData({
       ? { name: query.query.feature.name, filter: query.query.feature.filter }
       : undefined,
     currentCount,
+    baselineCount,
+    changePercent,
     sampleEvents,
   };
+}
+
+async function collectBaselineCount({
+  ruleId,
+  esClient,
+}: {
+  ruleId: string;
+  esClient: ElasticsearchClient;
+}): Promise<number> {
+  try {
+    const baselineResponse = await esClient.count({
+      index: '.alerts-streams.alerts-default',
+      query: {
+        bool: {
+          filter: [
+            {
+              range: {
+                '@timestamp': {
+                  gte: `now-${BASELINE_WINDOW_HOURS}h`,
+                  lt: `now-${CURRENT_WINDOW_MINUTES}m`,
+                },
+              },
+            },
+            { term: { 'kibana.alert.rule.uuid': ruleId } },
+          ],
+        },
+      },
+    });
+    const totalHours = BASELINE_WINDOW_HOURS - CURRENT_WINDOW_MINUTES / 60;
+    const hourlyRate = baselineResponse.count / totalHours;
+    return Math.round(hourlyRate * (CURRENT_WINDOW_MINUTES / 60));
+  } catch {
+    return 0;
+  }
 }
