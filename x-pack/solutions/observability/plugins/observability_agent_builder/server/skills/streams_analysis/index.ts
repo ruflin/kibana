@@ -211,6 +211,72 @@ For every investigation, follow this tool priority:
 - Do NOT use it as a substitute for semantic search — search tools are more targeted and token-efficient
 `;
 
+const INCIDENT_PATTERNS_CONTENT = `# Common Incident Patterns for SREs
+
+## Cascading failure
+**Symptoms**: Errors in one service propagate to dependent services, each showing increasing
+latency and error rates. Downstream services may show timeout errors rather than the original
+error type.
+**Investigation**: Check service topology. Look for the earliest error signal — that's likely
+the root cause service. Downstream services are victims, not causes.
+**Key queries**: diff_count on service.name to find which service error rate changed first;
+detect_change_points on latency per service to build a timeline.
+
+## Thundering herd
+**Symptoms**: Sudden spike in traffic after a brief outage or cache invalidation. All clients
+retry simultaneously, overwhelming the recovering service.
+**Investigation**: Look for a brief dip in traffic followed by a massive spike. Check if
+retry patterns are visible in logs. The spike is typically 3-10x normal traffic.
+**Key queries**: detect_change_points on request count; diff_count on client IPs or user agents.
+
+## Split-brain / network partition
+**Symptoms**: Inconsistent behavior across instances of the same service. Some requests succeed,
+others fail. Database replication lag or consensus failures.
+**Investigation**: Check if errors are correlated with specific hosts or availability zones.
+Look for network timeout patterns and replication lag metrics.
+**Key queries**: diff_count by host.name or cloud.availability_zone; bubble_up on error logs.
+
+## Memory leak
+**Symptoms**: Gradual increase in memory usage over hours/days, eventually leading to OOM kills
+or garbage collection pauses that cause latency spikes.
+**Investigation**: Look for a steady upward trend in memory metrics. Check for OOMKilled events
+in container logs. GC pause duration increasing over time is a strong signal.
+**Key queries**: detect_change_points on memory metrics (trend_change type); search for
+OOMKilled or OutOfMemoryError in logs.
+
+## Connection pool exhaustion
+**Symptoms**: Sudden increase in latency and errors, often with "connection timeout" or "pool
+exhausted" messages. Affects all requests to the affected dependency.
+**Investigation**: Check database or service dependency connection metrics. Look for slow queries
+or long-held connections that prevent pool recycling.
+**Key queries**: search for "pool exhausted" or "connection timeout"; diff_metric on connection
+wait time; attribute_impact on latency by dependency.
+
+## Certificate / credential expiry
+**Symptoms**: Sudden, complete failure of TLS connections or authentication. All requests fail
+with the same error. Often happens at a predictable time (expiry date).
+**Investigation**: Look for TLS handshake errors or authentication failures that start at a
+specific timestamp. Check if the error is uniform across all instances.
+**Key queries**: detect_change_points on error count (step_change type); search for
+"certificate expired" or "authentication failed".
+
+## Deployment regression
+**Symptoms**: Step change in error rate or latency that coincides with a deployment. May affect
+only specific endpoints or request types.
+**Investigation**: Correlate the change point timestamp with deployment events. Check if the
+regression is isolated to specific versions or canary instances.
+**Key queries**: detect_change_points on latency and error rate; diff_count on error types
+before/after deployment; attribute_impact on latency by endpoint.
+
+## Resource contention (noisy neighbor)
+**Symptoms**: Intermittent latency spikes that don't correlate with the service's own traffic
+patterns. Other services on the same host show similar degradation.
+**Investigation**: Check host-level CPU and memory metrics. Look for a single process consuming
+disproportionate resources. Compare affected vs unaffected hosts.
+**Key queries**: attribute_impact on host CPU by process/service; diff_metric on latency
+grouped by host; bubble_up on slow requests by host.name.
+`;
+
 export const createStreamsAnalysisSkill = (): SkillDefinition<typeof NAME, typeof BASE_PATH> => {
   return defineSkillType({
     id: ID,
@@ -224,6 +290,11 @@ export const createStreamsAnalysisSkill = (): SkillDefinition<typeof NAME, typeo
         relativePath: '.',
         name: 'investigation-playbook',
         content: PLAYBOOK_CONTENT,
+      },
+      {
+        relativePath: '.',
+        name: 'incident-patterns',
+        content: INCIDENT_PATTERNS_CONTENT,
       },
     ],
     getRegistryTools: () => [

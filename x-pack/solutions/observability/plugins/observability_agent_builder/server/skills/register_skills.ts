@@ -7,7 +7,15 @@
 
 import type { AgentBuilderPluginSetup } from '@kbn/agent-builder-plugin/server';
 import { createStreamsAnalysisSkill } from './streams_analysis';
+import { createFeatureRefinementSkill } from './feature_refinement';
+import { createQueryOptimizationSkill } from './query_optimization';
+import { createObservabilityCorrelationSkill } from './observability_correlation';
 
 export const registerSkills = async (agentBuilder: AgentBuilderPluginSetup): Promise<void> => {
-  await agentBuilder.skills.register(createStreamsAnalysisSkill());
+  await Promise.all([
+    agentBuilder.skills.register(createStreamsAnalysisSkill()),
+    agentBuilder.skills.register(createFeatureRefinementSkill()),
+    agentBuilder.skills.register(createQueryOptimizationSkill()),
+    agentBuilder.skills.register(createObservabilityCorrelationSkill()),
+  ]);
 };
