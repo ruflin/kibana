@@ -232,9 +232,59 @@ const getDiscoveryQueriesOccurrencesRoute = createServerRoute({
   },
 });
 
+const backfillQueriesRoute = createServerRoute({
+  endpoint: 'POST /internal/streams/{name}/queries/_backfill',
+  options: {
+    access: 'internal',
+    summary: 'Backfill significant event queries',
+    description:
+      'Schedules backfill for rule-backed significant event queries over a given time range, so historical log data is evaluated retroactively.',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.manage],
+    },
+  },
+  params: z.object({
+    path: z.object({
+      name: z.string(),
+    }),
+    body: z.object({
+      start: z.string().describe('Start of the backfill time range (ISO 8601)'),
+      end: z.string().describe('End of the backfill time range (ISO 8601)'),
+      queryIds: z
+        .array(z.string())
+        .optional()
+        .describe('Query IDs to backfill; if omitted, all rule-backed queries are backfilled'),
+    }),
+  }),
+  handler: async ({
+    params,
+    request,
+    getScopedClients,
+    server,
+  }): Promise<{ scheduled: number }> => {
+    const { queryClient, streamsClient, licensing, uiSettingsClient } = await getScopedClients({
+      request,
+    });
+
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+
+    const {
+      path: { name: streamName },
+      body: { start, end, queryIds },
+    } = params;
+
+    await streamsClient.ensureStream(streamName);
+
+    return await queryClient.backfillQueriesByIds(streamName, queryIds, start, end);
+  },
+});
+
 export const internalQueriesRoutes = {
   ...getUnbackedQueriesCountRoute,
   ...promoteUnbackedQueriesRoute,
   ...getDiscoveryQueriesRoute,
   ...getDiscoveryQueriesOccurrencesRoute,
+  ...backfillQueriesRoute,
 };

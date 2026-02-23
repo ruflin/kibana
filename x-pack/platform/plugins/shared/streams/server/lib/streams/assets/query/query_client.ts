@@ -779,6 +779,67 @@ export class QueryClient {
         );
       }),
     ]);
+
+    await this.backfillQueries(queriesToCreate);
+  }
+
+  private async backfillQueries(queries: QueryLink[]) {
+    if (queries.length === 0) {
+      return;
+    }
+
+    const { rulesClient, logger } = this.dependencies;
+    const now = new Date();
+    const start = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const end = now.toISOString();
+
+    const params = queries.map((query) => ({
+      ruleId: getRuleIdFromQueryLink(query),
+      ranges: [{ start, end }],
+      initiator: 'system' as const,
+    }));
+
+    try {
+      await rulesClient.scheduleBackfill(params);
+      logger.debug(`Scheduled 24h backfill for ${queries.length} newly created rules`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`Failed to schedule backfill for ${queries.length} queries: ${message}`);
+    }
+  }
+
+  /**
+   * Schedules backfill for rule-backed queries over a caller-supplied time range.
+   */
+  public async backfillQueriesByIds(
+    streamName: string,
+    queryIds: string[] | undefined,
+    start: string,
+    end: string
+  ): Promise<{ scheduled: number }> {
+    const { rulesClient, logger } = this.dependencies;
+
+    const { [streamName]: queryLinks } = await this.getStreamToQueryLinksMap([streamName]);
+    const ruleBackedQueries = queryLinks.filter(
+      (link) => link.rule_backed && (!queryIds || queryIds.includes(link.query.id))
+    );
+
+    if (ruleBackedQueries.length === 0) {
+      return { scheduled: 0 };
+    }
+
+    const params = ruleBackedQueries.map((query) => ({
+      ruleId: getRuleIdFromQueryLink(query),
+      ranges: [{ start, end }],
+      initiator: 'user' as const,
+    }));
+
+    await rulesClient.scheduleBackfill(params);
+    logger.debug(
+      `Scheduled backfill for ${ruleBackedQueries.length} rules on stream "${streamName}" from ${start} to ${end}`
+    );
+
+    return { scheduled: ruleBackedQueries.length };
   }
 
   private async uninstallQueries(queries: QueryLink[]) {
