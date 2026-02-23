@@ -27,7 +27,13 @@ export function registerRules({ plugins, logger }: Props) {
     componentTemplates: [
       {
         name: 'mappings',
-        mappings: mappingFromFieldMap(alertFieldMap, false),
+        mappings: mappingFromFieldMap(
+          {
+            ...alertFieldMap,
+            'original_source': { type: 'flattened', array: false, required: false },
+          },
+          false
+        ),
       },
     ],
   });

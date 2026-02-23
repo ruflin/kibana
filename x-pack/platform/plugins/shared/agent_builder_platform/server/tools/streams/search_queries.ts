@@ -71,6 +71,7 @@ export const searchQueriesTool = (): BuiltinToolDefinition<typeof schema> => ({
   description:
     'Search Streams significant-event queries by field filters and/or semantic similarity. ' +
     'Significant-event queries are KQL or ES|QL queries linked to streams that detect notable events (errors, anomalies, security issues). ' +
+    'Queries with rule_backed=true have a Kibana rule that writes matched events to .alerts-streams.alerts-default. ' +
     'Use the "query" parameter for natural-language semantic search, or filter by stream, feature name, severity, and rule status.',
   schema,
   tags: ['streams'],

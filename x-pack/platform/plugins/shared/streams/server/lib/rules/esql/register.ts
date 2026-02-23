@@ -52,7 +52,13 @@ export function esqlRuleType(): PersistenceAlertType<
     autoRecoverAlerts: false,
     alerts: {
       context: STREAMS_RULE_REGISTRATION_CONTEXT,
-      mappings: { dynamic: false, fieldMap: { ...alertFieldMap } },
+      mappings: {
+        dynamic: false,
+        fieldMap: {
+          ...alertFieldMap,
+          'original_source': { type: 'flattened', array: false, required: false },
+        },
+      },
       shouldWrite: false,
       isSpaceAware: false,
       dangerouslyCreateAlertsInAllSpaces: true,
