@@ -9,20 +9,37 @@ import type { BoundInferenceClient, ChatCompletionTokenCount } from '@kbn/infere
 import { sumTokens } from '@kbn/streams-ai';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import type { Streams } from '@kbn/streams-schema';
-import type { InsightsResult } from '@kbn/streams-schema';
+import type { Insight, InsightsResult } from '@kbn/streams-schema';
 import type { LogMeta } from '@kbn/logging';
 import type { QueryClient } from '../../streams/assets/query/query_client';
 import type { StreamsClient } from '../../streams/client';
+import type { InsightClient } from '../../streams/insight/insight_client';
 import { getErrorMessage } from '../../streams/errors/parse_error';
 import { SummarizeQueriesPrompt } from './prompts/summarize_queries/prompt';
 import { SummarizeStreamsPrompt } from './prompts/summarize_streams/prompt';
 import { extractInsightsFromResponse, collectQueryData, type QueryData } from './utils';
+
+function insightToPersistedInput(insight: Insight, streamName: string) {
+  return {
+    id: `task-${streamName}-${insight.title.toLowerCase().replace(/\s+/g, '-').slice(0, 60)}`,
+    stream_name: streamName,
+    title: insight.title,
+    description: insight.description,
+    impact: insight.impact,
+    category: 'other' as const,
+    source: 'task' as const,
+    confidence: 70,
+    evidence: insight.evidence,
+    recommendations: insight.recommendations,
+  };
+}
 
 export async function generateInsights({
   streamsClient,
   queryClient,
   esClient,
   inferenceClient,
+  insightClient,
   signal,
   logger,
   streamNames,
@@ -31,6 +48,7 @@ export async function generateInsights({
   queryClient: QueryClient;
   esClient: ElasticsearchClient;
   inferenceClient: BoundInferenceClient;
+  insightClient?: InsightClient;
   signal: AbortSignal;
   logger: Logger;
   /** When provided, only generate insights for these streams. Otherwise all streams are used. */
@@ -88,6 +106,10 @@ export async function generateInsights({
 
     const insights = extractInsightsFromResponse(response, logger);
 
+    if (insightClient && insights.length > 0) {
+      await persistInsights(insightClient, insights, streamInsightsWithData, logger);
+    }
+
     return {
       insights,
       tokensUsed: sumTokens(tokensUsed, response.tokens),
@@ -107,6 +129,26 @@ export async function generateInsights({
     }
 
     throw error;
+  }
+}
+
+async function persistInsights(
+  insightClient: InsightClient,
+  insights: Insight[],
+  streamInsightsWithData: Array<{ streamName: string }>,
+  logger: Logger
+): Promise<void> {
+  const primaryStream = streamInsightsWithData[0]?.streamName ?? 'unknown';
+  try {
+    const insightInputs = insights.map((insight) =>
+      insightToPersistedInput(insight, primaryStream)
+    );
+    await insightClient.bulkUpsert(primaryStream, insightInputs);
+    logger.debug(`Persisted ${insights.length} insights for stream ${primaryStream}`);
+  } catch (err) {
+    logger.warn(
+      `Failed to persist insights: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 }
 

@@ -75,6 +75,14 @@ import {
   createAttributeImpactTool,
 } from './root_cause/attribute_impact/tool';
 import { OBSERVABILITY_BUBBLE_UP_TOOL_ID, createBubbleUpTool } from './root_cause/bubble_up/tool';
+import {
+  STREAMS_SEARCH_INSIGHTS_TOOL_ID,
+  createSearchInsightsTool,
+} from './streams/search_insights/tool';
+import {
+  STREAMS_WRITE_INSIGHT_TOOL_ID,
+  createWriteInsightTool,
+} from './streams/write_insight/tool';
 
 const PLATFORM_TOOL_IDS = [
   platformCoreTools.listIndices,
@@ -104,6 +112,8 @@ const OBSERVABILITY_TOOL_IDS = [
   OBSERVABILITY_DETECT_CHANGE_POINTS_TOOL_ID,
   OBSERVABILITY_ATTRIBUTE_IMPACT_TOOL_ID,
   OBSERVABILITY_BUBBLE_UP_TOOL_ID,
+  STREAMS_SEARCH_INSIGHTS_TOOL_ID,
+  STREAMS_WRITE_INSIGHT_TOOL_ID,
 ];
 
 export const OBSERVABILITY_AGENT_TOOL_IDS = [...PLATFORM_TOOL_IDS, ...OBSERVABILITY_TOOL_IDS];
@@ -140,6 +150,8 @@ export async function registerTools({
     createDetectChangePointsTool({ core, logger }),
     createAttributeImpactTool({ core, logger }),
     createBubbleUpTool({ core, logger }),
+    createSearchInsightsTool({ core, logger }),
+    createWriteInsightTool({ core, logger }),
   ];
 
   for (const tool of observabilityTools) {

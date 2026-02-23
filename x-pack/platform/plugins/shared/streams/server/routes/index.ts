@@ -30,6 +30,7 @@ import { internalAttachmentRoutes } from './internal/attachments/route';
 import { internalDescriptionGenerationRoutes } from './internal/streams/description_generation/route';
 import { featureRoutes as internalFeatureRoutes } from './internal/streams/features/route';
 import { internalInsightsRoutes } from './internal/streams/insights/route';
+import { internalInsightsCrudRoutes } from './internal/streams/insights_crud/route';
 import { internalTasksRoutes } from './internal/streams/tasks/route';
 import { internalOnboardingRoutes } from './internal/streams/onboarding/route';
 import { internalQueriesRoutes } from './internal/streams/queries/route';
@@ -53,6 +54,7 @@ export const streamsRouteRepository = {
   ...internalDescriptionGenerationRoutes,
   ...internalFeatureRoutes,
   ...internalInsightsRoutes,
+  ...internalInsightsCrudRoutes,
   ...internalTasksRoutes,
   ...internalOnboardingRoutes,
   ...internalQueriesRoutes,

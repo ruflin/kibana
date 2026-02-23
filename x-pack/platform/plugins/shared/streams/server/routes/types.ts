@@ -20,6 +20,7 @@ import type { StreamsClient } from '../lib/streams/client';
 import type { EbtTelemetryClient } from '../lib/telemetry';
 import type { StreamsServer } from '../types';
 import type { FeatureClient } from '../lib/streams/feature/feature_client';
+import type { InsightClient } from '../lib/streams/insight/insight_client';
 import type { ProcessorSuggestionsService } from '../lib/streams/ingest_pipelines/processor_suggestions_service';
 import type { TaskClient } from '../lib/tasks/task_client';
 import type { StreamsTaskType } from '../lib/tasks/task_definitions';
@@ -37,6 +38,7 @@ export interface RouteHandlerScopedClients {
   attachmentClient: AttachmentClient;
   streamsClient: StreamsClient;
   featureClient: FeatureClient;
+  insightClient: InsightClient;
   systemClient: SystemClient;
   inferenceClient: InferenceClient;
   contentClient: ContentClient;

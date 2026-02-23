@@ -44,6 +44,7 @@ export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
                 streamsClient,
                 inferenceClient,
                 queryClient,
+                insightClient,
               } = await taskContext.getScopedClients({
                 request: runContext.fakeRequest,
               });
@@ -56,6 +57,7 @@ export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
                   queryClient,
                   esClient: scopedClusterClient.asCurrentUser,
                   inferenceClient: boundInferenceClient,
+                  insightClient,
                   signal: runContext.abortController.signal,
                   logger: taskContext.logger.get('insights_discovery'),
                   streamNames,

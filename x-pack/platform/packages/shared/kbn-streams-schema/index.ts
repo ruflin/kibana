@@ -196,5 +196,22 @@ export type { GenerateDescriptionResult } from './src/api/description_generation
 export type { IdentifyFeaturesResult } from './src/api/features';
 
 export type { InsightsResult, Insight, InsightImpactLevel } from './src/insights';
+export type {
+  InsightSource,
+  InsightStatus,
+  InsightCategory,
+  InsightEvidenceInput,
+  BasePersistedInsight,
+  PersistedInsight,
+} from './src/insights';
+export {
+  insightImpactLevelSchema,
+  insightSourceSchema,
+  insightStatusSchema,
+  insightCategorySchema,
+  insightEvidenceSchema,
+  basePersistedInsightSchema,
+  persistedInsightSchema,
+} from './src/insights';
 export type { OnboardingResult } from './src/onboarding';
 export { OnboardingStep } from './src/onboarding';
