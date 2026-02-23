@@ -13,8 +13,10 @@ import {
   ASSET_UUID,
   QUERY_ESQL_QUERY,
   QUERY_KQL_BODY,
+  QUERY_KQL_BODY_SEMANTIC,
   QUERY_SEVERITY_SCORE,
   QUERY_TITLE,
+  QUERY_TITLE_SEMANTIC,
   RULE_BACKED,
   STREAM_NAME,
 } from './fields';
@@ -38,6 +40,8 @@ export const queryStorageSettings = {
       [QUERY_SEVERITY_SCORE]: types.long(),
       [RULE_BACKED]: types.boolean(),
       experimental: types.object({ enabled: false }),
+      [QUERY_TITLE_SEMANTIC]: types.semantic_text(),
+      [QUERY_KQL_BODY_SEMANTIC]: types.semantic_text(),
     },
   },
 } satisfies IndexStorageSettings;

@@ -10,7 +10,10 @@ import { types } from '@kbn/storage-adapter';
 import {
   STREAM_NAME,
   FEATURE_DESCRIPTION,
+  FEATURE_DESCRIPTION_SEMANTIC,
+  FEATURE_EVIDENCE_SEMANTIC,
   FEATURE_PROPERTIES,
+  FEATURE_PROPERTIES_SUMMARY,
   FEATURE_CONFIDENCE,
   FEATURE_EVIDENCE,
   FEATURE_STATUS,
@@ -44,6 +47,9 @@ export const featureStorageSettings = {
       [FEATURE_TAGS]: types.keyword(),
       [FEATURE_META]: types.object({ enabled: false }),
       [FEATURE_EXPIRES_AT]: types.date(),
+      [FEATURE_DESCRIPTION_SEMANTIC]: types.semantic_text(),
+      [FEATURE_EVIDENCE_SEMANTIC]: types.semantic_text(),
+      [FEATURE_PROPERTIES_SUMMARY]: types.semantic_text(),
     },
   },
 } satisfies IndexStorageSettings;
