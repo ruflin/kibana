@@ -19,10 +19,27 @@ import {
   STREAM_NAME,
 } from '../streams/feature/fields';
 import { QUERY_TITLE_SEMANTIC, QUERY_KQL_BODY_SEMANTIC } from '../streams/assets/fields';
-import type { CorrelatedFeatureHit, CorrelatedQueryHit, SemanticCorrelateResponse } from './types';
+import {
+  INSIGHT_ID,
+  INSIGHT_TITLE,
+  INSIGHT_DESCRIPTION,
+  INSIGHT_IMPACT,
+  INSIGHT_CATEGORY,
+  INSIGHT_TITLE_SEMANTIC,
+  INSIGHT_DESCRIPTION_SEMANTIC,
+  INSIGHT_RECOMMENDATIONS_SEMANTIC,
+  STREAM_NAME as INSIGHT_STREAM_NAME,
+} from '../streams/insight/fields';
+import type {
+  CorrelatedFeatureHit,
+  CorrelatedQueryHit,
+  CorrelatedInsightHit,
+  SemanticCorrelateResponse,
+} from './types';
 
 const FEATURES_INDEX_PATTERN = '.kibana_streams_features*';
 const ASSETS_INDEX_PATTERN = '.kibana_streams_assets';
+const INSIGHTS_INDEX_PATTERN = '.kibana_streams_insights';
 
 const FEATURE_SEMANTIC_FIELDS = [
   FEATURE_DESCRIPTION_SEMANTIC,
@@ -32,11 +49,18 @@ const FEATURE_SEMANTIC_FIELDS = [
 
 const ASSETS_SEMANTIC_FIELDS = [QUERY_TITLE_SEMANTIC, QUERY_KQL_BODY_SEMANTIC];
 
+const INSIGHT_SEMANTIC_FIELDS = [
+  INSIGHT_TITLE_SEMANTIC,
+  INSIGHT_DESCRIPTION_SEMANTIC,
+  INSIGHT_RECOMMENDATIONS_SEMANTIC,
+];
+
 export interface SemanticCorrelateParams {
   query: string;
   stream?: string;
   size?: number;
   includeQueries?: boolean;
+  includeInsights?: boolean;
 }
 
 /**
@@ -48,7 +72,7 @@ export async function semanticCorrelate(
   params: SemanticCorrelateParams,
   logger: Logger
 ): Promise<SemanticCorrelateResponse> {
-  const { query, stream, size = 10, includeQueries = false } = params;
+  const { query, stream, size = 10, includeQueries = false, includeInsights = false } = params;
 
   const featuresFilter = stream ? { term: { [STREAM_NAME]: stream } } : { match_all: {} };
 
@@ -155,5 +179,68 @@ export async function semanticCorrelate(
     }
   }
 
-  return { features, queries };
+  let insights: CorrelatedInsightHit[] | undefined;
+  if (includeInsights) {
+    const insightsFilter = stream
+      ? { term: { [INSIGHT_STREAM_NAME]: stream } }
+      : { match_all: {} };
+    const insightsSearchRequest: Record<string, unknown> = {
+      index: INSIGHTS_INDEX_PATTERN,
+      size,
+      retriever: {
+        rrf: {
+          retrievers: INSIGHT_SEMANTIC_FIELDS.map((field) => ({
+            standard: {
+              query: {
+                bool: {
+                  filter: [insightsFilter],
+                  must: [{ semantic: { field, query } }],
+                },
+              },
+            },
+          })),
+          rank_window_size: size * 2,
+        },
+      },
+      _source: [
+        INSIGHT_ID,
+        INSIGHT_STREAM_NAME,
+        INSIGHT_TITLE,
+        INSIGHT_DESCRIPTION,
+        INSIGHT_IMPACT,
+        INSIGHT_CATEGORY,
+      ],
+    };
+
+    try {
+      const insightsResponse = await esClient.search<{
+        [INSIGHT_ID]: string;
+        [INSIGHT_STREAM_NAME]: string;
+        [INSIGHT_TITLE]: string;
+        [INSIGHT_DESCRIPTION]: string;
+        [INSIGHT_IMPACT]: string;
+        [INSIGHT_CATEGORY]: string;
+      }>(insightsSearchRequest as any);
+
+      insights = (insightsResponse.hits.hits ?? []).map((hit) => {
+        const s = hit._source ?? {};
+        return {
+          id: s[INSIGHT_ID],
+          stream_name: s[INSIGHT_STREAM_NAME],
+          title: s[INSIGHT_TITLE],
+          description: s[INSIGHT_DESCRIPTION] ?? '',
+          impact: s[INSIGHT_IMPACT] ?? '',
+          category: s[INSIGHT_CATEGORY] ?? '',
+          score: (hit as any)._score,
+        };
+      });
+    } catch (err) {
+      logger.warn(
+        `Semantic correlate (insights) failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+      insights = [];
+    }
+  }
+
+  return { features, queries, insights };
 }

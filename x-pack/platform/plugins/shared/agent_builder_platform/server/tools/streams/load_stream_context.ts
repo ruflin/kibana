@@ -17,7 +17,7 @@ import { callStreamContext } from './call_streams_internal';
 const STREAMS_MOUNT_PATH = '/streams';
 
 const schema = z.object({
-  stream: z.string().describe('Name of the stream to load (features and queries context)'),
+  stream: z.string().describe('Name of the stream to load (features, queries, and insights context)'),
 });
 
 export const loadStreamContextToolId = `${internalNamespaces.streams}.load_stream_context`;
@@ -27,7 +27,7 @@ export const loadStreamContextTool = (
 ): BuiltinToolDefinition<typeof schema> => ({
   id: loadStreamContextToolId,
   type: ToolType.builtin,
-  description: `Load context (features and significant-event queries) for a Streams stream and write it to the filestore at ${STREAMS_MOUNT_PATH}/{stream}.json so you can read it later with the filestore read tool. Use when you need detailed stream features and queries for analysis or correlation.`,
+  description: `Load context (features, significant-event queries, and recent insights) for a Streams stream and write it to the filestore at ${STREAMS_MOUNT_PATH}/{stream}.json so you can read it later with the filestore read tool. Use when you need detailed stream features, queries, and insights for analysis or correlation.`,
   schema,
   tags: ['streams', 'filestore'],
   handler: async ({ stream }, { request, spaceId, logger, writeStreamContext }) => {
@@ -55,6 +55,7 @@ export const loadStreamContextTool = (
               stream: data.stream,
               features_count: data.features.length,
               queries_count: data.queries.length,
+              insights_count: data.insights.length,
               message: `Stream context written to ${path}. Use filestore read with path "${path}" to read it.`,
             },
           }),

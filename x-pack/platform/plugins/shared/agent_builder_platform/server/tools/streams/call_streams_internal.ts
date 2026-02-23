@@ -66,7 +66,7 @@ export async function callStreamContext(
   core: CoreStart,
   spaceId: string,
   stream: string
-): Promise<{ stream: string; features: unknown[]; queries: unknown[] }> {
+): Promise<{ stream: string; features: unknown[]; queries: unknown[]; insights: unknown[] }> {
   const url = buildInternalUrl(request, core, spaceId, '/internal/streams/stream_context', {
     stream,
   });
@@ -85,7 +85,13 @@ export async function callSemanticCorrelate(
   request: KibanaRequest,
   core: CoreStart,
   spaceId: string,
-  body: { query: string; stream?: string; size?: number; include_queries?: boolean }
+  body: {
+    query: string;
+    stream?: string;
+    size?: number;
+    include_queries?: boolean;
+    include_insights?: boolean;
+  }
 ): Promise<unknown> {
   const url = buildInternalUrl(request, core, spaceId, '/internal/streams/semantic_correlate');
   const res = await fetch(url, {

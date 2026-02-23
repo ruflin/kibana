@@ -11,16 +11,16 @@ import { STREAMS_API_PRIVILEGES } from '../../../../../common/constants';
 import { assertSignificantEventsAccess } from '../../../utils/assert_significant_events_access';
 
 /**
- * Returns features and significant-event queries for a stream.
+ * Returns features, significant-event queries, and recent insights for a stream.
  * Used by Agent Builder "load stream context" tool to persist to filestore.
  */
 const streamContextRoute = createServerRoute({
   endpoint: 'GET /internal/streams/stream_context',
   options: {
     access: 'internal',
-    summary: 'Get stream context (features and queries)',
+    summary: 'Get stream context (features, queries, and insights)',
     description:
-      'Returns features and significant-event queries for the given stream for use by agents or persistence to filestore.',
+      'Returns features, significant-event queries, and recent insights for the given stream for use by agents or persistence to filestore.',
   },
   security: {
     authz: {
@@ -38,16 +38,17 @@ const streamContextRoute = createServerRoute({
     getScopedClients,
     server,
   }) => {
-    const { featureClient, queryClient, licensing, uiSettingsClient, streamsClient } =
+    const { featureClient, queryClient, insightClient, licensing, uiSettingsClient, streamsClient } =
       await getScopedClients({ request });
     await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
 
     const streamName = params.query.stream;
     await streamsClient.ensureStream(streamName);
 
-    const [featuresResponse, queries] = await Promise.all([
+    const [featuresResponse, queries, insightsResponse] = await Promise.all([
       featureClient.getFeatures(streamName, { limit: 500 }),
       queryClient.getAssets(streamName),
+      insightClient.getInsights(streamName, { limit: 50 }),
     ]);
 
     const features = featuresResponse.hits.map((f) => ({
@@ -67,10 +68,21 @@ const streamContextRoute = createServerRoute({
       feature_name: q.query?.feature?.name,
     }));
 
+    const insights = insightsResponse.hits.map((i) => ({
+      id: i.id,
+      title: i.title,
+      description: i.description,
+      impact: i.impact,
+      category: i.category,
+      status: i.status,
+      recommendations: i.recommendations,
+    }));
+
     return {
       stream: streamName,
       features,
       queries: querySummaries,
+      insights,
     };
   },
 });

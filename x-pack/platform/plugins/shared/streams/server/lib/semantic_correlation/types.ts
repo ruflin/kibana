@@ -25,8 +25,20 @@ export interface CorrelatedQueryHit {
   score?: number;
 }
 
+/** Single correlated insight hit from semantic search (insights index). */
+export interface CorrelatedInsightHit {
+  id: string;
+  stream_name: string;
+  title: string;
+  description: string;
+  impact: string;
+  category: string;
+  score?: number;
+}
+
 /** Response of the semantic correlation API. */
 export interface SemanticCorrelateResponse {
   features: CorrelatedFeatureHit[];
   queries?: CorrelatedQueryHit[];
+  insights?: CorrelatedInsightHit[];
 }

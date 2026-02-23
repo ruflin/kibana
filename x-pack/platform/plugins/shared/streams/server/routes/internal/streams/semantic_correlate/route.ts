@@ -15,9 +15,9 @@ const semanticCorrelateRoute = createServerRoute({
   endpoint: 'POST /internal/streams/semantic_correlate',
   options: {
     access: 'internal',
-    summary: 'Semantic correlation over features and optional queries',
+    summary: 'Semantic correlation over features, optional queries and insights',
     description:
-      'Runs semantic search over .kibana_streams_features (and optionally .kibana_streams_assets) and returns ranked features and queries for the given natural-language query.',
+      'Runs semantic search over .kibana_streams_features (and optionally .kibana_streams_assets and .kibana_streams_insights) and returns ranked features, queries, and insights for the given natural-language query.',
   },
   security: {
     authz: {
@@ -30,6 +30,7 @@ const semanticCorrelateRoute = createServerRoute({
       stream: z.string().optional().describe('Optional stream name to scope results'),
       size: z.number().min(1).max(50).optional().default(10),
       include_queries: z.boolean().optional().default(false),
+      include_insights: z.boolean().optional().default(false),
     }),
   }),
   handler: async ({
@@ -44,10 +45,16 @@ const semanticCorrelateRoute = createServerRoute({
     });
     await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
 
-    const { query, stream, size, include_queries } = params.body;
+    const { query, stream, size, include_queries, include_insights } = params.body;
     return semanticCorrelate(
       scopedClusterClient.asCurrentUser,
-      { query, stream, size, includeQueries: include_queries },
+      {
+        query,
+        stream,
+        size,
+        includeQueries: include_queries,
+        includeInsights: include_insights,
+      },
       logger
     );
   },

@@ -31,6 +31,11 @@ const schema = z.object({
     .optional()
     .default(false)
     .describe('Include related significant-event queries in results'),
+  include_insights: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe('Include previously generated insights in results'),
 });
 
 export const semanticCorrelateToolId = `${internalNamespaces.streams}.semantic_correlate`;
@@ -40,11 +45,17 @@ export const semanticCorrelateTool = (
 ): BuiltinToolDefinition<typeof schema> => ({
   id: semanticCorrelateToolId,
   type: ToolType.builtin,
-  description: `Find Streams features (and optionally significant-event queries) that are semantically related to a natural-language query. Use for correlating alerts or questions with identified systems/features. Requires Streams plugin.`,
+  description: `Find Streams features (and optionally significant-event queries and insights) that are semantically related to a natural-language query. Use for correlating alerts or questions with identified systems/features. Requires Streams plugin.`,
   schema,
   tags: ['streams'],
   handler: async (
-    { query, stream, size = 10, include_queries: includeQueries = false },
+    {
+      query,
+      stream,
+      size = 10,
+      include_queries: includeQueries = false,
+      include_insights: includeInsights = false,
+    },
     { request, spaceId, logger }
   ) => {
     try {
@@ -54,6 +65,7 @@ export const semanticCorrelateTool = (
         stream,
         size,
         include_queries: includeQueries,
+        include_insights: includeInsights,
       });
       return {
         results: [
