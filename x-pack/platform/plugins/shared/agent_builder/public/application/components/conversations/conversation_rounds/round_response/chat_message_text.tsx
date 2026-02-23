@@ -34,6 +34,8 @@ import { useAgentBuilderServices } from '../../../../hooks/use_agent_builder_ser
 import {
   Cursor,
   esqlLanguagePlugin,
+  mermaidLanguagePlugin,
+  MermaidRenderer,
   createVisualizationRenderer,
   loadingCursorPlugin,
   visualizationTagParser,
@@ -44,6 +46,11 @@ import { useStepsFromPrevRounds } from '../../../../hooks/use_conversation';
 import { useConversationContext } from '../../../../context/conversation/conversation_context';
 import { CanvasProvider } from './attachments/canvas_context';
 import { CanvasFlyout } from './attachments/canvas_flyout';
+
+/**
+ * Set to false to disable Mermaid diagram rendering and fall back to plain code blocks.
+ */
+const ENABLE_MERMAID_RENDERING = true;
 
 interface Props {
   content: string;
@@ -116,6 +123,11 @@ export function ChatMessageText({
           </>
         );
       },
+      ...(ENABLE_MERMAID_RENDERING
+        ? {
+            mermaid: (props: { value: string }) => <MermaidRenderer value={props.value} />,
+          }
+        : {}),
       table: (props) => (
         <>
           <EuiTable
@@ -159,6 +171,7 @@ export function ChatMessageText({
     return {
       parsingPluginList: [
         loadingCursorPlugin,
+        ...(ENABLE_MERMAID_RENDERING ? [mermaidLanguagePlugin] : []),
         esqlLanguagePlugin,
         visualizationTagParser,
         renderAttachmentTagParser,

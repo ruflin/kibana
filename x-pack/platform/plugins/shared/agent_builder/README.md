@@ -249,6 +249,16 @@ The A2A (Agent-to-Agent) server provides a standardized interface for external A
 
 Agentcards for agentBuilder agents are exposed on `GET /api/agent_builder/a2a/{agentId}.json`. The protocol endpoint is: `POST /api/agent_builder/a2a/{agentId}`.
 
+## Mermaid Diagram Rendering
+
+The Agent Builder chat UI supports rendering [Mermaid](https://mermaid.js.org/) diagrams inline. When an agent response contains a fenced code block with language `mermaid`, it is rendered as an interactive SVG diagram instead of plain text.
+
+Features:
+- **Lazy loading** — The Mermaid library is loaded on demand only when a diagram appears, keeping the initial bundle small.
+- **Source toggle** — Users can switch between the rendered diagram and the raw Mermaid source via a toolbar button.
+- **Error handling** — Invalid Mermaid syntax falls back to displaying the raw source with an error indicator.
+- **Kill switch** — Set `ENABLE_MERMAID_RENDERING` to `false` in `chat_message_text.tsx` to disable rendering and fall back to plain code blocks.
+
 ## ES|QL Based Tools
 
 The ES|QL Tool API enables users to build custom ES|QL-powered tools that the LLM can execute against any index. Here's how to create your first ES|QL tool using a POST request in Kibana DevTools:
