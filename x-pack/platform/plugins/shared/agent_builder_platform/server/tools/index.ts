@@ -26,6 +26,8 @@ import { createVisualizationTool } from './create_visualization';
 import { getWorkflowExecutionStatusTool } from './get_workflow_execution_status';
 import { searchFeaturesTool } from './streams/search_features';
 import { searchQueriesTool } from './streams/search_queries';
+import { loadStreamContextTool } from './streams/load_stream_context';
+import { semanticCorrelateTool } from './streams/semantic_correlate';
 
 export const registerTools = ({
   coreSetup,
@@ -50,6 +52,8 @@ export const registerTools = ({
     casesTool(coreSetup),
     searchFeaturesTool(),
     searchQueriesTool(),
+    loadStreamContextTool(coreSetup),
+    semanticCorrelateTool(coreSetup),
   ];
 
   if (setupDeps.workflowsManagement) {

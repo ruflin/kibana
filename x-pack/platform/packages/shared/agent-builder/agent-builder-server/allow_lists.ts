@@ -54,6 +54,8 @@ export const AGENT_BUILDER_BUILTIN_TOOLS = [
   `${internalNamespaces.streams}.write_insight`,
   `${internalNamespaces.streams}.suggest_query`,
   `${internalNamespaces.streams}.annotate_feature`,
+  `${internalNamespaces.streams}.load_stream_context`,
+  `${internalNamespaces.streams}.semantic_correlate`,
 ] as const;
 
 export type AgentBuilderBuiltinTool = (typeof AGENT_BUILDER_BUILTIN_TOOLS)[number];
