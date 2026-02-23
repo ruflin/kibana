@@ -799,6 +799,7 @@ export class QueryClient {
         params: {
           timestampField: '@timestamp',
           query: esqlQuery,
+          streamName: definition.name,
         },
         enabled: true,
         tags: ['streams', definition.name],
@@ -824,6 +825,7 @@ export class QueryClient {
         params: {
           timestampField: '@timestamp',
           query: esqlQuery,
+          streamName: definition.name,
         },
         tags: ['streams', definition.name],
         schedule: {

@@ -19,9 +19,11 @@ export const esqlRuleInstanceState = z.object({
 export interface EsqlRuleParams extends RuleTypeParams {
   query: string;
   timestampField: string;
+  streamName?: string;
 }
 
 export const esqlRuleParams = z.object({
   query: z.string(),
   timestampField: z.string(),
+  streamName: z.string().optional(),
 }) satisfies z.Schema<EsqlRuleParams>;

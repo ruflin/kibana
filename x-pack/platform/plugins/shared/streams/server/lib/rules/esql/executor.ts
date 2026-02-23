@@ -69,6 +69,7 @@ export async function getRuleExecutor(
     return {
       _id: alertDocId,
       _source: {
+        'stream.name': params.streamName,
         original_source: {
           _id: result._id,
           ...result._source,
