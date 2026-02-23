@@ -4,21 +4,7 @@
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
-import React, { useEffect, useRef, useState } from 'react';
-import { css } from '@emotion/css';
-import {
-  EuiCodeBlock,
-  EuiFlexGroup,
-  EuiFlexItem,
-  EuiIcon,
-  EuiLoadingSpinner,
-  EuiPanel,
-  EuiSpacer,
-  EuiText,
-  EuiToolTip,
-  EuiButtonIcon,
-  useEuiTheme,
-} from '@elastic/eui';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 interface MermaidRendererProps {
   value: string;
@@ -37,8 +23,9 @@ const loadMermaid = async (): Promise<typeof import('mermaid')['default']> => {
       mermaidInstance = mod.default;
       mermaidInstance.initialize({
         startOnLoad: false,
+        suppressErrorRendering: true,
         theme: 'neutral',
-        securityLevel: 'strict',
+        securityLevel: 'loose',
         fontFamily: 'Inter, system-ui, sans-serif',
       });
       return mermaidInstance;
@@ -47,133 +34,121 @@ const loadMermaid = async (): Promise<typeof import('mermaid')['default']> => {
   return mermaidLoadPromise;
 };
 
+const containerStyle: React.CSSProperties = {
+  border: '1px solid #d3dae6',
+  borderRadius: '6px',
+  padding: '16px',
+  background: '#fafbfd',
+  overflowX: 'auto',
+  marginBottom: '16px',
+};
+
+const errorStyle: React.CSSProperties = {
+  padding: '8px 12px',
+  borderRadius: '6px',
+  background: '#fef0ef',
+  color: '#bd271e',
+  fontSize: '13px',
+  marginBottom: '8px',
+};
+
+const toolbarStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'flex-end',
+  marginBottom: '4px',
+};
+
+const buttonStyle: React.CSSProperties = {
+  background: 'none',
+  border: '1px solid #d3dae6',
+  borderRadius: '4px',
+  padding: '2px 8px',
+  cursor: 'pointer',
+  color: '#69707d',
+  fontSize: '12px',
+};
+
+const codeStyle: React.CSSProperties = {
+  background: '#f5f7fa',
+  border: '1px solid #d3dae6',
+  borderRadius: '6px',
+  padding: '12px',
+  fontFamily: 'monospace',
+  fontSize: '13px',
+  whiteSpace: 'pre-wrap',
+  overflowX: 'auto',
+  marginBottom: '16px',
+};
+
 export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ value }) => {
-  const { euiTheme } = useEuiTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [rendered, setRendered] = useState(false);
   const [showSource, setShowSource] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    const render = async () => {
+  const renderDiagram = useCallback(
+    async (container: HTMLDivElement) => {
       try {
-        setLoading(true);
         setError(null);
+        setRendered(false);
         const mermaid = await loadMermaid();
-        if (cancelled) return;
 
         const diagramId = `mermaid-diagram-${++idCounter}`;
-        const { svg: renderedSvg } = await mermaid.render(diagramId, value);
-        if (cancelled) return;
+        const trimmedValue = value.trim();
 
-        if (containerRef.current) {
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(renderedSvg, 'image/svg+xml');
-          const svgElement = doc.documentElement;
-          containerRef.current.replaceChildren(svgElement);
-        }
+        const { svg } = await mermaid.render(diagramId, trimmedValue, container);
+
+        container.replaceChildren();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(svg, 'image/svg+xml');
+        container.replaceChildren(doc.documentElement);
+
+        setRendered(true);
       } catch (e) {
-        if (cancelled) return;
         setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
       }
-    };
+    },
+    [value]
+  );
 
-    render();
-    return () => {
-      cancelled = true;
-    };
-  }, [value]);
-
-  const containerCss = css`
-    border: 1px solid ${euiTheme.colors.borderBaseSubdued};
-    border-radius: ${euiTheme.border.radius.medium};
-    padding: ${euiTheme.size.m};
-    background: ${euiTheme.colors.backgroundBaseSubdued};
-    overflow-x: auto;
-
-    svg {
-      max-width: 100%;
-      height: auto;
+  useEffect(() => {
+    if (containerRef.current && !showSource) {
+      renderDiagram(containerRef.current);
     }
-  `;
-
-  const toolbarCss = css`
-    display: flex;
-    justify-content: flex-end;
-    gap: ${euiTheme.size.xs};
-    margin-bottom: ${euiTheme.size.xs};
-  `;
-
-  if (loading) {
-    return (
-      <>
-        <EuiPanel color="subdued" paddingSize="l">
-          <EuiFlexGroup justifyContent="center" alignItems="center">
-            <EuiFlexItem grow={false}>
-              <EuiLoadingSpinner size="m" />
-            </EuiFlexItem>
-            <EuiFlexItem grow={false}>
-              <EuiText size="s" color="subdued">
-                Rendering diagram...
-              </EuiText>
-            </EuiFlexItem>
-          </EuiFlexGroup>
-        </EuiPanel>
-        <EuiSpacer size="m" />
-      </>
-    );
-  }
+  }, [renderDiagram, showSource]);
 
   if (error) {
     return (
-      <>
-        <EuiPanel color="danger" paddingSize="s">
-          <EuiFlexGroup gutterSize="s" alignItems="center" responsive={false}>
-            <EuiFlexItem grow={false}>
-              <EuiIcon type="warning" color="danger" />
-            </EuiFlexItem>
-            <EuiFlexItem>
-              <EuiText size="xs" color="danger">
-                Failed to render Mermaid diagram
-              </EuiText>
-            </EuiFlexItem>
-          </EuiFlexGroup>
-        </EuiPanel>
-        <EuiSpacer size="s" />
-        <EuiCodeBlock language="text" paddingSize="s" fontSize="s">
-          {value}
-        </EuiCodeBlock>
-        <EuiSpacer size="m" />
-      </>
+      <div>
+        <div style={errorStyle}>Failed to render Mermaid diagram</div>
+        <div style={codeStyle}>{value}</div>
+      </div>
+    );
+  }
+
+  if (showSource) {
+    return (
+      <div>
+        <div style={toolbarStyle}>
+          <button type="button" style={buttonStyle} onClick={() => setShowSource(false)}>
+            Diagram
+          </button>
+        </div>
+        <div style={codeStyle}>{value}</div>
+      </div>
     );
   }
 
   return (
-    <>
-      <div className={toolbarCss}>
-        <EuiToolTip content={showSource ? 'Show diagram' : 'Show source'}>
-          <EuiButtonIcon
-            iconType={showSource ? 'eye' : 'editorCodeBlock'}
-            aria-label={showSource ? 'Show diagram' : 'Show source'}
-            size="xs"
-            color="text"
-            onClick={() => setShowSource(!showSource)}
-          />
-        </EuiToolTip>
+    <div>
+      <div style={toolbarStyle}>
+        {rendered && (
+          <button type="button" style={buttonStyle} onClick={() => setShowSource(true)}>
+            Source
+          </button>
+        )}
       </div>
-      {showSource ? (
-        <EuiCodeBlock language="text" isCopyable paddingSize="s" fontSize="s">
-          {value}
-        </EuiCodeBlock>
-      ) : (
-        <div ref={containerRef} className={containerCss} />
-      )}
-      <EuiSpacer size="m" />
-    </>
+      <div ref={containerRef} style={containerStyle} />
+    </div>
   );
 };

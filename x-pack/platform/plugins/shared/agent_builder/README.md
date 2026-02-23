@@ -259,6 +259,8 @@ Features:
 - **Error handling** — Invalid Mermaid syntax falls back to displaying the raw source with an error indicator.
 - **Kill switch** — Set `ENABLE_MERMAID_RENDERING` to `false` in `chat_message_text.tsx` to disable rendering and fall back to plain code blocks.
 
+Implementation note: The renderer (`mermaid_renderer.tsx`) uses only plain HTML elements with inline styles — no EUI layout components or Emotion CSS. This is required because `EuiMarkdownFormat` renders custom components synchronously via `processSync`, and complex EUI components that depend on context providers will crash in that pipeline.
+
 ## ES|QL Based Tools
 
 The ES|QL Tool API enables users to build custom ES|QL-powered tools that the LLM can execute against any index. Here's how to create your first ES|QL tool using a POST request in Kibana DevTools:
