@@ -20,6 +20,9 @@ import {
   FEATURE_EVIDENCE,
   FEATURE_CONFIDENCE,
   FEATURE_DESCRIPTION,
+  FEATURE_DESCRIPTION_SEMANTIC,
+  FEATURE_EVIDENCE_SEMANTIC,
+  FEATURE_PROPERTIES_SUMMARY,
   FEATURE_TYPE,
   FEATURE_SUBTYPE,
   FEATURE_TITLE,
@@ -226,6 +229,12 @@ export class FeatureClient {
   }
 }
 
+function summarizeProperties(properties: Record<string, unknown>): string {
+  return Object.entries(properties)
+    .map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`)
+    .join('; ');
+}
+
 function toStorage(stream: string, feature: Feature): StoredFeature {
   return {
     [FEATURE_UUID]: feature.uuid,
@@ -243,6 +252,9 @@ function toStorage(stream: string, feature: Feature): StoredFeature {
     [FEATURE_META]: feature.meta,
     [FEATURE_EXPIRES_AT]: feature.expires_at,
     [FEATURE_TITLE]: feature.title,
+    [FEATURE_DESCRIPTION_SEMANTIC]: feature.description,
+    [FEATURE_EVIDENCE_SEMANTIC]: feature.evidence?.join(', '),
+    [FEATURE_PROPERTIES_SUMMARY]: summarizeProperties(feature.properties),
   };
 }
 

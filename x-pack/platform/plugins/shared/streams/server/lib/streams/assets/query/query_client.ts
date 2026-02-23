@@ -34,8 +34,10 @@ import {
   QUERY_FEATURE_NAME,
   QUERY_FEATURE_TYPE,
   QUERY_KQL_BODY,
+  QUERY_KQL_BODY_SEMANTIC,
   QUERY_SEVERITY_SCORE,
   QUERY_TITLE,
+  QUERY_TITLE_SEMANTIC,
   RULE_BACKED,
   STREAM_NAME,
 } from '../fields';
@@ -116,6 +118,8 @@ type QueryLinkStorageFields = Omit<QueryLink, 'query' | 'stream_name'> & {
   [QUERY_ESQL_QUERY]: string;
   [QUERY_SEVERITY_SCORE]?: number;
   [RULE_BACKED]?: boolean;
+  [QUERY_TITLE_SEMANTIC]?: string;
+  [QUERY_KQL_BODY_SEMANTIC]?: string;
 };
 
 export type StoredQueryLink = QueryLinkStorageFields & {
@@ -192,6 +196,8 @@ function toStorage(
     [QUERY_SEVERITY_SCORE]: query.severity_score,
     [QUERY_EVIDENCE]: query.evidence,
     [RULE_BACKED]: ruleBacked,
+    [QUERY_TITLE_SEMANTIC]: query.title,
+    [QUERY_KQL_BODY_SEMANTIC]: query.kql.query,
   } as unknown as StoredQueryLink;
 }
 

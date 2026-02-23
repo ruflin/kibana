@@ -33,6 +33,8 @@ import { internalInsightsRoutes } from './internal/streams/insights/route';
 import { internalTasksRoutes } from './internal/streams/tasks/route';
 import { internalOnboardingRoutes } from './internal/streams/onboarding/route';
 import { internalQueriesRoutes } from './internal/streams/queries/route';
+import { internalSemanticCorrelateRoutes } from './internal/streams/semantic_correlate/route';
+import { internalStreamContextRoutes } from './internal/streams/stream_context/route';
 
 export const streamsRouteRepository = {
   // internal APIs
@@ -54,6 +56,8 @@ export const streamsRouteRepository = {
   ...internalTasksRoutes,
   ...internalOnboardingRoutes,
   ...internalQueriesRoutes,
+  ...internalSemanticCorrelateRoutes,
+  ...internalStreamContextRoutes,
   // public APIs
   ...docCountsRoutes,
   ...crudRoutes,

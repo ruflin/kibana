@@ -11,6 +11,9 @@ import {
   STREAM_NAME,
   FEATURE_UUID,
   FEATURE_DESCRIPTION,
+  FEATURE_DESCRIPTION_SEMANTIC,
+  FEATURE_EVIDENCE_SEMANTIC,
+  FEATURE_PROPERTIES_SUMMARY,
   FEATURE_CONFIDENCE,
   FEATURE_EVIDENCE,
   FEATURE_STATUS,
@@ -41,6 +44,9 @@ export const storedFeatureSchema = z.object({
   [FEATURE_META]: z.record(z.string(), z.any()).optional(),
   [FEATURE_EXPIRES_AT]: z.string().optional(),
   [FEATURE_TITLE]: z.string().optional(),
+  [FEATURE_DESCRIPTION_SEMANTIC]: z.string().optional(),
+  [FEATURE_EVIDENCE_SEMANTIC]: z.string().optional(),
+  [FEATURE_PROPERTIES_SUMMARY]: z.string().optional(),
 });
 
 export type StoredFeature = z.infer<typeof storedFeatureSchema>;
