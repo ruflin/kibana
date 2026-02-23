@@ -111,6 +111,9 @@ const upsertQueryRoute = createServerRoute({
       },
       severity_score: body.severity_score,
       evidence: body.evidence,
+      insight_uuids: body.insight_uuids,
+      related_feature_uuids: body.related_feature_uuids,
+      tier: body.tier,
     });
 
     return {

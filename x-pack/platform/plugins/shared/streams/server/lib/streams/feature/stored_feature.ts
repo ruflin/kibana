@@ -26,6 +26,8 @@ import {
   FEATURE_ID,
   FEATURE_PROPERTIES,
   FEATURE_SUBTYPE,
+  FEATURE_RELATED_INSIGHT_UUIDS,
+  FEATURE_RELATED_QUERY_IDS,
 } from './fields';
 
 export const storedFeatureSchema = z.object({
@@ -42,6 +44,8 @@ export const storedFeatureSchema = z.object({
   [FEATURE_LAST_SEEN]: z.string(),
   [FEATURE_TAGS]: z.array(z.string()).optional(),
   [FEATURE_META]: z.record(z.string(), z.any()).optional(),
+  [FEATURE_RELATED_INSIGHT_UUIDS]: z.array(z.string()).optional(),
+  [FEATURE_RELATED_QUERY_IDS]: z.array(z.string()).optional(),
   [FEATURE_EXPIRES_AT]: z.string().optional(),
   [FEATURE_TITLE]: z.string().optional(),
   [FEATURE_DESCRIPTION_SEMANTIC]: z.string().optional(),

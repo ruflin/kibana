@@ -40,6 +40,20 @@ const schema = z.object({
     .describe(
       'Evidence for why this query is useful — e.g. "Pattern appeared in 3 incidents over the last week".'
     ),
+  insight_uuids: z
+    .array(z.string())
+    .optional()
+    .describe('UUIDs of insights that motivated this query suggestion.'),
+  related_feature_uuids: z
+    .array(z.string())
+    .optional()
+    .describe('UUIDs of stream features related to this query.'),
+  tier: z
+    .number()
+    .min(1)
+    .max(3)
+    .optional()
+    .describe('Topology tier (1/2/3) derived from dependency position for severity traceability.'),
 });
 
 export const STREAMS_SUGGEST_QUERY_TOOL_ID = `${internalNamespaces.streams}.suggest_query`;
@@ -90,6 +104,9 @@ export const createSuggestQueryTool = ({
         kql: { query: params.kql_query },
         severity_score: params.severity_score,
         evidence: params.evidence,
+        insight_uuids: params.insight_uuids,
+        related_feature_uuids: params.related_feature_uuids,
+        tier: params.tier,
       };
 
       const result = await callStreamsQueryUpsert(

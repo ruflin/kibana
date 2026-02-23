@@ -30,6 +30,8 @@ import {
   FEATURE_TAGS,
   FEATURE_META,
   FEATURE_EXPIRES_AT,
+  FEATURE_RELATED_INSIGHT_UUIDS,
+  FEATURE_RELATED_QUERY_IDS,
 } from './fields';
 import type { FeatureStorageSettings } from './storage_settings';
 import type { StoredFeature } from './stored_feature';
@@ -250,6 +252,8 @@ function toStorage(stream: string, feature: Feature): StoredFeature {
     [FEATURE_TAGS]: feature.tags,
     [STREAM_NAME]: stream,
     [FEATURE_META]: feature.meta,
+    [FEATURE_RELATED_INSIGHT_UUIDS]: feature.related_insight_uuids,
+    [FEATURE_RELATED_QUERY_IDS]: feature.related_query_ids,
     [FEATURE_EXPIRES_AT]: feature.expires_at,
     [FEATURE_TITLE]: feature.title,
     [FEATURE_DESCRIPTION_SEMANTIC]: feature.description,
@@ -273,6 +277,8 @@ function fromStorage(feature: StoredFeature): Feature {
     last_seen: feature[FEATURE_LAST_SEEN],
     tags: feature[FEATURE_TAGS],
     meta: feature[FEATURE_META],
+    related_insight_uuids: feature[FEATURE_RELATED_INSIGHT_UUIDS],
+    related_query_ids: feature[FEATURE_RELATED_QUERY_IDS],
     expires_at: feature[FEATURE_EXPIRES_AT],
     title: feature[FEATURE_TITLE],
   };

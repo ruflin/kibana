@@ -43,6 +43,10 @@ export interface StreamQuery extends StreamQueryBase {
   // from 0 to 100. aligned with anomaly detection scoring
   severity_score?: number;
   evidence?: string[];
+  insight_uuids?: string[];
+  related_feature_uuids?: string[];
+  /** Topology tier (1/2/3) derived from dependency position. */
+  tier?: number;
 }
 
 const streamQueryBaseSchema: z.Schema<StreamQueryBase> = z.object({
@@ -67,6 +71,9 @@ export const streamQueryInputSchema: z.Schema<StreamQueryInput> = z.intersection
     }),
     severity_score: z.number().optional(),
     evidence: z.array(z.string()).optional(),
+    insight_uuids: z.array(z.string()).optional(),
+    related_feature_uuids: z.array(z.string()).optional(),
+    tier: z.number().optional(),
   })
 );
 
@@ -97,6 +104,9 @@ export const upsertStreamQueryRequestSchema = z.object({
   }),
   severity_score: z.number().optional(),
   evidence: z.array(z.string()).optional(),
+  insight_uuids: z.array(z.string()).optional(),
+  related_feature_uuids: z.array(z.string()).optional(),
+  tier: z.number().optional(),
 });
 
 export interface QueriesGetResponse {

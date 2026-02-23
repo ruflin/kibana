@@ -44,6 +44,14 @@ const schema = z.object({
     .describe(
       'Updated confidence score (0-100) if investigation revealed the feature is more or less relevant than originally scored.'
     ),
+  related_insight_uuids: z
+    .array(z.string())
+    .optional()
+    .describe('UUIDs of insights related to this feature.'),
+  related_query_ids: z
+    .array(z.string())
+    .optional()
+    .describe('IDs of significant event queries related to this feature.'),
 });
 
 export const STREAMS_ANNOTATE_FEATURE_TOOL_ID = `${internalNamespaces.streams}.annotate_feature`;
@@ -111,6 +119,8 @@ export const createAnnotateFeatureTool = ({
           'feature.evidence',
           'feature.tags',
           'feature.meta',
+          'feature.related_insight_uuids',
+          'feature.related_query_ids',
           'stream.name',
         ],
       });
@@ -148,6 +158,13 @@ export const createAnnotateFeatureTool = ({
         annotations: [...existingAnnotations, annotation],
       };
 
+      const existingInsightUuids = Array.isArray(feature.related_insight_uuids)
+        ? (feature.related_insight_uuids as string[])
+        : [];
+      const existingQueryIds = Array.isArray(feature.related_query_ids)
+        ? (feature.related_query_ids as string[])
+        : [];
+
       const body: Record<string, unknown> = {
         id: feature.id ?? params.feature_id,
         stream_name: params.stream_name,
@@ -163,6 +180,12 @@ export const createAnnotateFeatureTool = ({
         meta: mergedMeta,
         title: feature.title,
         subtype: feature.subtype,
+        related_insight_uuids: [
+          ...new Set([...existingInsightUuids, ...(params.related_insight_uuids ?? [])]),
+        ],
+        related_query_ids: [
+          ...new Set([...existingQueryIds, ...(params.related_query_ids ?? [])]),
+        ],
       };
 
       const result = await callStreamsFeatureUpsert(

@@ -22,6 +22,9 @@ export const FEATURE_TAGS = 'feature.tags';
 export const FEATURE_META = 'feature.meta';
 export const FEATURE_EXPIRES_AT = 'feature.expires_at';
 
+export const FEATURE_RELATED_INSIGHT_UUIDS = 'feature.related_insight_uuids';
+export const FEATURE_RELATED_QUERY_IDS = 'feature.related_query_ids';
+
 export const FEATURE_DESCRIPTION_SEMANTIC = 'feature.description_semantic';
 export const FEATURE_EVIDENCE_SEMANTIC = 'feature.evidence_semantic';
 export const FEATURE_PROPERTIES_SUMMARY = 'feature.properties_summary';

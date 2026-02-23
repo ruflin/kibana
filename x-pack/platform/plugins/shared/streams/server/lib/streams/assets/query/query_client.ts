@@ -33,9 +33,12 @@ import {
   QUERY_FEATURE_FILTER,
   QUERY_FEATURE_NAME,
   QUERY_FEATURE_TYPE,
+  QUERY_INSIGHT_UUIDS,
   QUERY_KQL_BODY,
   QUERY_KQL_BODY_SEMANTIC,
+  QUERY_RELATED_FEATURE_UUIDS,
   QUERY_SEVERITY_SCORE,
+  QUERY_TIER,
   QUERY_TITLE,
   QUERY_TITLE_SEMANTIC,
   RULE_BACKED,
@@ -117,6 +120,9 @@ type QueryLinkStorageFields = Omit<QueryLink, 'query' | 'stream_name'> & {
   [QUERY_KQL_BODY]: string;
   [QUERY_ESQL_QUERY]: string;
   [QUERY_SEVERITY_SCORE]?: number;
+  [QUERY_INSIGHT_UUIDS]?: string[];
+  [QUERY_RELATED_FEATURE_UUIDS]?: string[];
+  [QUERY_TIER]?: number;
   [RULE_BACKED]?: boolean;
   [QUERY_TITLE_SEMANTIC]?: string;
   [QUERY_KQL_BODY_SEMANTIC]?: string;
@@ -171,6 +177,9 @@ function fromStorage(link: StoredQueryLink): QueryLink {
         : undefined,
       severity_score: storageFields[QUERY_SEVERITY_SCORE],
       evidence: storageFields[QUERY_EVIDENCE],
+      insight_uuids: storageFields[QUERY_INSIGHT_UUIDS],
+      related_feature_uuids: storageFields[QUERY_RELATED_FEATURE_UUIDS],
+      tier: storageFields[QUERY_TIER],
     },
   } satisfies QueryLink;
 }
@@ -195,6 +204,9 @@ function toStorage(
     [QUERY_FEATURE_TYPE]: query.feature ? query.feature.type : '',
     [QUERY_SEVERITY_SCORE]: query.severity_score,
     [QUERY_EVIDENCE]: query.evidence,
+    [QUERY_INSIGHT_UUIDS]: query.insight_uuids,
+    [QUERY_RELATED_FEATURE_UUIDS]: query.related_feature_uuids,
+    [QUERY_TIER]: query.tier,
     [RULE_BACKED]: ruleBacked,
     [QUERY_TITLE_SEMANTIC]: query.title,
     [QUERY_KQL_BODY_SEMANTIC]: query.kql.query,

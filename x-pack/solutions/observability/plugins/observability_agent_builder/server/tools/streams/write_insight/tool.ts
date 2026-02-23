@@ -50,10 +50,14 @@ const schema = z.object({
     .array(z.string())
     .optional()
     .describe('Actionable recommendations for addressing the insight.'),
-  related_features: z
+  related_feature_uuids: z
     .array(z.string())
     .optional()
     .describe('UUIDs of related stream features.'),
+  related_query_ids: z
+    .array(z.string())
+    .optional()
+    .describe('IDs of related significant event queries that this insight justifies or references.'),
   tags: z.array(z.string()).optional().describe('Tags for categorization.'),
   time_range: z
     .object({
@@ -118,7 +122,8 @@ export const createWriteInsightTool = ({
         confidence: params.confidence,
         evidence: params.evidence ?? [],
         recommendations: params.recommendations ?? [],
-        related_features: params.related_features,
+        related_feature_uuids: params.related_feature_uuids,
+        related_query_ids: params.related_query_ids,
         tags: params.tags,
         time_range: params.time_range,
       };

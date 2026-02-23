@@ -73,8 +73,12 @@ export const basePersistedInsightSchema = z.object({
   confidence: z.number().min(0).max(100),
   evidence: z.array(insightEvidenceSchema),
   recommendations: z.array(z.string()),
+  /** @deprecated Use related_feature_uuids instead. */
   related_features: z.array(z.string()).optional(),
+  /** @deprecated Use related_query_ids instead. */
   related_queries: z.array(z.string()).optional(),
+  related_feature_uuids: z.array(z.string()).optional(),
+  related_query_ids: z.array(z.string()).optional(),
   parent_insight_id: z.string().optional(),
   related_insight_ids: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),

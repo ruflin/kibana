@@ -24,5 +24,9 @@ export const QUERY_FEATURE_FILTER = 'experimental.query.system.filter';
 export const QUERY_FEATURE_TYPE = 'experimental.query.system.type';
 export const QUERY_EVIDENCE = 'experimental.query.evidence';
 
+export const QUERY_INSIGHT_UUIDS = 'query.insight_uuids';
+export const QUERY_RELATED_FEATURE_UUIDS = 'query.related_feature_uuids';
+export const QUERY_TIER = 'query.tier';
+
 export const QUERY_TITLE_SEMANTIC = 'query.title_semantic';
 export const QUERY_KQL_BODY_SEMANTIC = 'query.kql.query_semantic';

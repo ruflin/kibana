@@ -18,8 +18,12 @@ export const INSIGHT_STATUS = 'insight.status';
 export const INSIGHT_CONFIDENCE = 'insight.confidence';
 export const INSIGHT_EVIDENCE = 'insight.evidence';
 export const INSIGHT_RECOMMENDATIONS = 'insight.recommendations';
+/** @deprecated Use INSIGHT_RELATED_FEATURE_UUIDS instead. */
 export const INSIGHT_RELATED_FEATURES = 'insight.related_features';
+/** @deprecated Use INSIGHT_RELATED_QUERY_IDS instead. */
 export const INSIGHT_RELATED_QUERIES = 'insight.related_queries';
+export const INSIGHT_RELATED_FEATURE_UUIDS = 'insight.related_feature_uuids';
+export const INSIGHT_RELATED_QUERY_IDS = 'insight.related_query_ids';
 export const INSIGHT_TAGS = 'insight.tags';
 export const INSIGHT_TIME_RANGE = 'insight.time_range';
 export const INSIGHT_CREATED_AT = 'insight.created_at';
