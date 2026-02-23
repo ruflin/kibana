@@ -31,6 +31,12 @@ export const AGENT_BUILDER_BUILTIN_TOOLS = [
   `${internalNamespaces.observability}.get_service_topology`,
   `${internalNamespaces.observability}.get_traces`,
   `${internalNamespaces.observability}.get_runtime_metrics`,
+  `${internalNamespaces.observability}.diff_count`,
+  `${internalNamespaces.observability}.diff_metric`,
+  `${internalNamespaces.observability}.detect_outliers`,
+  `${internalNamespaces.observability}.detect_change_points`,
+  `${internalNamespaces.observability}.attribute_impact`,
+  `${internalNamespaces.observability}.bubble_up`,
 
   // Dashboards
   'platform.dashboard.manage_dashboard',
@@ -40,6 +46,10 @@ export const AGENT_BUILDER_BUILTIN_TOOLS = [
   `${internalNamespaces.security}.attack_discovery_search`,
   `${internalNamespaces.security}.security_labs_search`,
   `${internalNamespaces.security}.alerts`,
+
+  // Streams
+  `${internalNamespaces.streams}.search_features`,
+  `${internalNamespaces.streams}.search_queries`,
 ] as const;
 
 export type AgentBuilderBuiltinTool = (typeof AGENT_BUILDER_BUILTIN_TOOLS)[number];

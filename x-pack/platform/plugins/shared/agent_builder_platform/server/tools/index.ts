@@ -24,6 +24,8 @@ import { executeEsqlTool } from './execute_esql';
 import { searchTool } from './search';
 import { createVisualizationTool } from './create_visualization';
 import { getWorkflowExecutionStatusTool } from './get_workflow_execution_status';
+import { searchFeaturesTool } from './streams/search_features';
+import { searchQueriesTool } from './streams/search_queries';
 
 export const registerTools = ({
   coreSetup,
@@ -46,6 +48,8 @@ export const registerTools = ({
     productDocumentationTool(coreSetup),
     integrationKnowledgeTool(coreSetup),
     casesTool(coreSetup),
+    searchFeaturesTool(),
+    searchQueriesTool(),
   ];
 
   if (setupDeps.workflowsManagement) {

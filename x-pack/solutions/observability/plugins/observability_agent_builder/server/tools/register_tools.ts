@@ -54,6 +54,27 @@ import {
   createGetServiceTopologyTool,
 } from './get_service_topology/tool';
 import { OBSERVABILITY_GET_TRACES_TOOL_ID, createGetTracesTool } from './get_traces/tool';
+import {
+  OBSERVABILITY_DIFF_COUNT_TOOL_ID,
+  createDiffCountTool,
+} from './root_cause/diff_count/tool';
+import {
+  OBSERVABILITY_DIFF_METRIC_TOOL_ID,
+  createDiffMetricTool,
+} from './root_cause/diff_metric/tool';
+import {
+  OBSERVABILITY_DETECT_OUTLIERS_TOOL_ID,
+  createDetectOutliersTool,
+} from './root_cause/detect_outliers/tool';
+import {
+  OBSERVABILITY_DETECT_CHANGE_POINTS_TOOL_ID,
+  createDetectChangePointsTool,
+} from './root_cause/detect_change_points/tool';
+import {
+  OBSERVABILITY_ATTRIBUTE_IMPACT_TOOL_ID,
+  createAttributeImpactTool,
+} from './root_cause/attribute_impact/tool';
+import { OBSERVABILITY_BUBBLE_UP_TOOL_ID, createBubbleUpTool } from './root_cause/bubble_up/tool';
 
 const PLATFORM_TOOL_IDS = [
   platformCoreTools.listIndices,
@@ -77,6 +98,12 @@ const OBSERVABILITY_TOOL_IDS = [
   OBSERVABILITY_GET_TRACE_CHANGE_POINTS_TOOL_ID,
   OBSERVABILITY_GET_INDEX_INFO_TOOL_ID,
   OBSERVABILITY_GET_SERVICE_TOPOLOGY_TOOL_ID,
+  OBSERVABILITY_DIFF_COUNT_TOOL_ID,
+  OBSERVABILITY_DIFF_METRIC_TOOL_ID,
+  OBSERVABILITY_DETECT_OUTLIERS_TOOL_ID,
+  OBSERVABILITY_DETECT_CHANGE_POINTS_TOOL_ID,
+  OBSERVABILITY_ATTRIBUTE_IMPACT_TOOL_ID,
+  OBSERVABILITY_BUBBLE_UP_TOOL_ID,
 ];
 
 export const OBSERVABILITY_AGENT_TOOL_IDS = [...PLATFORM_TOOL_IDS, ...OBSERVABILITY_TOOL_IDS];
@@ -107,6 +134,12 @@ export async function registerTools({
     createGetTraceChangePointsTool({ core, plugins, logger }),
     createGetIndexInfoTool({ core, plugins, logger }),
     createGetServiceTopologyTool({ core, plugins, dataRegistry, logger }),
+    createDiffCountTool({ core, logger }),
+    createDiffMetricTool({ core, logger }),
+    createDetectOutliersTool({ core, logger }),
+    createDetectChangePointsTool({ core, logger }),
+    createAttributeImpactTool({ core, logger }),
+    createBubbleUpTool({ core, logger }),
   ];
 
   for (const tool of observabilityTools) {
