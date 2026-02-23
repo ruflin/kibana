@@ -58,6 +58,7 @@ export function esqlRuleType(): PersistenceAlertType<
           ...alertFieldMap,
           'original_source': { type: 'flattened', array: false, required: false },
           'stream.name': { type: 'keyword', array: false, required: false },
+          'pattern_text': { type: 'match_only_text', array: false, required: false },
         },
       },
       shouldWrite: false,

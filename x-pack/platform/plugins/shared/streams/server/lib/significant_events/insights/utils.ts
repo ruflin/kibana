@@ -71,7 +71,7 @@ export async function collectQueryData({
   const ruleId = getRuleIdFromQueryLink(query);
 
   const currentResponse = await esClient
-    .search<{ original_source: Record<string, unknown> }>({
+    .search<{ original_source: Record<string, unknown>; pattern_text?: string }>({
       index: '.alerts-streams.alerts-default',
       size: SAMPLE_EVENTS_COUNT,
       query: {
@@ -115,9 +115,13 @@ export async function collectQueryData({
     return undefined;
   }
 
-  const sampleEvents = currentResponse.hits.hits.map((hit) =>
-    JSON.stringify(omit(hit._source?.original_source ?? {}, '_id'))
-  );
+  const sampleEvents = currentResponse.hits.hits.map((hit) => {
+    const patternText = hit._source?.pattern_text;
+    if (patternText) {
+      return patternText;
+    }
+    return JSON.stringify(omit(hit._source?.original_source ?? {}, '_id'));
+  });
 
   const baselineCount = await collectBaselineCount({ ruleId, esClient });
   const changePercent =
