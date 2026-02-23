@@ -6,12 +6,12 @@
  */
 
 import type { AlertInstanceContext, RuleTypeState } from '@kbn/alerting-plugin/server';
-import { alertFieldMap } from '@kbn/alerts-as-data-utils';
 import { DEFAULT_APP_CATEGORIES } from '@kbn/core/server';
 import type { LicenseType } from '@kbn/licensing-types';
 import { STREAMS_ESQL_RULE_TYPE_ID } from '@kbn/rule-data-utils';
 import type { PersistenceAlertType } from '@kbn/rule-registry-plugin/server';
 import { STREAMS_PRODUCER, STREAMS_RULE_REGISTRATION_CONTEXT } from '../../../../common/constants';
+import { streamsAlertFieldMap } from '../alert_field_map';
 import { getRuleExecutor } from './executor';
 import type { EsqlRuleParams } from './types';
 import { esqlRuleParams } from './types';
@@ -54,12 +54,7 @@ export function esqlRuleType(): PersistenceAlertType<
       context: STREAMS_RULE_REGISTRATION_CONTEXT,
       mappings: {
         dynamic: false,
-        fieldMap: {
-          ...alertFieldMap,
-          'original_source': { type: 'flattened', array: false, required: false },
-          'stream.name': { type: 'keyword', array: false, required: false },
-          'pattern_text': { type: 'match_only_text', array: false, required: false },
-        },
+        fieldMap: streamsAlertFieldMap,
       },
       shouldWrite: false,
       isSpaceAware: false,

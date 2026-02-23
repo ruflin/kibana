@@ -6,11 +6,11 @@
  */
 
 import { mappingFromFieldMap } from '@kbn/alerting-plugin/common';
-import { alertFieldMap } from '@kbn/alerts-as-data-utils';
 import type { Logger } from '@kbn/core/server';
 import { Dataset, createPersistenceRuleTypeWrapper } from '@kbn/rule-registry-plugin/server';
 import { STREAMS_FEATURE_ID, STREAMS_RULE_REGISTRATION_CONTEXT } from '../../../common/constants';
 import type { StreamsPluginSetupDependencies } from '../../types';
+import { streamsAlertFieldMap } from './alert_field_map';
 import { esqlRuleType } from './esql/register';
 
 interface Props {
@@ -27,15 +27,7 @@ export function registerRules({ plugins, logger }: Props) {
     componentTemplates: [
       {
         name: 'mappings',
-        mappings: mappingFromFieldMap(
-          {
-            ...alertFieldMap,
-            'original_source': { type: 'flattened', array: false, required: false },
-            'stream.name': { type: 'keyword', array: false, required: false },
-            'pattern_text': { type: 'match_only_text', array: false, required: false },
-          },
-          false
-        ),
+        mappings: mappingFromFieldMap(streamsAlertFieldMap, false),
       },
     ],
   });

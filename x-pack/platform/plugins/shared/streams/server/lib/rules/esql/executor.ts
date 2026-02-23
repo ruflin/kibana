@@ -12,9 +12,10 @@ import type {
 } from '@kbn/alerting-plugin/server';
 import type { Alert } from '@kbn/alerts-as-data-utils';
 import type { PersistenceServices } from '@kbn/rule-registry-plugin/server';
-import { isEmpty } from 'lodash';
+import { get, isEmpty } from 'lodash';
 import moment from 'moment';
 import objectHash from 'object-hash';
+import { ALERT_RESOURCE_FIELD_NAMES } from '../alert_field_map';
 import { MAX_ALERTS_PER_EXECUTION } from './common';
 import { buildEsqlSearchRequest } from './lib/build_esql_search_request';
 import { executeEsqlRequest } from './lib/execute_esql_request';
@@ -29,8 +30,8 @@ export function extractPatternText(source: Record<string, unknown>): string | un
     typeof source['body.text'] === 'string'
       ? source['body.text']
       : typeof body === 'object' && body !== null && 'text' in body
-        ? (body as Record<string, unknown>).text
-        : undefined;
+      ? (body as Record<string, unknown>).text
+      : undefined;
 
   if (typeof bodyText === 'string') {
     return bodyText;
@@ -42,6 +43,21 @@ export function extractPatternText(source: Record<string, unknown>): string | un
   }
 
   return undefined;
+}
+
+/**
+ * Extracts semconv resource fields from a source document, checking both
+ * ECS-style flat dotted names and OTel-style `resource.attributes.*` paths.
+ */
+export function extractResourceFields(source: Record<string, unknown>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const field of ALERT_RESOURCE_FIELD_NAMES) {
+    const value = get(source, field) ?? get(source, `resource.attributes.${field}`);
+    if (typeof value === 'string') {
+      result[field] = value;
+    }
+  }
+  return result;
 }
 
 export async function getRuleExecutor(
@@ -97,7 +113,10 @@ export async function getRuleExecutor(
       _id: alertDocId,
       _source: {
         'stream.name': params.streamName,
-        ...(patternText !== undefined ? { pattern_text: patternText } : {}),
+        ...(patternText !== undefined
+          ? { pattern_text: patternText, 'body.text': patternText }
+          : {}),
+        ...extractResourceFields(source),
         original_source: {
           _id: result._id,
           ...source,
