@@ -83,6 +83,14 @@ import {
   STREAMS_WRITE_INSIGHT_TOOL_ID,
   createWriteInsightTool,
 } from './streams/write_insight/tool';
+import {
+  STREAMS_SUGGEST_QUERY_TOOL_ID,
+  createSuggestQueryTool,
+} from './streams/suggest_query/tool';
+import {
+  STREAMS_ANNOTATE_FEATURE_TOOL_ID,
+  createAnnotateFeatureTool,
+} from './streams/annotate_feature/tool';
 
 const PLATFORM_TOOL_IDS = [
   platformCoreTools.listIndices,
@@ -114,6 +122,8 @@ const OBSERVABILITY_TOOL_IDS = [
   OBSERVABILITY_BUBBLE_UP_TOOL_ID,
   STREAMS_SEARCH_INSIGHTS_TOOL_ID,
   STREAMS_WRITE_INSIGHT_TOOL_ID,
+  STREAMS_SUGGEST_QUERY_TOOL_ID,
+  STREAMS_ANNOTATE_FEATURE_TOOL_ID,
 ];
 
 export const OBSERVABILITY_AGENT_TOOL_IDS = [...PLATFORM_TOOL_IDS, ...OBSERVABILITY_TOOL_IDS];
@@ -152,6 +162,8 @@ export async function registerTools({
     createBubbleUpTool({ core, logger }),
     createSearchInsightsTool({ core, logger }),
     createWriteInsightTool({ core, logger }),
+    createSuggestQueryTool({ core, logger }),
+    createAnnotateFeatureTool({ core, logger }),
   ];
 
   for (const tool of observabilityTools) {
