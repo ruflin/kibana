@@ -16,9 +16,9 @@ import {
 } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
 import { TaskStatus } from '@kbn/streams-schema';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import useAsyncFn from 'react-use/lib/useAsyncFn';
-import type { Insight } from '@kbn/streams-schema';
+import type { Insight, PersistedInsight } from '@kbn/streams-schema';
 import { useAIFeatures } from '../../../../hooks/use_ai_features';
 import { useInsightsDiscoveryApi } from '../../../../hooks/use_insights_discovery_api';
 import { useKibana } from '../../../../hooks/use_kibana';
@@ -28,7 +28,12 @@ import { ConnectorListButton } from '../../../connector_list_button/connector_li
 import { FeedbackButtons } from './feedback_buttons';
 import { InsightCard } from './insight_card';
 
-export function Summary({ count }: { count: number }) {
+interface SummaryProps {
+  persistedInsights: PersistedInsight[];
+  onInsightsChanged: () => void;
+}
+
+export function Summary({ persistedInsights, onInsightsChanged }: SummaryProps) {
   const aiFeatures = useAIFeatures();
   const {
     core: { notifications },
@@ -43,10 +48,6 @@ export function Summary({ count }: { count: number }) {
 
   const [{ value: task }, getTaskStatus] = useAsyncFn(getInsightsDiscoveryTaskStatus);
   const [{ loading: isSchedulingTask }, scheduleTask] = useAsyncFn(async () => {
-    /**
-     * Combining scheduling and immediate status update to prevent
-     * React updating the UI in between states causing flickering
-     */
     await scheduleInsightsDiscoveryTask();
     await getTaskStatus();
   }, [scheduleInsightsDiscoveryTask, getTaskStatus]);
@@ -70,8 +71,8 @@ export function Summary({ count }: { count: number }) {
       return;
     }
 
-    if (task?.status === TaskStatus.Completed) {
-      if (previousStatus === TaskStatus.InProgress && task.insights.length === 0) {
+    if (task?.status === TaskStatus.Completed && previousStatus === TaskStatus.InProgress) {
+      if (task.insights.length === 0) {
         notifications.toasts.addInfo({
           title: i18n.translate('xpack.streams.insights.noInsightsTitle', {
             defaultMessage: 'No insights found',
@@ -82,9 +83,9 @@ export function Summary({ count }: { count: number }) {
           }),
         });
       }
-      setInsights(task.insights);
+      onInsightsChanged();
     }
-  }, [task, notifications.toasts]);
+  }, [task, notifications.toasts, onInsightsChanged]);
 
   const { cancelTask, isCancellingTask } = useTaskPolling({
     task,
@@ -93,143 +94,143 @@ export function Summary({ count }: { count: number }) {
     onCancel: cancelInsightsDiscoveryTask,
   });
 
-  const [insights, setInsights] = useState<Insight[] | null>(null);
-
-  const onGenerateInsightsClick = async () => {
+  const onGenerateInsightsClick = useCallback(async () => {
     await scheduleTask();
-  };
+  }, [scheduleTask]);
 
-  const onRegenerateInsightsClick = async () => {
+  const onRegenerateInsightsClick = useCallback(async () => {
     await acknowledgeInsightsDiscoveryTask();
     await scheduleTask();
-
-    setInsights(null);
-  };
+  }, [acknowledgeInsightsDiscoveryTask, scheduleTask]);
 
   const isGenerateButtonPending =
     task?.status === TaskStatus.InProgress || isCancellingTask || isSchedulingTask;
 
-  if (insights && insights.length > 0) {
-    return (
-      <EuiFlexGroup direction="column">
-        <EuiFlexItem>
-          <EuiPanel hasBorder paddingSize="none">
-            <EuiPanel color="subdued" hasShadow={false}>
-              <EuiFlexGroup justifyContent="flexEnd">
-                <EuiFlexItem grow={false}>
-                  <FeedbackButtons />
-                </EuiFlexItem>
-                <EuiFlexItem grow={false}>
-                  <EuiButton
-                    fill={true}
-                    iconType="refresh"
-                    onClick={onRegenerateInsightsClick}
-                    disabled={isSchedulingTask}
-                    isLoading={isSchedulingTask}
-                    data-test-subj="significant_events_regenerate_insights_button"
-                  >
-                    {i18n.translate('xpack.streams.insights.regenerateButtonLabel', {
-                      defaultMessage: 'Re-generate insights',
+  const displayInsights: Insight[] = persistedInsights;
+
+  return (
+    <EuiFlexGroup direction="column">
+      <EuiFlexItem>
+        <EuiPanel hasBorder paddingSize="none">
+          <EuiPanel color="subdued" hasShadow={false}>
+            <EuiFlexGroup justifyContent="spaceBetween" alignItems="center">
+              <EuiFlexItem grow={false}>
+                <EuiTitle size="xs">
+                  <h3>
+                    {i18n.translate('xpack.streams.insights.insightsTitle', {
+                      defaultMessage:
+                        '{count} {count, plural, one {insight} other {insights}}',
+                      values: { count: displayInsights.length },
                     })}
-                  </EuiButton>
-                </EuiFlexItem>
-              </EuiFlexGroup>
-            </EuiPanel>
+                  </h3>
+                </EuiTitle>
+              </EuiFlexItem>
+              <EuiFlexItem grow={false}>
+                <EuiFlexGroup gutterSize="s" alignItems="center">
+                  <EuiFlexItem grow={false}>
+                    <FeedbackButtons />
+                  </EuiFlexItem>
+                  {displayInsights.length > 0 ? (
+                    <EuiFlexItem grow={false}>
+                      <ConnectorListButton
+                        buttonProps={{
+                          iconType: 'refresh',
+                          fill: true,
+                          children: isGenerateButtonPending
+                            ? i18n.translate('xpack.streams.insights.regeneratingButtonLabel', {
+                                defaultMessage: 'Generating...',
+                              })
+                            : i18n.translate('xpack.streams.insights.regenerateButtonLabel', {
+                                defaultMessage: 'Re-generate insights',
+                              }),
+                          onClick: onRegenerateInsightsClick,
+                          isDisabled: isGenerateButtonPending,
+                          isLoading: isGenerateButtonPending,
+                          'data-test-subj': 'significant_events_regenerate_insights_button',
+                        }}
+                      />
+                    </EuiFlexItem>
+                  ) : (
+                    <>
+                      <EuiFlexItem grow={false}>
+                        <ConnectorListButton
+                          buttonProps={{
+                            fill: true,
+                            size: 'm',
+                            iconType: 'sparkles',
+                            children: isGenerateButtonPending
+                              ? i18n.translate('xpack.streams.insights.generatingButtonLabel', {
+                                  defaultMessage: 'Generating insights',
+                                })
+                              : i18n.translate('xpack.streams.insights.generateButtonLabel', {
+                                  defaultMessage: 'Generate insights',
+                                }),
+                            onClick: onGenerateInsightsClick,
+                            isDisabled: isGenerateButtonPending,
+                            isLoading: isGenerateButtonPending,
+                            'data-test-subj': 'significant_events_generate_insights_button',
+                          }}
+                        />
+                      </EuiFlexItem>
+                    </>
+                  )}
+                  {(task?.status === TaskStatus.InProgress || isCancellingTask) && (
+                    <EuiFlexItem grow={false}>
+                      <EuiButton
+                        onClick={cancelTask}
+                        isDisabled={isCancellingTask}
+                        data-test-subj="significant_events_cancel_insights_generation_button"
+                      >
+                        {isCancellingTask
+                          ? i18n.translate('xpack.streams.insights.cancellingTaskButtonLabel', {
+                              defaultMessage: 'Cancelling',
+                            })
+                          : i18n.translate('xpack.streams.insights.cancelTaskButtonLabel', {
+                              defaultMessage: 'Cancel',
+                            })}
+                      </EuiButton>
+                    </EuiFlexItem>
+                  )}
+                </EuiFlexGroup>
+              </EuiFlexItem>
+            </EuiFlexGroup>
+          </EuiPanel>
+          {displayInsights.length > 0 ? (
             <EuiPanel hasShadow={false}>
               <EuiFlexGroup direction="column" gutterSize="m">
-                {insights.map((insight, idx) => (
+                {displayInsights.map((insight, idx) => (
                   <EuiFlexItem key={idx}>
                     <InsightCard insight={insight} index={idx} />
                   </EuiFlexItem>
                 ))}
               </EuiFlexGroup>
             </EuiPanel>
-          </EuiPanel>
-        </EuiFlexItem>
-      </EuiFlexGroup>
-    );
-  }
-
-  return (
-    <EuiFlexGroup direction="column" alignItems="center" justifyContent="center">
-      <EuiFlexItem grow={false}>
-        <EuiPanel color="subdued">
-          <EuiFlexGroup
-            direction="column"
-            alignItems="center"
-            justifyContent="center"
-            style={{ minHeight: '30vh', minWidth: '40vh' }}
-          >
-            <EuiFlexItem grow={false}>
-              <EuiIcon type="createAdvancedJob" size="xxl" aria-hidden={true} />
-            </EuiFlexItem>
-            <EuiFlexItem grow={false}>
-              <EuiTitle size="s">
-                <h2>
-                  {i18n.translate(
-                    'xpack.streams.sigEventsDiscovery.insightsTab.significantEventsFoundTitle',
-                    {
-                      defaultMessage:
-                        '{count} significant {count, plural, one {event} other {events}} detected',
-                      values: {
-                        count,
-                      },
-                    }
-                  )}
-                </h2>
-              </EuiTitle>
-            </EuiFlexItem>
-            <EuiFlexItem grow={false}>
-              <EuiText size="s" textAlign="center" css={{ maxWidth: 400 }}>
-                {i18n.translate(
-                  'xpack.streams.sigEventsDiscovery.insightsTab.significantEventsFoundDescription',
-                  {
-                    defaultMessage:
-                      'Start extracting insights from your logs, and understand what they mean with the power of AI and Elastic Observability.',
-                  }
-                )}
-              </EuiText>
-            </EuiFlexItem>
-            <EuiFlexItem grow={false}>
-              <EuiFlexGroup>
-                <ConnectorListButton
-                  buttonProps={{
-                    fill: true,
-                    size: 'm',
-                    iconType: 'sparkles',
-                    children:
-                      task?.status === TaskStatus.InProgress
-                        ? i18n.translate('xpack.streams.insights.generatingButtonLabel', {
-                            defaultMessage: 'Generating insights',
-                          })
-                        : i18n.translate('xpack.streams.insights.generateButtonLabel', {
-                            defaultMessage: 'Generate insights',
-                          }),
-                    onClick: onGenerateInsightsClick,
-                    isDisabled: isGenerateButtonPending,
-                    isLoading: isGenerateButtonPending,
-                    'data-test-subj': 'significant_events_generate_insights_button',
-                  }}
-                />
-
-                {(task?.status === TaskStatus.InProgress || isCancellingTask) && (
-                  <EuiButton
-                    onClick={cancelTask}
-                    isDisabled={isCancellingTask}
-                    data-test-subj="significant_events_cancel_insights_generation_button"
-                  >
-                    {isCancellingTask
-                      ? i18n.translate('xpack.streams.insights.cancellingTaskButtonLabel', {
-                          defaultMessage: 'Cancelling',
-                        })
-                      : i18n.translate('xpack.streams.insights.cancelTaskButtonLabel', {
-                          defaultMessage: 'Cancel',
-                        })}
-                  </EuiButton>
-                )}
+          ) : (
+            <EuiPanel hasShadow={false}>
+              <EuiFlexGroup
+                direction="column"
+                alignItems="center"
+                justifyContent="center"
+                gutterSize="m"
+                style={{ minHeight: '20vh' }}
+              >
+                <EuiFlexItem grow={false}>
+                  <EuiIcon type="createAdvancedJob" size="xxl" aria-hidden={true} />
+                </EuiFlexItem>
+                <EuiFlexItem grow={false}>
+                  <EuiText size="s" textAlign="center" css={{ maxWidth: 400 }}>
+                    {i18n.translate(
+                      'xpack.streams.sigEventsDiscovery.insightsTab.noInsightsYetDescription',
+                      {
+                        defaultMessage:
+                          'No insights yet. Generate insights from your significant events using AI, or insights will appear here as they are created by agents and tasks.',
+                      }
+                    )}
+                  </EuiText>
+                </EuiFlexItem>
               </EuiFlexGroup>
-            </EuiFlexItem>
-          </EuiFlexGroup>
+            </EuiPanel>
+          )}
         </EuiPanel>
       </EuiFlexItem>
     </EuiFlexGroup>
