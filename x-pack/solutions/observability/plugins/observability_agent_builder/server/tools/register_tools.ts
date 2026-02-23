@@ -103,6 +103,10 @@ import {
   STREAMS_GET_INSIGHT_QUALITY_TOOL_ID,
   createGetInsightQualityTool,
 } from './streams/get_insight_quality/tool';
+import {
+  STREAMS_CREATE_FEATURE_TOOL_ID,
+  createCreateFeatureTool,
+} from './streams/create_feature/tool';
 
 const PLATFORM_TOOL_IDS = [
   platformCoreTools.listIndices,
@@ -139,6 +143,7 @@ const OBSERVABILITY_TOOL_IDS = [
   STREAMS_UPDATE_INSIGHT_STATUS_TOOL_ID,
   STREAMS_LINK_INSIGHTS_TOOL_ID,
   STREAMS_GET_INSIGHT_QUALITY_TOOL_ID,
+  STREAMS_CREATE_FEATURE_TOOL_ID,
 ];
 
 export const OBSERVABILITY_AGENT_TOOL_IDS = [...PLATFORM_TOOL_IDS, ...OBSERVABILITY_TOOL_IDS];
@@ -182,6 +187,7 @@ export async function registerTools({
     createUpdateInsightStatusTool({ core, logger }),
     createLinkInsightsTool({ core, logger }),
     createGetInsightQualityTool({ core, logger }),
+    createCreateFeatureTool({ core, logger }),
   ];
 
   for (const tool of observabilityTools) {

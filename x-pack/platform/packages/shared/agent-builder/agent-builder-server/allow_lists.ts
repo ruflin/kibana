@@ -59,6 +59,7 @@ export const AGENT_BUILDER_BUILTIN_TOOLS = [
   `${internalNamespaces.streams}.update_insight_status`,
   `${internalNamespaces.streams}.link_insights`,
   `${internalNamespaces.streams}.get_insight_quality`,
+  `${internalNamespaces.streams}.create_feature`,
 ] as const;
 
 export type AgentBuilderBuiltinTool = (typeof AGENT_BUILDER_BUILTIN_TOOLS)[number];
