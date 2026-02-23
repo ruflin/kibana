@@ -11,6 +11,7 @@ import {
   EuiBadge,
   EuiFlexGroup,
   EuiFlexItem,
+  EuiMarkdownFormat,
   EuiPanel,
   EuiSpacer,
   EuiText,
@@ -77,9 +78,9 @@ export function InsightCard({ insight, index }: InsightCardProps) {
       >
         <EuiSpacer size="s" />
 
-        <EuiText size="s">
-          <p>{insight.description}</p>
-        </EuiText>
+        <EuiMarkdownFormat textSize="s">
+          {insight.description.replace(/\\n/g, '\n')}
+        </EuiMarkdownFormat>
 
         {insight.evidence.length > 0 && (
           <>
