@@ -71,6 +71,7 @@ export type AgentBuilderBuiltinTool = (typeof AGENT_BUILDER_BUILTIN_TOOLS)[numbe
  */
 export const AGENT_BUILDER_BUILTIN_AGENTS = [
   `${internalNamespaces.observability}.agent`,
+  `${internalNamespaces.observability}.logs_insights_agent`,
   'platform.dashboard.dashboard_agent',
   `${internalNamespaces.security}.agent`,
 ] as const;

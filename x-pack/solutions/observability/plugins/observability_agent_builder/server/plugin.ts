@@ -13,6 +13,7 @@ import type {
   Logger,
 } from '@kbn/core/server';
 import { registerObservabilityAgent } from './agent/register_observability_agent';
+import { registerLogsInsightsAgent } from './agent/register_logs_insights_agent';
 import { registerTools } from './tools/register_tools';
 import { registerAttachments } from './attachments/register_attachments';
 import { registerSkills } from './skills/register_skills';
@@ -51,6 +52,10 @@ export class ObservabilityAgentBuilderPlugin
   ): ObservabilityAgentBuilderPluginSetup {
     registerObservabilityAgent({ core, plugins, logger: this.logger }).catch((error) => {
       this.logger.error(`Error registering observability agent: ${error}`);
+    });
+
+    registerLogsInsightsAgent({ core, plugins, logger: this.logger }).catch((error) => {
+      this.logger.error(`Error registering logs insights agent: ${error}`);
     });
 
     registerTools({
