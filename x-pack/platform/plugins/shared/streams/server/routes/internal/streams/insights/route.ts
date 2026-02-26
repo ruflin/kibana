@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import type { InsightsResult } from '@kbn/streams-schema';
+import type { DiscoveryPipelineResult } from '@kbn/streams-schema';
 import { z } from '@kbn/zod';
 import type { TaskResult } from '@kbn/streams-schema';
 import { STREAMS_API_PRIVILEGES } from '../../../../../common/constants';
@@ -19,7 +19,7 @@ import { handleTaskAction } from '../../../utils/task_helpers';
 
 /* Insights Discovery Task */
 
-export type InsightsTaskResult = TaskResult<InsightsResult>;
+export type InsightsTaskResult = TaskResult<DiscoveryPipelineResult>;
 
 const insightsTaskRoute = createServerRoute({
   endpoint: 'POST /internal/streams/_insights/_task',
@@ -86,7 +86,7 @@ const insightsTaskRoute = createServerRoute({
           } as const)
         : ({ action: body.action } as const);
 
-    return handleTaskAction<InsightsDiscoveryTaskParams, InsightsResult>({
+    return handleTaskAction<InsightsDiscoveryTaskParams, DiscoveryPipelineResult>({
       taskClient,
       taskId: STREAMS_INSIGHTS_DISCOVERY_TASK_TYPE,
       ...actionParams,
@@ -112,7 +112,7 @@ const insightsStatusRoute = createServerRoute({
     });
     await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
 
-    return taskClient.getStatus<InsightsDiscoveryTaskParams, InsightsResult>(
+    return taskClient.getStatus<InsightsDiscoveryTaskParams, DiscoveryPipelineResult>(
       STREAMS_INSIGHTS_DISCOVERY_TASK_TYPE
     );
   },

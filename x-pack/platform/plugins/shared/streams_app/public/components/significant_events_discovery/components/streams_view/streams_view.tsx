@@ -34,10 +34,10 @@ import { StreamsAppSearchBar } from '../../../streams_app_search_bar';
 import { useOnboardingStatusUpdateQueue } from '../../hooks/use_onboarding_status_update_queue';
 import {
   DISCOVER_INSIGHTS_BUTTON_LABEL,
-  getInsightsCompleteToastTitle,
-  INSIGHTS_COMPLETE_TOAST_VIEW_BUTTON,
+  getAnalysisCompleteToastTitle,
+  ANALYSIS_COMPLETE_TOAST_VIEW_BUTTON,
   INSIGHTS_SCHEDULING_FAILURE_TITLE,
-  NO_INSIGHTS_TOAST_TITLE,
+  NO_DISCOVERIES_TOAST_TITLE,
   ONBOARDING_FAILURE_TITLE,
   ONBOARDING_SCHEDULING_FAILURE_TITLE,
   RUN_BULK_STREAM_ONBOARDING_BUTTON_LABEL,
@@ -130,14 +130,16 @@ export function StreamsView({ refreshUnbackedQueriesCount }: StreamsViewProps) {
       return;
     }
     if (insightsTask.status === TaskStatus.Completed) {
-      const count = insightsTask.insights?.length ?? 0;
-      if (count === 0) {
+      const discoveryCount = insightsTask.discoveries?.length ?? 0;
+      const insightCount = insightsTask.insights?.length ?? 0;
+      const recommendationCount = insightsTask.recommendations?.length ?? 0;
+      if (discoveryCount === 0 && insightCount === 0) {
         toasts.addInfo({
-          title: NO_INSIGHTS_TOAST_TITLE,
+          title: NO_DISCOVERIES_TOAST_TITLE,
         });
       } else {
         const toast = toasts.addSuccess({
-          title: getInsightsCompleteToastTitle(count),
+          title: getAnalysisCompleteToastTitle(discoveryCount, insightCount, recommendationCount),
           text: toMountPoint(
             <EuiFlexGroup justifyContent="flexEnd" gutterSize="s">
               <EuiFlexItem grow={false}>
@@ -152,7 +154,7 @@ export function StreamsView({ refreshUnbackedQueriesCount }: StreamsViewProps) {
                     });
                   }}
                 >
-                  {INSIGHTS_COMPLETE_TOAST_VIEW_BUTTON}
+                  {ANALYSIS_COMPLETE_TOAST_VIEW_BUTTON}
                 </EuiButton>
               </EuiFlexItem>
             </EuiFlexGroup>,

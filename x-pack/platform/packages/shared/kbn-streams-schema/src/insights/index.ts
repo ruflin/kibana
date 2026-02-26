@@ -7,9 +7,31 @@
 
 import type { ChatCompletionTokenCount } from '@kbn/inference-common';
 
-export type InsightImpactLevel = 'critical' | 'high' | 'medium' | 'low';
+export type SeverityLevel = 'critical' | 'high' | 'medium' | 'low';
 
-interface InsightEvidence {
+export type InsightImpactLevel = SeverityLevel;
+
+export interface DiscoveryEvidence {
+  streamName: string;
+  queryTitle: string;
+  featureName?: string;
+  eventCount: number;
+}
+
+export interface Discovery {
+  title: string;
+  description: string;
+  severity: SeverityLevel;
+  evidence: DiscoveryEvidence[];
+  sampleEvents: string[];
+}
+
+export interface DiscoveriesResult {
+  discoveries: Discovery[];
+  tokensUsed: ChatCompletionTokenCount;
+}
+
+export interface InsightEvidence {
   streamName: string;
   queryTitle: string;
   featureName?: string;
@@ -21,10 +43,30 @@ export interface Insight {
   description: string;
   impact: InsightImpactLevel;
   evidence: InsightEvidence[];
-  recommendations: string[];
+  discoveryRefs: number[];
 }
 
 export interface InsightsResult {
   insights: Insight[];
+  tokensUsed: ChatCompletionTokenCount;
+}
+
+export interface Recommendation {
+  title: string;
+  description: string;
+  priority: SeverityLevel;
+  insightRefs: number[];
+  steps: string[];
+}
+
+export interface RecommendationsResult {
+  recommendations: Recommendation[];
+  tokensUsed: ChatCompletionTokenCount;
+}
+
+export interface DiscoveryPipelineResult {
+  discoveries: Discovery[];
+  insights: Insight[];
+  recommendations: Recommendation[];
   tokensUsed: ChatCompletionTokenCount;
 }

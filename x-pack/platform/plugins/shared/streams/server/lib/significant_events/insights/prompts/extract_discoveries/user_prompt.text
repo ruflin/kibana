@@ -1,0 +1,6 @@
+Investigate the following data streams and extract discoveries about significant events.
+
+Use the available tools to gather the information you need. Start by checking which queries have fired recently, then explore features and query definitions for context. If you spot interesting patterns, search for additional events to confirm.
+
+`data streams to investigate`
+{{{streamNames}}}

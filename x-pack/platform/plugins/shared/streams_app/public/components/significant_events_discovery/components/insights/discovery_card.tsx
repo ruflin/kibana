@@ -19,56 +19,59 @@ import {
 } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
 import useToggle from 'react-use/lib/useToggle';
-import type { Insight, InsightImpactLevel } from '@kbn/streams-schema';
+import type { Discovery, SeverityLevel } from '@kbn/streams-schema';
 
-const impactColors: Record<InsightImpactLevel, 'danger' | 'warning' | 'primary' | 'hollow'> = {
+const severityColors: Record<SeverityLevel, 'danger' | 'warning' | 'primary' | 'hollow'> = {
   critical: 'danger',
   high: 'warning',
   medium: 'primary',
   low: 'hollow',
 };
 
-const impactLabels: Record<InsightImpactLevel, string> = {
-  critical: i18n.translate('xpack.streams.insights.impact.critical', {
+const severityLabels: Record<SeverityLevel, string> = {
+  critical: i18n.translate('xpack.streams.discoveries.severity.critical', {
     defaultMessage: 'Critical',
   }),
-  high: i18n.translate('xpack.streams.insights.impact.high', {
+  high: i18n.translate('xpack.streams.discoveries.severity.high', {
     defaultMessage: 'High',
   }),
-  medium: i18n.translate('xpack.streams.insights.impact.medium', {
+  medium: i18n.translate('xpack.streams.discoveries.severity.medium', {
     defaultMessage: 'Medium',
   }),
-  low: i18n.translate('xpack.streams.insights.impact.low', {
+  low: i18n.translate('xpack.streams.discoveries.severity.low', {
     defaultMessage: 'Low',
   }),
 };
 
-interface InsightCardProps {
-  insight: Insight;
+interface DiscoveryCardProps {
+  discovery: Discovery;
   index: number;
 }
 
-export function InsightCard({ insight, index }: InsightCardProps) {
+export function DiscoveryCard({ discovery, index }: DiscoveryCardProps) {
   const [isOpen, toggleIsOpen] = useToggle(index === 0);
-  const accordionId = useGeneratedHtmlId({ prefix: 'insightAccordion' });
+  const accordionId = useGeneratedHtmlId({ prefix: 'discoveryAccordion' });
 
   return (
     <EuiPanel hasBorder paddingSize="m">
       <EuiAccordion
         id={accordionId}
-        data-test-subj="streamsInsightCardAccordion"
+        data-test-subj="streamsDiscoveryCardAccordion"
         forceState={isOpen ? 'open' : 'closed'}
         onToggle={toggleIsOpen}
         buttonContent={
           <EuiFlexGroup alignItems="center" gutterSize="m" responsive={false}>
             <EuiFlexItem grow={false}>
-              <EuiBadge color={impactColors[insight.impact]}>
-                {impactLabels[insight.impact]}
+              <EuiBadge color="hollow">#{index + 1}</EuiBadge>
+            </EuiFlexItem>
+            <EuiFlexItem grow={false}>
+              <EuiBadge color={severityColors[discovery.severity]}>
+                {severityLabels[discovery.severity]}
               </EuiBadge>
             </EuiFlexItem>
             <EuiFlexItem>
               <EuiTitle size="xs">
-                <h3>{insight.title}</h3>
+                <h3>{discovery.title}</h3>
               </EuiTitle>
             </EuiFlexItem>
           </EuiFlexGroup>
@@ -78,22 +81,22 @@ export function InsightCard({ insight, index }: InsightCardProps) {
         <EuiSpacer size="s" />
 
         <EuiText size="s">
-          <p>{insight.description}</p>
+          <p>{discovery.description}</p>
         </EuiText>
 
-        {insight.evidence.length > 0 && (
+        {discovery.evidence.length > 0 && (
           <>
             <EuiSpacer size="m" />
             <EuiText size="xs">
               <strong>
-                {i18n.translate('xpack.streams.insights.evidence', {
+                {i18n.translate('xpack.streams.discoveries.evidence', {
                   defaultMessage: 'Evidence:',
                 })}
               </strong>
             </EuiText>
             <EuiSpacer size="xs" />
             <EuiFlexGroup direction="column" gutterSize="xs">
-              {insight.evidence.map((ev, idx) => (
+              {discovery.evidence.map((ev, idx) => (
                 <EuiFlexItem key={idx}>
                   <EuiPanel color="subdued" paddingSize="s" hasShadow={false}>
                     <EuiFlexGroup gutterSize="s" alignItems="center" responsive={false}>
@@ -102,7 +105,7 @@ export function InsightCard({ insight, index }: InsightCardProps) {
                       </EuiFlexItem>
                       <EuiFlexItem>
                         <EuiText size="xs">
-                          {i18n.translate('xpack.streams.insights.evidenceDescription', {
+                          {i18n.translate('xpack.streams.discoveries.evidenceDescription', {
                             defaultMessage: '{queryTitle} ({eventCount} events)',
                             values: { queryTitle: ev.queryTitle, eventCount: ev.eventCount },
                           })}
@@ -116,17 +119,28 @@ export function InsightCard({ insight, index }: InsightCardProps) {
           </>
         )}
 
-        {insight.discoveryRefs.length > 0 && (
+        {discovery.sampleEvents.length > 0 && (
           <>
             <EuiSpacer size="m" />
             <EuiText size="xs">
               <strong>
-                {i18n.translate('xpack.streams.insights.basedOnDiscoveries', {
-                  defaultMessage: 'Based on discoveries:',
+                {i18n.translate('xpack.streams.discoveries.sampleEvents', {
+                  defaultMessage: 'Sample events:',
                 })}
-              </strong>{' '}
-              {insight.discoveryRefs.map((ref) => `#${ref + 1}`).join(', ')}
+              </strong>
             </EuiText>
+            <EuiSpacer size="xs" />
+            <EuiFlexGroup direction="column" gutterSize="xs">
+              {discovery.sampleEvents.map((event, idx) => (
+                <EuiFlexItem key={idx}>
+                  <EuiPanel color="subdued" paddingSize="s" hasShadow={false}>
+                    <EuiText size="xs" css={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                      {event}
+                    </EuiText>
+                  </EuiPanel>
+                </EuiFlexItem>
+              ))}
+            </EuiFlexGroup>
           </>
         )}
       </EuiAccordion>

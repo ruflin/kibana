@@ -41,6 +41,9 @@ import type {
   StreamsPluginStartDependencies,
   StreamsServer,
 } from './types';
+import { createExtractFeaturesTool } from './lib/agent_builder/tools/extract_features_tool';
+import { createUpsertFeaturesTool } from './lib/agent_builder/tools/upsert_features_tool';
+import { extractStreamFeaturesSkill } from './lib/agent_builder/skills/extract_stream_features_skill';
 import { createStreamsGlobalSearchResultProvider } from './lib/streams/create_streams_global_search_result_provider';
 import { FeatureService } from './lib/streams/feature/feature_service';
 import { ProcessorSuggestionsService } from './lib/streams/ingest_pipelines/processor_suggestions_service';
@@ -252,6 +255,19 @@ export class StreamsPlugin
       plugins.globalSearch.registerResultProvider(
         createStreamsGlobalSearchResultProvider(core, this.logger)
       );
+    }
+
+    if (plugins.agentBuilder) {
+      const server = this.server;
+      plugins.agentBuilder.tools.register(
+        createExtractFeaturesTool({ getScopedClients, server })
+      );
+      plugins.agentBuilder.tools.register(
+        createUpsertFeaturesTool({ getScopedClients, server })
+      );
+      plugins.agentBuilder.skills.register(extractStreamFeaturesSkill).catch((err) => {
+        this.logger.error(`Failed to register streams extract-features skill: ${err.message}`);
+      });
     }
 
     return {};

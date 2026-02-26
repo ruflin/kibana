@@ -7,7 +7,7 @@
 
 import type { TaskDefinitionRegistry } from '@kbn/task-manager-plugin/server';
 import { isInferenceProviderError } from '@kbn/inference-common';
-import type { InsightsResult } from '@kbn/streams-schema';
+import type { DiscoveryPipelineResult } from '@kbn/streams-schema';
 import { getDeleteTaskRunResult } from '@kbn/task-manager-plugin/server/task';
 import type { TaskContext } from '.';
 import { cancellableTask } from '../cancellable_task';
@@ -44,6 +44,7 @@ export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
                 streamsClient,
                 inferenceClient,
                 queryClient,
+                featureClient,
               } = await taskContext.getScopedClients({
                 request: runContext.fakeRequest,
               });
@@ -54,6 +55,7 @@ export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
                 const result = await generateInsights({
                   streamsClient,
                   queryClient,
+                  featureClient,
                   esClient: scopedClusterClient.asCurrentUser,
                   inferenceClient: boundInferenceClient,
                   signal: runContext.abortController.signal,
@@ -67,7 +69,7 @@ export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
                   cached_tokens_used: result.tokensUsed?.cached ?? 0,
                 });
 
-                await taskClient.complete<InsightsDiscoveryTaskParams, InsightsResult>(
+                await taskClient.complete<InsightsDiscoveryTaskParams, DiscoveryPipelineResult>(
                   _task,
                   { connectorId, streamNames },
                   result

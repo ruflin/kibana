@@ -8,19 +8,52 @@
 import type { BoundInferenceClient, ChatCompletionTokenCount } from '@kbn/inference-common';
 import { sumTokens } from '@kbn/streams-ai';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
-import type { Streams } from '@kbn/streams-schema';
-import type { InsightsResult } from '@kbn/streams-schema';
+import type { DiscoveryPipelineResult, Streams } from '@kbn/streams-schema';
 import type { LogMeta } from '@kbn/logging';
+import { executeAsReasoningAgent } from '@kbn/inference-prompt-utils';
 import type { QueryClient } from '../../streams/assets/query/query_client';
 import type { StreamsClient } from '../../streams/client';
+import type { FeatureClient } from '../../streams/feature/feature_client';
 import { getErrorMessage } from '../../streams/errors/parse_error';
-import { SummarizeQueriesPrompt } from './prompts/summarize_queries/prompt';
-import { SummarizeStreamsPrompt } from './prompts/summarize_streams/prompt';
-import { extractInsightsFromResponse, collectQueryData, type QueryData } from './utils';
+import { ExtractDiscoveriesPrompt } from './prompts/extract_discoveries/prompt';
+import { GenerateInsightsPrompt } from './prompts/generate_insights/prompt';
+import { GenerateRecommendationsPrompt } from './prompts/generate_recommendations/prompt';
+import {
+  extractDiscoveriesFromResponse,
+  extractInsightsFromResponse,
+  extractRecommendationsFromResponse,
+} from './utils';
+import { SUBMIT_DISCOVERIES_TOOL_NAME } from './schema';
+import { SUBMIT_INSIGHTS_TOOL_NAME } from './schema';
+import {
+  createGetStreamFeaturesCallback,
+  createSearchEventsCallback,
+  createGetQueryDefinitionsCallback,
+  createGetQueryResultsCallback,
+} from './tools/tool_callbacks';
+import {
+  GET_STREAM_FEATURES_TOOL_NAME,
+  SEARCH_EVENTS_TOOL_NAME,
+  GET_QUERY_DEFINITIONS_TOOL_NAME,
+  GET_QUERY_RESULTS_TOOL_NAME,
+} from './tools/tool_schemas';
+
+const EMPTY_TOKENS: ChatCompletionTokenCount = { prompt: 0, completion: 0, total: 0 };
+
+const EMPTY_RESULT: DiscoveryPipelineResult = {
+  discoveries: [],
+  insights: [],
+  recommendations: [],
+  tokensUsed: EMPTY_TOKENS,
+};
+
+const DISCOVERY_MAX_STEPS = 8;
+const INSIGHTS_MAX_STEPS = 6;
 
 export async function generateInsights({
   streamsClient,
   queryClient,
+  featureClient,
   esClient,
   inferenceClient,
   signal,
@@ -29,153 +62,217 @@ export async function generateInsights({
 }: {
   streamsClient: StreamsClient;
   queryClient: QueryClient;
+  featureClient: FeatureClient;
   esClient: ElasticsearchClient;
   inferenceClient: BoundInferenceClient;
   signal: AbortSignal;
   logger: Logger;
-  /** When provided, only generate insights for these streams. Otherwise all streams are used. */
   streamNames?: string[];
-}): Promise<InsightsResult> {
+}): Promise<DiscoveryPipelineResult> {
   const allStreams = await streamsClient.listStreams();
   let streams = allStreams;
   if (streamNames !== undefined && streamNames.length > 0) {
     const streamNamesSet = new Set(streamNames);
     streams = allStreams.filter((s) => streamNamesSet.has(s.name));
   }
-  const streamInsightsResults = await Promise.all(
-    streams.map(async (stream) => {
-      const streamInsightResult = await generateStreamInsights({
-        stream,
-        queryClient,
-        esClient,
-        inferenceClient,
-        signal,
-        logger,
-      });
-      return {
-        streamName: stream.name,
-        ...streamInsightResult,
-      };
-    })
-  );
 
-  // Filter out streams with no insights
-  const streamInsightsWithData = streamInsightsResults.filter(
-    (result) => result.insights.length > 0
-  );
-
-  const tokensUsed = streamInsightsResults.reduce<ChatCompletionTokenCount>(
-    (acc, result) => sumTokens(acc, result.tokensUsed),
-    { prompt: 0, completion: 0, total: 0 }
-  );
-
-  // If no stream insights, return empty
-  if (streamInsightsWithData.length === 0) {
-    return {
-      insights: [],
-      tokensUsed,
-    };
+  if (streams.length === 0) {
+    return EMPTY_RESULT;
   }
 
+  // --- Stage 1: Extract discoveries using reasoning agent ---
+  const { discoveries: allDiscoveries, tokensUsed: discoveryTokens } =
+    await extractDiscoveriesWithAgent({
+      streams,
+      queryClient,
+      featureClient,
+      esClient,
+      inferenceClient,
+      signal,
+      logger,
+    });
+
+  let tokensUsed = discoveryTokens;
+
+  if (allDiscoveries.length === 0) {
+    return { ...EMPTY_RESULT, tokensUsed };
+  }
+
+  // --- Stage 2: Generate insights using reasoning agent ---
   try {
-    const response = await inferenceClient.prompt({
-      prompt: SummarizeStreamsPrompt,
+    const insightsResult = await generateInsightsWithAgent({
+      discoveries: allDiscoveries,
+      queryClient,
+      featureClient,
+      esClient,
+      inferenceClient,
+      signal,
+      logger,
+    });
+
+    const { insights } = insightsResult;
+    tokensUsed = sumTokens(tokensUsed, insightsResult.tokensUsed);
+
+    if (insights.length === 0) {
+      return { discoveries: allDiscoveries, insights: [], recommendations: [], tokensUsed };
+    }
+
+    // --- Stage 3: Generate recommendations (single-shot, no tools needed) ---
+    const recommendationsResponse = await inferenceClient.prompt({
+      prompt: GenerateRecommendationsPrompt,
       input: {
-        streamInsights: JSON.stringify(streamInsightsWithData),
+        insights: JSON.stringify(insights),
       },
       abortSignal: signal,
     });
 
-    const insights = extractInsightsFromResponse(response, logger);
+    const recommendations = extractRecommendationsFromResponse(recommendationsResponse, logger);
+    tokensUsed = sumTokens(tokensUsed, recommendationsResponse.tokens);
 
     return {
+      discoveries: allDiscoveries,
       insights,
-      tokensUsed: sumTokens(tokensUsed, response.tokens),
+      recommendations,
+      tokensUsed,
     };
   } catch (error) {
     if (
       getErrorMessage(error).includes(`The request exceeded the model's maximum context length`)
     ) {
       logger.debug(
-        `Context too big when generating system insights, number of streams: ${streamInsightsWithData.length}`,
+        `Context too big when generating insights/recommendations, number of discoveries: ${allDiscoveries.length}`,
         { error } as LogMeta
       );
-      return {
-        insights: [],
-        tokensUsed,
-      };
+      return { discoveries: allDiscoveries, insights: [], recommendations: [], tokensUsed };
     }
 
     throw error;
   }
 }
 
-async function generateStreamInsights({
-  stream,
+async function extractDiscoveriesWithAgent({
+  streams,
   queryClient,
+  featureClient,
   esClient,
   inferenceClient,
   signal,
   logger,
 }: {
-  stream: Streams.all.Definition;
+  streams: Streams.all.Definition[];
   queryClient: QueryClient;
+  featureClient: FeatureClient;
   esClient: ElasticsearchClient;
   inferenceClient: BoundInferenceClient;
   signal: AbortSignal;
   logger: Logger;
-}): Promise<InsightsResult> {
-  const queries = await queryClient.getAssets(stream.name);
-
-  const queryDataResults = await Promise.all(
-    queries.map((query) =>
-      collectQueryData({
-        query,
-        esClient,
-      })
-    )
-  );
-
-  // Filter out queries with no events
-  const queryDataList = queryDataResults.filter((data): data is QueryData => data !== undefined);
-
-  if (queryDataList.length === 0) {
-    return {
-      insights: [],
-      tokensUsed: { prompt: 0, completion: 0, total: 0 },
-    };
-  }
+}) {
+  const streamNamesList = streams.map((s) => s.name);
 
   try {
-    const response = await inferenceClient.prompt({
-      prompt: SummarizeQueriesPrompt,
+    logger.debug(
+      `Extracting discoveries via reasoning agent for ${streamNamesList.length} streams`
+    );
+
+    const response = await executeAsReasoningAgent({
+      prompt: ExtractDiscoveriesPrompt,
       input: {
-        streamName: stream.name,
-        queries: JSON.stringify(queryDataList),
+        streamNames: streamNamesList.join('\n'),
       },
+      inferenceClient,
+      maxSteps: DISCOVERY_MAX_STEPS,
+      toolCallbacks: {
+        [GET_STREAM_FEATURES_TOOL_NAME]: createGetStreamFeaturesCallback({
+          featureClient,
+          logger,
+        }),
+        [GET_QUERY_DEFINITIONS_TOOL_NAME]: createGetQueryDefinitionsCallback({
+          queryClient,
+          logger,
+        }),
+        [GET_QUERY_RESULTS_TOOL_NAME]: createGetQueryResultsCallback({
+          esClient,
+          queryClient,
+          logger,
+        }),
+        [SEARCH_EVENTS_TOOL_NAME]: createSearchEventsCallback({ esClient, logger }),
+        [SUBMIT_DISCOVERIES_TOOL_NAME]: async (toolCall) => {
+          return { response: { status: 'accepted' } };
+        },
+      },
+      finalToolChoice: { function: SUBMIT_DISCOVERIES_TOOL_NAME },
       abortSignal: signal,
     });
 
-    const insights = extractInsightsFromResponse(response, logger);
+    const discoveries = extractDiscoveriesFromResponse(response, logger);
 
     return {
-      insights,
-      tokensUsed: response.tokens ?? { prompt: 0, completion: 0, total: 0 },
+      discoveries,
+      tokensUsed: response.tokens ?? EMPTY_TOKENS,
     };
   } catch (error) {
     if (
       getErrorMessage(error).includes(`The request exceeded the model's maximum context length`)
     ) {
       logger.debug(
-        `Context too big when generating insights for stream ${stream.name}, number of queries: ${queryDataList.length}`,
+        `Context too big when extracting discoveries, streams: ${streamNamesList.join(', ')}`,
         { error } as LogMeta
       );
-      return {
-        insights: [],
-        tokensUsed: { prompt: 0, completion: 0, total: 0 },
-      };
+      return { discoveries: [], tokensUsed: EMPTY_TOKENS };
     }
 
     throw error;
   }
+}
+
+async function generateInsightsWithAgent({
+  discoveries,
+  queryClient,
+  featureClient,
+  esClient,
+  inferenceClient,
+  signal,
+  logger,
+}: {
+  discoveries: DiscoveryPipelineResult['discoveries'];
+  queryClient: QueryClient;
+  featureClient: FeatureClient;
+  esClient: ElasticsearchClient;
+  inferenceClient: BoundInferenceClient;
+  signal: AbortSignal;
+  logger: Logger;
+}) {
+  logger.debug(`Generating insights via reasoning agent from ${discoveries.length} discoveries`);
+
+  const response = await executeAsReasoningAgent({
+    prompt: GenerateInsightsPrompt,
+    input: {
+      discoveries: JSON.stringify(discoveries),
+    },
+    inferenceClient,
+    maxSteps: INSIGHTS_MAX_STEPS,
+    toolCallbacks: {
+      [GET_STREAM_FEATURES_TOOL_NAME]: createGetStreamFeaturesCallback({
+        featureClient,
+        logger,
+      }),
+      [GET_QUERY_DEFINITIONS_TOOL_NAME]: createGetQueryDefinitionsCallback({
+        queryClient,
+        logger,
+      }),
+      [SEARCH_EVENTS_TOOL_NAME]: createSearchEventsCallback({ esClient, logger }),
+      [SUBMIT_INSIGHTS_TOOL_NAME]: async (toolCall) => {
+        return { response: { status: 'accepted' } };
+      },
+    },
+    finalToolChoice: { function: SUBMIT_INSIGHTS_TOOL_NAME },
+    abortSignal: signal,
+  });
+
+  const insights = extractInsightsFromResponse(response, logger);
+
+  return {
+    insights,
+    tokensUsed: response.tokens ?? EMPTY_TOKENS,
+  };
 }

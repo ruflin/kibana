@@ -78,5 +78,10 @@
     "@kbn/core-http-common",
     "@kbn/scout",
     "@kbn/esql-language",
+    "@kbn/inference-prompt-utils",
+    "@kbn/inference-tracing",
+    "@kbn/agent-builder-plugin",
+    "@kbn/agent-builder-server",
+    "@kbn/agent-builder-common",
   ]
 }

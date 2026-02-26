@@ -105,7 +105,7 @@ export function SignificantEventsDiscoveryPage() {
     {
       id: 'insights',
       label: i18n.translate('xpack.streams.significantEventsDiscovery.insightsTab', {
-        defaultMessage: 'Insights',
+        defaultMessage: 'Analysis',
       }),
       href: router.link('/_discovery/{tab}', { path: { tab: 'insights' } }),
       isSelected: tab === 'insights',

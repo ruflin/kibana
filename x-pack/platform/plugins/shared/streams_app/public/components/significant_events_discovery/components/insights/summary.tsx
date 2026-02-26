@@ -11,6 +11,7 @@ import {
   EuiFlexItem,
   EuiIcon,
   EuiPanel,
+  EuiSpacer,
   EuiText,
   EuiTitle,
 } from '@elastic/eui';
@@ -18,7 +19,7 @@ import { i18n } from '@kbn/i18n';
 import { TaskStatus } from '@kbn/streams-schema';
 import React, { useEffect, useRef, useState } from 'react';
 import useAsyncFn from 'react-use/lib/useAsyncFn';
-import type { Insight } from '@kbn/streams-schema';
+import type { Discovery, Insight, Recommendation } from '@kbn/streams-schema';
 import { useAIFeatures } from '../../../../hooks/use_ai_features';
 import { useInsightsDiscoveryApi } from '../../../../hooks/use_insights_discovery_api';
 import { useKibana } from '../../../../hooks/use_kibana';
@@ -26,7 +27,15 @@ import { useTaskPolling } from '../../../../hooks/use_task_polling';
 import { getFormattedError } from '../../../../util/errors';
 import { ConnectorListButton } from '../../../connector_list_button/connector_list_button';
 import { FeedbackButtons } from './feedback_buttons';
+import { DiscoveryCard } from './discovery_card';
 import { InsightCard } from './insight_card';
+import { RecommendationCard } from './recommendation_card';
+
+interface PipelineResult {
+  discoveries: Discovery[];
+  insights: Insight[];
+  recommendations: Recommendation[];
+}
 
 export function Summary({ count }: { count: number }) {
   const aiFeatures = useAIFeatures();
@@ -43,10 +52,6 @@ export function Summary({ count }: { count: number }) {
 
   const [{ value: task }, getTaskStatus] = useAsyncFn(getInsightsDiscoveryTaskStatus);
   const [{ loading: isSchedulingTask }, scheduleTask] = useAsyncFn(async () => {
-    /**
-     * Combining scheduling and immediate status update to prevent
-     * React updating the UI in between states causing flickering
-     */
     await scheduleInsightsDiscoveryTask();
     await getTaskStatus();
   }, [scheduleInsightsDiscoveryTask, getTaskStatus]);
@@ -64,25 +69,37 @@ export function Summary({ count }: { count: number }) {
     if (task?.status === TaskStatus.Failed) {
       notifications.toasts.addError(getFormattedError(new Error(task.error)), {
         title: i18n.translate('xpack.streams.insights.errorTitle', {
-          defaultMessage: 'Error generating insights',
+          defaultMessage: 'Error generating analysis',
         }),
       });
       return;
     }
 
     if (task?.status === TaskStatus.Completed) {
-      if (previousStatus === TaskStatus.InProgress && task.insights.length === 0) {
+      const discoveryCount = task.discoveries?.length ?? 0;
+      const insightCount = task.insights?.length ?? 0;
+      const recommendationCount = task.recommendations?.length ?? 0;
+
+      if (
+        previousStatus === TaskStatus.InProgress &&
+        discoveryCount === 0 &&
+        insightCount === 0
+      ) {
         notifications.toasts.addInfo({
-          title: i18n.translate('xpack.streams.insights.noInsightsTitle', {
-            defaultMessage: 'No insights found',
+          title: i18n.translate('xpack.streams.insights.noResultsTitle', {
+            defaultMessage: 'No discoveries found',
           }),
-          text: i18n.translate('xpack.streams.insights.noInsightsDescription', {
+          text: i18n.translate('xpack.streams.insights.noResultsDescription', {
             defaultMessage:
-              'The AI could not generate any insights from the current significant events. Try again later when more events are available.',
+              'The AI could not extract any discoveries from the current significant events. Try again later when more events are available.',
           }),
         });
       }
-      setInsights(task.insights);
+      setPipelineResult({
+        discoveries: task.discoveries ?? [],
+        insights: task.insights ?? [],
+        recommendations: task.recommendations ?? [],
+      });
     }
   }, [task, notifications.toasts]);
 
@@ -93,23 +110,28 @@ export function Summary({ count }: { count: number }) {
     onCancel: cancelInsightsDiscoveryTask,
   });
 
-  const [insights, setInsights] = useState<Insight[] | null>(null);
+  const [pipelineResult, setPipelineResult] = useState<PipelineResult | null>(null);
 
-  const onGenerateInsightsClick = async () => {
+  const onGenerateClick = async () => {
     await scheduleTask();
   };
 
-  const onRegenerateInsightsClick = async () => {
+  const onRegenerateClick = async () => {
     await acknowledgeInsightsDiscoveryTask();
     await scheduleTask();
-
-    setInsights(null);
+    setPipelineResult(null);
   };
 
   const isGenerateButtonPending =
     task?.status === TaskStatus.InProgress || isCancellingTask || isSchedulingTask;
 
-  if (insights && insights.length > 0) {
+  const hasResults =
+    pipelineResult &&
+    (pipelineResult.discoveries.length > 0 ||
+      pipelineResult.insights.length > 0 ||
+      pipelineResult.recommendations.length > 0);
+
+  if (hasResults) {
     return (
       <EuiFlexGroup direction="column">
         <EuiFlexItem>
@@ -123,26 +145,103 @@ export function Summary({ count }: { count: number }) {
                   <EuiButton
                     fill={true}
                     iconType="refresh"
-                    onClick={onRegenerateInsightsClick}
+                    onClick={onRegenerateClick}
                     disabled={isSchedulingTask}
                     isLoading={isSchedulingTask}
                     data-test-subj="significant_events_regenerate_insights_button"
                   >
                     {i18n.translate('xpack.streams.insights.regenerateButtonLabel', {
-                      defaultMessage: 'Re-generate insights',
+                      defaultMessage: 'Re-generate analysis',
                     })}
                   </EuiButton>
                 </EuiFlexItem>
               </EuiFlexGroup>
             </EuiPanel>
             <EuiPanel hasShadow={false}>
-              <EuiFlexGroup direction="column" gutterSize="m">
-                {insights.map((insight, idx) => (
-                  <EuiFlexItem key={idx}>
-                    <InsightCard insight={insight} index={idx} />
-                  </EuiFlexItem>
-                ))}
-              </EuiFlexGroup>
+              {pipelineResult.discoveries.length > 0 && (
+                <>
+                  <EuiTitle size="s">
+                    <h2>
+                      {i18n.translate('xpack.streams.insights.discoveriesSectionTitle', {
+                        defaultMessage: 'Discoveries ({count})',
+                        values: { count: pipelineResult.discoveries.length },
+                      })}
+                    </h2>
+                  </EuiTitle>
+                  <EuiSpacer size="s" />
+                  <EuiText size="xs" color="subdued">
+                    {i18n.translate('xpack.streams.insights.discoveriesSectionDescription', {
+                      defaultMessage: 'Factual observations extracted from significant events.',
+                    })}
+                  </EuiText>
+                  <EuiSpacer size="m" />
+                  <EuiFlexGroup direction="column" gutterSize="m">
+                    {pipelineResult.discoveries.map((discovery, idx) => (
+                      <EuiFlexItem key={idx}>
+                        <DiscoveryCard discovery={discovery} index={idx} />
+                      </EuiFlexItem>
+                    ))}
+                  </EuiFlexGroup>
+                  <EuiSpacer size="l" />
+                </>
+              )}
+
+              {pipelineResult.insights.length > 0 && (
+                <>
+                  <EuiTitle size="s">
+                    <h2>
+                      {i18n.translate('xpack.streams.insights.insightsSectionTitle', {
+                        defaultMessage: 'Insights ({count})',
+                        values: { count: pipelineResult.insights.length },
+                      })}
+                    </h2>
+                  </EuiTitle>
+                  <EuiSpacer size="s" />
+                  <EuiText size="xs" color="subdued">
+                    {i18n.translate('xpack.streams.insights.insightsSectionDescription', {
+                      defaultMessage:
+                        'Analytical conclusions drawn from the discoveries, including correlations and root causes.',
+                    })}
+                  </EuiText>
+                  <EuiSpacer size="m" />
+                  <EuiFlexGroup direction="column" gutterSize="m">
+                    {pipelineResult.insights.map((insight, idx) => (
+                      <EuiFlexItem key={idx}>
+                        <InsightCard insight={insight} index={idx} />
+                      </EuiFlexItem>
+                    ))}
+                  </EuiFlexGroup>
+                  <EuiSpacer size="l" />
+                </>
+              )}
+
+              {pipelineResult.recommendations.length > 0 && (
+                <>
+                  <EuiTitle size="s">
+                    <h2>
+                      {i18n.translate('xpack.streams.insights.recommendationsSectionTitle', {
+                        defaultMessage: 'Recommendations ({count})',
+                        values: { count: pipelineResult.recommendations.length },
+                      })}
+                    </h2>
+                  </EuiTitle>
+                  <EuiSpacer size="s" />
+                  <EuiText size="xs" color="subdued">
+                    {i18n.translate('xpack.streams.insights.recommendationsSectionDescription', {
+                      defaultMessage:
+                        'Actionable steps to investigate, mitigate, or resolve the identified issues.',
+                    })}
+                  </EuiText>
+                  <EuiSpacer size="m" />
+                  <EuiFlexGroup direction="column" gutterSize="m">
+                    {pipelineResult.recommendations.map((recommendation, idx) => (
+                      <EuiFlexItem key={idx}>
+                        <RecommendationCard recommendation={recommendation} index={idx} />
+                      </EuiFlexItem>
+                    ))}
+                  </EuiFlexGroup>
+                </>
+              )}
             </EuiPanel>
           </EuiPanel>
         </EuiFlexItem>
@@ -185,7 +284,7 @@ export function Summary({ count }: { count: number }) {
                   'xpack.streams.sigEventsDiscovery.insightsTab.significantEventsFoundDescription',
                   {
                     defaultMessage:
-                      'Start extracting insights from your logs, and understand what they mean with the power of AI and Elastic Observability.',
+                      'Start analyzing your significant events to extract discoveries, generate insights, and get actionable recommendations with the power of AI and Elastic Observability.',
                   }
                 )}
               </EuiText>
@@ -200,12 +299,12 @@ export function Summary({ count }: { count: number }) {
                     children:
                       task?.status === TaskStatus.InProgress
                         ? i18n.translate('xpack.streams.insights.generatingButtonLabel', {
-                            defaultMessage: 'Generating insights',
+                            defaultMessage: 'Analyzing events',
                           })
                         : i18n.translate('xpack.streams.insights.generateButtonLabel', {
-                            defaultMessage: 'Generate insights',
+                            defaultMessage: 'Analyze events',
                           }),
-                    onClick: onGenerateInsightsClick,
+                    onClick: onGenerateClick,
                     isDisabled: isGenerateButtonPending,
                     isLoading: isGenerateButtonPending,
                     'data-test-subj': 'significant_events_generate_insights_button',
