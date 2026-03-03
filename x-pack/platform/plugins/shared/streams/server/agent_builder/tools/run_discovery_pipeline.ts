@@ -98,11 +98,13 @@ When to use:
           streamsClient,
           queryClient,
           esClient: esClient.asCurrentUser,
+          scopedClusterClient: esClient,
           inferenceClient: inferenceClient.bindTo({ connectorId }),
           signal: new AbortController().signal,
           logger: deps.logger,
           streamNames: toolParams.streamNames,
           discoveryClient,
+          featureClient,
           connectorId,
         });
 

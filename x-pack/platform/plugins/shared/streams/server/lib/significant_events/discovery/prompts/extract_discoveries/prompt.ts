@@ -10,6 +10,9 @@ import { z } from '@kbn/zod';
 import systemPromptTemplate from './system_prompt.text';
 import userPromptTemplate from './user_prompt.text';
 import { discoveriesSchema, SUBMIT_DISCOVERIES_TOOL_NAME } from '../../schema';
+import { createPipelineToolDefinitions } from '../../pipeline_tools';
+
+const pipelineTools = createPipelineToolDefinitions();
 
 export const ExtractDiscoveriesPrompt = createPrompt({
   name: 'extract_discoveries',
@@ -34,7 +37,14 @@ export const ExtractDiscoveriesPrompt = createPrompt({
         description: 'Submit the identified discoveries for this stream',
         schema: discoveriesSchema,
       },
+      get_sig_events_with_change_points: pipelineTools.get_sig_events_with_change_points,
+      get_log_patterns: pipelineTools.get_log_patterns,
+      run_log_rate_analysis: pipelineTools.run_log_rate_analysis,
+      search_events: pipelineTools.search_events,
+      get_query_results: pipelineTools.get_query_results,
+      get_stream_features: pipelineTools.get_stream_features,
+      search_discoveries: pipelineTools.search_discoveries,
+      get_query_definitions: pipelineTools.get_query_definitions,
     },
-    toolChoice: { function: SUBMIT_DISCOVERIES_TOOL_NAME },
   })
   .get();

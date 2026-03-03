@@ -10,6 +10,9 @@ import { z } from '@kbn/zod';
 import systemPromptTemplate from './system_prompt.text';
 import userPromptTemplate from './user_prompt.text';
 import { discoveriesSchema, SUBMIT_DISCOVERIES_TOOL_NAME } from '../../schema';
+import { createPipelineToolDefinitions } from '../../pipeline_tools';
+
+const pipelineTools = createPipelineToolDefinitions();
 
 export const EnrichDiscoveriesPrompt = createPrompt({
   name: 'enrich_discoveries',
@@ -33,7 +36,9 @@ export const EnrichDiscoveriesPrompt = createPrompt({
         description: 'Submit system-level discoveries correlating across streams',
         schema: discoveriesSchema,
       },
+      search_discoveries: pipelineTools.search_discoveries,
+      get_stream_features: pipelineTools.get_stream_features,
+      search_events: pipelineTools.search_events,
     },
-    toolChoice: { function: SUBMIT_DISCOVERIES_TOOL_NAME },
   })
   .get();

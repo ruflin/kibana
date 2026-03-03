@@ -44,6 +44,7 @@ export function createStreamsDiscoveryPipelineTask(taskContext: TaskContext) {
                 inferenceClient,
                 queryClient,
                 discoveryClient,
+                featureClient,
               } = await taskContext.getScopedClients({
                 request: runContext.fakeRequest,
               });
@@ -55,11 +56,13 @@ export function createStreamsDiscoveryPipelineTask(taskContext: TaskContext) {
                   streamsClient,
                   queryClient,
                   esClient: scopedClusterClient.asCurrentUser,
+                  scopedClusterClient,
                   inferenceClient: boundInferenceClient,
                   signal: runContext.abortController.signal,
                   logger: taskContext.logger.get('discovery_pipeline'),
                   streamNames,
                   discoveryClient,
+                  featureClient,
                   connectorId,
                 });
 

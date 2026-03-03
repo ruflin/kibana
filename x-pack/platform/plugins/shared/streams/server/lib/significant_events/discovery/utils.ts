@@ -9,6 +9,7 @@ import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import { omit } from 'lodash';
 import type { Condition } from '@kbn/streamlang';
 import type { Discovery, Suggestion } from '@kbn/streams-schema';
+import { parse as parseEsql } from '@kbn/esql-language';
 import type { Query } from '../../../../common/queries';
 import { parseError } from '../../streams/errors/parse_error';
 import { SecurityError } from '../../streams/errors/security_error';
@@ -58,6 +59,25 @@ export function extractDiscoveriesFromResponse(
   return discoveries;
 }
 
+export function validateEsqlQuery(query: string): { valid: boolean; errors: string[] } {
+  if (!query || !query.trim()) {
+    return { valid: false, errors: ['Empty query'] };
+  }
+
+  try {
+    const result = parseEsql(query);
+    if (result.errors && result.errors.length > 0) {
+      return {
+        valid: false,
+        errors: result.errors.map((e) => ('message' in e ? (e as { message: string }).message : String(e))),
+      };
+    }
+    return { valid: true, errors: [] };
+  } catch (error) {
+    return { valid: false, errors: [error instanceof Error ? error.message : String(error)] };
+  }
+}
+
 export function extractSuggestionsFromResponse(
   response: { toolCalls?: Array<{ function: { name: string; arguments: unknown } }> },
   logger: Logger
@@ -84,7 +104,18 @@ export function extractSuggestionsFromResponse(
     logger.warn(`Suggestions validation failed: ${validationErrors.message}`);
   }
 
-  return suggestions;
+  const validSuggestions = suggestions.filter((s) => {
+    if (s.type === 'investigation') {
+      return true;
+    }
+    const { valid, errors } = validateEsqlQuery(s.esql_query);
+    if (!valid) {
+      logger.warn(`Rejecting suggestion "${s.title}" — invalid ES|QL: ${errors.join(', ')}`);
+    }
+    return valid;
+  });
+
+  return validSuggestions;
 }
 
 export async function collectQueryData({

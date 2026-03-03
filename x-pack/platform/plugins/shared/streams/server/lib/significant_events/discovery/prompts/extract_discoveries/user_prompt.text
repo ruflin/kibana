@@ -1,7 +1,8 @@
 Analyze the significant events for this data stream and generate structured discoveries.
+Start by calling get_sig_events_with_change_points to identify queries with statistically significant changes, then investigate the most interesting findings using the other available tools.
 
 `data stream`
 {{{streamName}}}
 
-`queries with event data`
+`initial query data (for context — use tools for deeper investigation)`
 {{{queries}}}
