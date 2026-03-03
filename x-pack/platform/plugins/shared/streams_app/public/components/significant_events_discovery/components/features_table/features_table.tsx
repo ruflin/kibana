@@ -7,6 +7,7 @@
 
 import {
   EuiBadge,
+  EuiButton,
   EuiButtonIcon,
   EuiFlexGroup,
   EuiFlexItem,
@@ -18,16 +19,34 @@ import {
 } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
 import type { Feature } from '@kbn/streams-schema';
+import { OnboardingStep } from '@kbn/streams-schema';
 import { upperFirst } from 'lodash';
+import pMap from 'p-map';
 import React, { useState, useCallback } from 'react';
 import { useFetchFeatures } from '../../../../hooks/use_fetch_features';
+import { useAIFeatures } from '../../../../hooks/use_ai_features';
+import { useKibana } from '../../../../hooks/use_kibana';
+import { getLast24HoursTimeRange } from '../../../../util/time_range';
+import { getFormattedError } from '../../../../util/errors';
 import { LoadingPanel } from '../../../loading_panel';
 import { FeatureDetailsFlyout } from '../../../stream_detail_systems/stream_features/feature_details_flyout';
 import { getConfidenceColor } from '../../../stream_detail_systems/stream_features/use_stream_features_table';
 
 export function FeaturesTable() {
-  const { data, isLoading: loading } = useFetchFeatures();
+  const { data, isLoading: loading, refetch } = useFetchFeatures();
   const [selectedFeature, setSelectedFeature] = useState<Feature | null>(null);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const aiFeatures = useAIFeatures();
+  const {
+    core: {
+      notifications: { toasts },
+    },
+    dependencies: {
+      start: {
+        streams: { streamsRepositoryClient },
+      },
+    },
+  } = useKibana();
 
   const handleSelectFeature = useCallback((feature: Feature | null) => {
     setSelectedFeature(feature);
@@ -36,6 +55,71 @@ export function FeaturesTable() {
   const handleCloseFlyout = useCallback(() => {
     setSelectedFeature(null);
   }, []);
+
+  const handleRegenerateFeatures = useCallback(async () => {
+    const features = data?.features ?? [];
+    const uniqueStreamNames = [...new Set(features.map((f) => f.stream_name).filter(Boolean))];
+
+    if (uniqueStreamNames.length === 0) {
+      toasts.addInfo({
+        title: i18n.translate(
+          'xpack.streams.significantEventsDiscovery.featuresTable.noStreamsToRegenerate',
+          { defaultMessage: 'No streams with features to regenerate' }
+        ),
+      });
+      return;
+    }
+
+    const connectorId = aiFeatures?.genAiConnectors.selectedConnector;
+    if (!connectorId) return;
+
+    setIsRegenerating(true);
+    const { from, to } = getLast24HoursTimeRange();
+
+    try {
+      await pMap(
+        uniqueStreamNames,
+        async (streamName) => {
+          await streamsRepositoryClient.fetch(
+            'POST /internal/streams/{streamName}/onboarding/_task',
+            {
+              params: {
+                path: { streamName },
+                query: { saveQueries: true },
+                body: {
+                  action: 'schedule' as const,
+                  from,
+                  to,
+                  connectorId,
+                  steps: [OnboardingStep.FeaturesIdentification],
+                },
+              },
+            }
+          );
+        },
+        { concurrency: 5 }
+      );
+      toasts.addSuccess({
+        title: i18n.translate(
+          'xpack.streams.significantEventsDiscovery.featuresTable.regenerateSuccess',
+          {
+            defaultMessage: 'Feature identification started for {count} streams',
+            values: { count: uniqueStreamNames.length },
+          }
+        ),
+      });
+      setTimeout(() => refetch(), 10000);
+    } catch (error) {
+      toasts.addError(getFormattedError(error as Error), {
+        title: i18n.translate(
+          'xpack.streams.significantEventsDiscovery.featuresTable.regenerateError',
+          { defaultMessage: 'Failed to regenerate features' }
+        ),
+      });
+    } finally {
+      setIsRegenerating(false);
+    }
+  }, [data?.features, aiFeatures, toasts, refetch, streamsRepositoryClient]);
 
   if (loading && !data) {
     return <LoadingPanel size="l" />;
@@ -122,12 +206,37 @@ export function FeaturesTable() {
   return (
     <EuiFlexGroup direction="column" gutterSize="m">
       <EuiFlexItem grow={false}>
-        <EuiText size="s">
-          {i18n.translate('xpack.streams.significantEventsDiscovery.featuresTable.featuresCount', {
-            defaultMessage: '{count} Features',
-            values: { count: data?.features.length ?? 0 },
-          })}
-        </EuiText>
+        <EuiFlexGroup alignItems="center" gutterSize="s">
+          <EuiFlexItem grow={false}>
+            <EuiText size="s">
+              {i18n.translate(
+                'xpack.streams.significantEventsDiscovery.featuresTable.featuresCount',
+                {
+                  defaultMessage: '{count} Features',
+                  values: { count: data?.features.length ?? 0 },
+                }
+              )}
+            </EuiText>
+          </EuiFlexItem>
+          <EuiFlexItem grow={false}>
+            <EuiButton
+              iconType="refresh"
+              size="s"
+              isLoading={isRegenerating}
+              disabled={
+                isRegenerating ||
+                !aiFeatures?.genAiConnectors?.selectedConnector ||
+                (data?.features.length ?? 0) === 0
+              }
+              onClick={handleRegenerateFeatures}
+            >
+              {i18n.translate(
+                'xpack.streams.significantEventsDiscovery.featuresTable.regenerateButton',
+                { defaultMessage: 'Regenerate features' }
+              )}
+            </EuiButton>
+          </EuiFlexItem>
+        </EuiFlexGroup>
       </EuiFlexItem>
       <EuiFlexItem grow={false}>
         <EuiInMemoryTable

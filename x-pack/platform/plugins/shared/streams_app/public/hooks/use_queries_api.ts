@@ -35,7 +35,6 @@ export function useQueriesApi(): QueriesApi {
         const params = { body: { queryIds } };
         return streamsRepositoryClient.fetch('POST /internal/streams/queries/_promote', {
           params,
-          signal,
         });
       },
       upsertQuery: async ({ query, streamName }: { query: StreamQuery; streamName: string }) => {
@@ -44,7 +43,6 @@ export function useQueriesApi(): QueriesApi {
         await streamsRepositoryClient.fetch(
           'PUT /api/streams/{name}/queries/{queryId} 2023-10-31',
           {
-            signal,
             params: {
               path: {
                 name: streamName,
@@ -59,7 +57,6 @@ export function useQueriesApi(): QueriesApi {
         await streamsRepositoryClient.fetch(
           'DELETE /api/streams/{name}/queries/{queryId} 2023-10-31',
           {
-            signal,
             params: {
               path: {
                 name: streamName,
@@ -72,7 +69,6 @@ export function useQueriesApi(): QueriesApi {
       promoteAll: async () => {
         return streamsRepositoryClient.fetch('POST /internal/streams/queries/_promote', {
           params: { body: {} },
-          signal,
         });
       },
       getUnbackedQueriesCount: async (requestSignal?: AbortSignal | null) => {

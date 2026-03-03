@@ -25,6 +25,8 @@ import {
 } from '@elastic/eui';
 import { css } from '@emotion/react';
 import { useMutation, useQueryClient } from '@kbn/react-query';
+import { OnboardingStep } from '@kbn/streams-schema';
+import pMap from 'p-map';
 import React, { useState, useCallback, useMemo } from 'react';
 import { DISCOVER_APP_LOCATOR } from '@kbn/deeplinks-analytics';
 import type { DiscoverAppLocatorParams } from '@kbn/discover-plugin/common';
@@ -43,7 +45,9 @@ import {
   UNBACKED_QUERIES_COUNT_QUERY_KEY,
   useUnbackedQueriesCount,
 } from '../../../../hooks/use_unbacked_queries_count';
+import { useAIFeatures } from '../../../../hooks/use_ai_features';
 import { getFormattedError } from '../../../../util/errors';
+import { getLast24HoursTimeRange } from '../../../../util/time_range';
 import { LoadingPanel } from '../../../loading_panel';
 import { SparkPlot } from '../../../spark_plot';
 import { StreamsAppSearchBar } from '../../../streams_app_search_bar';
@@ -84,6 +88,10 @@ import {
   getEventsCount,
   getPromoteAllCalloutTitle,
   getPromoteAllSuccessToast,
+  REGENERATE_QUERIES_BUTTON,
+  REGENERATE_QUERIES_ERROR_TOAST_TITLE,
+  REGENERATE_QUERIES_NO_STREAMS_TOAST_TITLE,
+  REGENERATE_QUERIES_SUCCESS_TOAST_TITLE,
 } from './translations';
 import { PromoteAction } from './promote_action';
 import { QueryDetailsFlyout } from './query_details_flyout';
@@ -96,14 +104,16 @@ export function QueriesTable() {
   const { euiTheme } = useEuiTheme();
   const {
     dependencies: {
-      start: { unifiedSearch, share },
+      start: { unifiedSearch, share, streams: { streamsRepositoryClient } },
     },
     core: {
       notifications: { toasts },
     },
   } = useKibana();
   const { timeState } = useTimefilter();
+  const aiFeatures = useAIFeatures();
   const [searchQuery, setSearchQuery] = useState('');
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   const [pagination, setPagination] = useState<{
     index: number;
@@ -139,6 +149,65 @@ export function QueriesTable() {
       ]),
     [queryClient]
   );
+
+  const handleRegenerateQueries = useCallback(async () => {
+    const queries = queriesData?.queries ?? [];
+    const uniqueStreamNames = [...new Set(queries.map((q) => q.stream_name).filter(Boolean))];
+
+    if (uniqueStreamNames.length === 0) {
+      toasts.addInfo({
+        title: REGENERATE_QUERIES_NO_STREAMS_TOAST_TITLE,
+      });
+      return;
+    }
+
+    const connectorId = aiFeatures?.genAiConnectors?.selectedConnector;
+    if (!connectorId) return;
+
+    setIsRegenerating(true);
+    const { from, to } = getLast24HoursTimeRange();
+
+    try {
+      await pMap(
+        uniqueStreamNames,
+        async (streamName) => {
+          await streamsRepositoryClient.fetch(
+            'POST /internal/streams/{streamName}/onboarding/_task',
+            {
+              params: {
+                path: { streamName },
+                query: { saveQueries: true },
+                body: {
+                  action: 'schedule' as const,
+                  from,
+                  to,
+                  connectorId,
+                  steps: [OnboardingStep.QueriesGeneration],
+                },
+              },
+            }
+          );
+        },
+        { concurrency: 5 }
+      );
+      toasts.addSuccess({
+        title: REGENERATE_QUERIES_SUCCESS_TOAST_TITLE(uniqueStreamNames.length),
+      });
+      setTimeout(() => invalidateQueriesData(), 10000);
+    } catch (error) {
+      toasts.addError(getFormattedError(error as Error), {
+        title: REGENERATE_QUERIES_ERROR_TOAST_TITLE,
+      });
+    } finally {
+      setIsRegenerating(false);
+    }
+  }, [
+    queriesData?.queries,
+    aiFeatures?.genAiConnectors?.selectedConnector,
+    toasts,
+    streamsRepositoryClient,
+    invalidateQueriesData,
+  ]);
 
   const promoteAllMutation = useMutation<{ promoted: number }, Error>({
     mutationFn: promoteAll,
@@ -420,7 +489,27 @@ export function QueriesTable() {
         </EuiPanel>
       </EuiFlexItem>
       <EuiFlexItem grow={false}>
-        <EuiText size="s">{getEventsCount(queriesData?.total ?? 0)}</EuiText>
+        <EuiFlexGroup gutterSize="s" alignItems="center">
+          <EuiFlexItem grow={false}>
+            <EuiText size="s">{getEventsCount(queriesData?.total ?? 0)}</EuiText>
+          </EuiFlexItem>
+          <EuiFlexItem grow={false}>
+            <EuiButton
+              iconType="refresh"
+              size="s"
+              isLoading={isRegenerating}
+              disabled={
+                isRegenerating ||
+                !aiFeatures?.genAiConnectors?.selectedConnector ||
+                (queriesData?.queries?.length ?? 0) === 0
+              }
+              onClick={handleRegenerateQueries}
+              data-test-subj="queriesRegenerateQueriesButton"
+            >
+              {REGENERATE_QUERIES_BUTTON}
+            </EuiButton>
+          </EuiFlexItem>
+        </EuiFlexGroup>
       </EuiFlexItem>
       <EuiFlexItem grow={false}>
         <EuiBasicTable

@@ -209,3 +209,27 @@ export const DELETE_QUERY_ERROR_TOAST_TITLE = i18n.translate(
   'xpack.streams.significantEventsDiscovery.queriesTable.deleteQueryErrorToastTitle',
   { defaultMessage: 'Failed to delete query' }
 );
+
+export const REGENERATE_QUERIES_BUTTON = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.regenerateQueriesButton',
+  { defaultMessage: 'Regenerate queries' }
+);
+
+export const REGENERATE_QUERIES_NO_STREAMS_TOAST_TITLE = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.regenerateQueriesNoStreamsToastTitle',
+  { defaultMessage: 'No streams with queries to regenerate' }
+);
+
+export const REGENERATE_QUERIES_SUCCESS_TOAST_TITLE = (count: number) =>
+  i18n.translate(
+    'xpack.streams.significantEventsDiscovery.queriesTable.regenerateQueriesSuccessToastTitle',
+    {
+      defaultMessage: 'Query generation started for {count} stream(s)',
+      values: { count },
+    }
+  );
+
+export const REGENERATE_QUERIES_ERROR_TOAST_TITLE = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.regenerateQueriesErrorToastTitle',
+  { defaultMessage: 'Failed to regenerate queries' }
+);
