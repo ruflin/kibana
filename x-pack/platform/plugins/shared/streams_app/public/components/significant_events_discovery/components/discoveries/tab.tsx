@@ -20,6 +20,7 @@ import {
   EuiIcon,
   EuiListGroup,
   EuiListGroupItem,
+  EuiMarkdownFormat,
   EuiPanel,
   EuiSpacer,
   EuiText,
@@ -117,9 +118,7 @@ function DiscoveryDetailFlyout({
           </h3>
         </EuiTitle>
         <EuiSpacer size="s" />
-        <EuiText size="s">
-          <p>{discovery.description}</p>
-        </EuiText>
+        <EuiMarkdownFormat textSize="s">{discovery.description}</EuiMarkdownFormat>
 
         {discovery.stream_refs.length > 0 && (
           <>
@@ -176,53 +175,27 @@ function DiscoveryDetailFlyout({
             </EuiTitle>
             <EuiSpacer size="s" />
             {discovery.evidence.map((ev: DiscoveryEvidence, idx: number) => (
-              <EuiPanel key={idx} paddingSize="s" hasBorder css={{ marginBottom: 8 }}>
-                <EuiDescriptionList
-                  type="column"
-                  compressed
-                  listItems={[
-                    {
-                      title: i18n.translate('xpack.streams.discoveryDetail.evidenceStream', {
-                        defaultMessage: 'Stream',
-                      }),
-                      description: ev.stream_name,
-                    },
-                    {
-                      title: i18n.translate('xpack.streams.discoveryDetail.evidenceQuery', {
-                        defaultMessage: 'Query',
-                      }),
-                      description: ev.query_title,
-                    },
-                    {
-                      title: i18n.translate('xpack.streams.discoveryDetail.evidenceCount', {
-                        defaultMessage: 'Events',
-                      }),
-                      description: String(ev.event_count),
-                    },
-                    ...(ev.change_point_type
-                      ? [
-                          {
-                            title: i18n.translate(
-                              'xpack.streams.discoveryDetail.evidenceChangePoint',
-                              { defaultMessage: 'Change point' }
-                            ),
-                            description: `${ev.change_point_type}${ev.change_point_p_value != null ? ` (p=${ev.change_point_p_value})` : ''}`,
-                          },
-                        ]
-                      : []),
-                    ...(ev.feature_name
-                      ? [
-                          {
-                            title: i18n.translate(
-                              'xpack.streams.discoveryDetail.evidenceFeature',
-                              { defaultMessage: 'Feature' }
-                            ),
-                            description: ev.feature_name,
-                          },
-                        ]
-                      : []),
-                  ]}
-                />
+              <EuiPanel key={idx} paddingSize="s" hasBorder css={{ marginBottom: 4 }}>
+                <EuiText size="xs">
+                  <strong>{ev.query_title}</strong>
+                  {' — '}
+                  {ev.stream_name}
+                  {' · '}
+                  {ev.event_count} events
+                  {ev.change_point_type && (
+                    <>
+                      {' · '}
+                      {ev.change_point_type}
+                      {ev.change_point_p_value != null && ` (p=${ev.change_point_p_value})`}
+                    </>
+                  )}
+                  {ev.feature_name && (
+                    <>
+                      {' · '}
+                      {ev.feature_name}
+                    </>
+                  )}
+                </EuiText>
               </EuiPanel>
             ))}
           </>
@@ -240,40 +213,50 @@ function DiscoveryDetailFlyout({
               </h3>
             </EuiTitle>
             <EuiSpacer size="s" />
-            {discovery.recommendations.map((rec: Recommendation, idx: number) => (
-              <EuiPanel key={idx} paddingSize="s" hasBorder css={{ marginBottom: 8 }}>
-                <EuiFlexGroup alignItems="center" gutterSize="s">
-                  <EuiFlexItem grow={false}>
-                    <EuiBadge color={severityColors[rec.priority] ?? 'hollow'}>
-                      {rec.priority}
-                    </EuiBadge>
-                  </EuiFlexItem>
-                  <EuiFlexItem>
-                    <EuiText size="s">
-                      <strong>{rec.title}</strong>
-                    </EuiText>
-                  </EuiFlexItem>
-                </EuiFlexGroup>
-                <EuiSpacer size="xs" />
-                <EuiText size="xs" color="subdued">
-                  {rec.description}
-                </EuiText>
-                {rec.steps.length > 0 && (
-                  <>
-                    <EuiSpacer size="xs" />
-                    <EuiListGroup flush maxWidth={false}>
-                      {rec.steps.map((step, stepIdx) => (
-                        <EuiListGroupItem
-                          key={stepIdx}
-                          label={`${stepIdx + 1}. ${step}`}
-                          size="xs"
-                        />
-                      ))}
-                    </EuiListGroup>
-                  </>
-                )}
-              </EuiPanel>
-            ))}
+            {discovery.recommendations.map((rec: Recommendation, idx: number) => {
+              const hasUniqueDescription =
+                rec.description && rec.description !== rec.title;
+              const hasUniqueSteps =
+                rec.steps.length > 0 &&
+                !(rec.steps.length === 1 && rec.steps[0] === rec.title);
+
+              return (
+                <EuiPanel key={idx} paddingSize="s" hasBorder css={{ marginBottom: 8 }}>
+                  <EuiFlexGroup alignItems="center" gutterSize="s">
+                    <EuiFlexItem grow={false}>
+                      <EuiBadge color={severityColors[rec.priority] ?? 'hollow'}>
+                        {rec.priority}
+                      </EuiBadge>
+                    </EuiFlexItem>
+                    <EuiFlexItem>
+                      <EuiText size="s">{rec.title}</EuiText>
+                    </EuiFlexItem>
+                  </EuiFlexGroup>
+                  {hasUniqueDescription && (
+                    <>
+                      <EuiSpacer size="xs" />
+                      <EuiMarkdownFormat textSize="xs">
+                        {rec.description}
+                      </EuiMarkdownFormat>
+                    </>
+                  )}
+                  {hasUniqueSteps && (
+                    <>
+                      <EuiSpacer size="xs" />
+                      <EuiListGroup flush maxWidth={false}>
+                        {rec.steps.map((step, stepIdx) => (
+                          <EuiListGroupItem
+                            key={stepIdx}
+                            label={`${stepIdx + 1}. ${step}`}
+                            size="xs"
+                          />
+                        ))}
+                      </EuiListGroup>
+                    </>
+                  )}
+                </EuiPanel>
+              );
+            })}
           </>
         )}
 
@@ -290,42 +273,56 @@ function DiscoveryDetailFlyout({
               </h3>
             </EuiTitle>
             <EuiSpacer size="s" />
-            <EuiDescriptionList
-              type="column"
-              compressed
-              listItems={[
-                ...(discovery.query_refs?.length
-                  ? [
-                      {
-                        title: i18n.translate('xpack.streams.discoveryDetail.queryRefs', {
-                          defaultMessage: 'Queries',
-                        }),
-                        description: discovery.query_refs.join(', '),
-                      },
-                    ]
-                  : []),
-                ...(discovery.feature_refs?.length
-                  ? [
-                      {
-                        title: i18n.translate('xpack.streams.discoveryDetail.featureRefs', {
-                          defaultMessage: 'Features',
-                        }),
-                        description: discovery.feature_refs.join(', '),
-                      },
-                    ]
-                  : []),
-                ...(discovery.discovery_refs?.length
-                  ? [
-                      {
-                        title: i18n.translate('xpack.streams.discoveryDetail.discoveryRefs', {
-                          defaultMessage: 'Related discoveries',
-                        }),
-                        description: discovery.discovery_refs.join(', '),
-                      },
-                    ]
-                  : []),
-              ]}
-            />
+            {discovery.query_refs && discovery.query_refs.length > 0 && (
+              <>
+                <EuiText size="xs">
+                  <strong>
+                    {i18n.translate('xpack.streams.discoveryDetail.queryRefs', {
+                      defaultMessage: 'Queries',
+                    })}
+                  </strong>
+                </EuiText>
+                <EuiListGroup flush maxWidth={false} gutterSize="none">
+                  {discovery.query_refs.map((ref) => (
+                    <EuiListGroupItem key={ref} label={ref} size="xs" />
+                  ))}
+                </EuiListGroup>
+              </>
+            )}
+            {discovery.feature_refs && discovery.feature_refs.length > 0 && (
+              <>
+                <EuiSpacer size="s" />
+                <EuiText size="xs">
+                  <strong>
+                    {i18n.translate('xpack.streams.discoveryDetail.featureRefs', {
+                      defaultMessage: 'Features',
+                    })}
+                  </strong>
+                </EuiText>
+                <EuiListGroup flush maxWidth={false} gutterSize="none">
+                  {discovery.feature_refs.map((ref) => (
+                    <EuiListGroupItem key={ref} label={ref} size="xs" />
+                  ))}
+                </EuiListGroup>
+              </>
+            )}
+            {discovery.discovery_refs && discovery.discovery_refs.length > 0 && (
+              <>
+                <EuiSpacer size="s" />
+                <EuiText size="xs">
+                  <strong>
+                    {i18n.translate('xpack.streams.discoveryDetail.discoveryRefs', {
+                      defaultMessage: 'Related discoveries',
+                    })}
+                  </strong>
+                </EuiText>
+                <EuiListGroup flush maxWidth={false} gutterSize="none">
+                  {discovery.discovery_refs.map((ref) => (
+                    <EuiListGroupItem key={ref} label={ref} size="xs" />
+                  ))}
+                </EuiListGroup>
+              </>
+            )}
           </>
         )}
 

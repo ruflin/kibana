@@ -17,18 +17,35 @@ import { createServerRoute } from '../../../create_server_route';
 import { assertSignificantEventsAccess } from '../../../utils/assert_significant_events_access';
 import { resolveConnectorId } from '../../../utils/resolve_connector_id';
 
-const TOPOLOGY_SYSTEM_PROMPT = `You are an expert at creating Mermaid diagrams that visualize system topology and data flow.
-Given a set of stream features (fields, entities, relationships, patterns), generate a Mermaid diagram that shows:
-- The main data streams and their relationships
-- Key entities (hosts, services, users) and how they connect
-- Data flow direction
-- Important field groupings or patterns
+const TOPOLOGY_SYSTEM_PROMPT = `You are an expert at creating Mermaid diagrams that visualize infrastructure topology, entity relationships, and service dependencies.
+
+Given a set of stream features (services, hosts, components, patterns), generate a Mermaid diagram that shows:
+
+1. **Entities** — Services, applications, hosts, and users discovered in the data. These are the primary nodes.
+2. **Infrastructure** — The underlying infrastructure (clusters, cloud providers, regions, namespaces) that entities run on. Use subgraphs to group entities by their infrastructure.
+3. **Dependencies** — How entities depend on each other: which services call which, what databases they connect to, what message queues they use, what APIs they consume.
+
+Color coding by importance (use Mermaid style classes or inline styles):
+- **Critical path** (core services, databases, load balancers): red/orange fill — \`style NodeId fill:#f97066,stroke:#d63d2f,color:#fff\`
+- **Important** (application services, API gateways): blue fill — \`style NodeId fill:#6ea8fe,stroke:#3d7bd9,color:#fff\`
+- **Supporting** (monitoring, logging, CI/CD, background workers): gray fill — \`style NodeId fill:#adb5bd,stroke:#6c757d,color:#fff\`
+- **External** (third-party APIs, cloud services, CDNs): purple fill — \`style NodeId fill:#b197fc,stroke:#7c5cbf,color:#fff\`
+
+Active issue annotations:
+- When active issues (discoveries) are provided, annotate the affected nodes and edges
+- For **critical** issues: use a thick red dashed border — \`style NodeId stroke:#d63d2f,stroke-width:3px,stroke-dasharray: 5 5\`
+- For **high** issues: use an orange dashed border — \`style NodeId stroke:#e8790c,stroke-width:2px,stroke-dasharray: 5 5\`
+- For **medium/low** issues: use a yellow dashed border — \`style NodeId stroke:#d4a017,stroke-width:2px,stroke-dasharray: 5 5\`
+- Add a note or annotation next to affected nodes with a short issue summary (use Mermaid notes if possible, otherwise append to the node label)
+- Match issues to nodes using the issue's stream_refs and evidence feature_name fields
 
 Rules:
-- Use \`graph TD\` (top-down) or \`graph LR\` (left-right) depending on what fits best
-- Keep the diagram readable — group related nodes, use subgraphs for streams
-- Use meaningful labels, not raw field names
-- Include at most 30 nodes to keep it readable
+- Use \`graph LR\` (left-right) for service dependency flows, \`graph TD\` (top-down) for infrastructure hierarchy
+- Use subgraphs to represent infrastructure boundaries (clusters, namespaces, cloud regions)
+- Label edges with the relationship type (e.g., "calls", "reads from", "deploys to", "monitors")
+- Use meaningful human-readable labels, not raw field names or IDs
+- Prioritize clarity: include at most 30 nodes; collapse less important nodes into group summaries
+- Assign colors to EVERY node based on its importance category
 - Return ONLY the Mermaid diagram code, no explanation or markdown fences`;
 
 const getTopologyRoute = createServerRoute({
@@ -75,7 +92,7 @@ const generateTopologyRoute = createServerRoute({
     }),
   }),
   handler: async ({ params, request, getScopedClients, server, logger }) => {
-    const { licensing, uiSettingsClient, featureClient, streamsClient, inferenceClient, soClient } =
+    const { licensing, uiSettingsClient, featureClient, streamsClient, inferenceClient, soClient, discoveryClient } =
       await getScopedClients({ request });
     await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
 
@@ -112,14 +129,35 @@ const generateTopologyRoute = createServerRoute({
       confidence: f.confidence,
     }));
 
+    let activeIssues: Array<{ title: string; severity: string; relevance_score: number; stream_refs: string[]; evidence: Array<{ feature_name?: string }> }> = [];
+    try {
+      const discoveries = await discoveryClient.searchDiscoveries({
+        minRelevanceScore: 30,
+        size: 20,
+      });
+      activeIssues = discoveries.map((d) => ({
+        title: d.title,
+        severity: d.severity,
+        relevance_score: d.relevance_score,
+        stream_refs: d.stream_refs,
+        evidence: (d.evidence ?? []).map((ev) => ({ feature_name: ev.feature_name })),
+      }));
+    } catch {
+      // Discoveries may not be available yet
+    }
+
     const boundClient = inferenceClient.bindTo({ connectorId });
+
+    const issuesSection = activeIssues.length > 0
+      ? `\n\nHere are the currently active issues (discoveries) that should be annotated on the diagram:\n\n${JSON.stringify(activeIssues, null, 2)}`
+      : '';
 
     const response = await boundClient.chatComplete({
       system: TOPOLOGY_SYSTEM_PROMPT,
       messages: [
         {
           role: MessageRole.User,
-          content: `Here are the stream features:\n\n${JSON.stringify(featureSummary, null, 2)}\n\nGenerate a Mermaid diagram showing the topology of these streams, their entities, and relationships.`,
+          content: `Here are the discovered features from our data streams:\n\n${JSON.stringify(featureSummary, null, 2)}${issuesSection}\n\nGenerate a Mermaid topology diagram that:\n1. Identifies the key entities (services, hosts, applications) and their dependencies\n2. Groups them by infrastructure (clusters, namespaces, cloud providers)\n3. Shows how they connect and depend on each other\n4. Colors every node by importance: critical path (red), important services (blue), supporting (gray), external (purple)\n5. Annotates any nodes or edges affected by active issues — mark them with warning icons and dashed borders`,
         },
       ],
     });
