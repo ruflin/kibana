@@ -51,9 +51,9 @@ When to use:
         const featureService = new FeatureService(deps.core, deps.logger);
         const featureClient = await featureService.getClientWithRequest({ request });
 
-        await featureClient.bulk({
-          streamName: toolParams.streamName,
-          operations: toolParams.features.map((f) => ({
+        await featureClient.bulk(
+          toolParams.streamName,
+          toolParams.features.map((f) => ({
             index: {
               feature: {
                 name: f.name,
@@ -61,8 +61,8 @@ When to use:
                 filter: f.filter,
               },
             },
-          })),
-        });
+          }))
+        );
 
         return {
           results: [

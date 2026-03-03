@@ -39,13 +39,61 @@ When to use:
         const { FeatureService } = await import('../../lib/streams/feature/feature_service');
         const featureService = new FeatureService(deps.core, deps.logger);
         const featureClient = await featureService.getClientWithRequest({ request });
-        const features = await featureClient.getAssets(toolParams.streamName);
+
+        let features;
+        try {
+          const result = await featureClient.getFeatures(toolParams.streamName);
+          features = result.hits;
+        } catch (fetchError) {
+          // getFeatures may fail if stored documents are missing required fields.
+          // Fall back to raw ES search and filter to valid features.
+          const esClient = (await deps.getEsClient(request)).asCurrentUser;
+          const response = await esClient.search({
+            index: '.kibana_streams_features',
+            size: 10_000,
+            query: { bool: { filter: [{ term: { 'stream.name': toolParams.streamName } }] } },
+          });
+
+          features = response.hits.hits
+            .map((hit) => {
+              const src = hit._source as Record<string, unknown> | undefined;
+              if (!src) return null;
+              const feature = src.feature as Record<string, unknown> | undefined;
+              if (!feature) return null;
+              return {
+                uuid: feature.uuid ?? hit._id,
+                id: feature.id ?? feature.uuid ?? hit._id,
+                stream_name: (src.stream as Record<string, unknown>)?.name ?? toolParams.streamName,
+                type: feature.type ?? 'unknown',
+                subtype: feature.subtype,
+                title: feature.title,
+                description: feature.description ?? '',
+                properties: feature.properties ?? {},
+                confidence: feature.confidence ?? 0,
+                evidence: feature.evidence,
+                status: feature.status ?? 'active',
+                last_seen: feature.last_seen ?? new Date().toISOString(),
+                tags: feature.tags,
+                meta: feature.meta,
+                expires_at: feature.expires_at,
+              };
+            })
+            .filter((f): f is NonNullable<typeof f> => f !== null);
+        }
+
+        const validFeatures = features.filter(
+          (f) => typeof f.id === 'string' && typeof f.type === 'string'
+        );
 
         return {
           results: [
             {
               type: ToolResultType.other,
-              data: { streamName: toolParams.streamName, features },
+              data: {
+                streamName: toolParams.streamName,
+                features: validFeatures,
+                total: validFeatures.length,
+              },
             },
           ],
         };

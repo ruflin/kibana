@@ -12,6 +12,33 @@ import type { BuiltinToolDefinition, StaticToolRegistration } from '@kbn/agent-b
 import { internalNamespaces } from '@kbn/agent-builder-common/base/namespaces';
 import type { StreamsToolsDependencies } from './types';
 
+const TIME_UNIT_MS: Record<string, number> = {
+  s: 1000,
+  m: 60 * 1000,
+  h: 60 * 60 * 1000,
+  d: 24 * 60 * 60 * 1000,
+  w: 7 * 24 * 60 * 60 * 1000,
+};
+
+const parseRelativeTime = (value: string): Date => {
+  if (value === 'now') {
+    return new Date();
+  }
+
+  const match = value.match(/^now-(\d+)([smhdw])$/);
+  if (match) {
+    const amount = parseInt(match[1], 10);
+    const unit = match[2];
+    return new Date(Date.now() - amount * (TIME_UNIT_MS[unit] ?? 0));
+  }
+
+  const parsed = new Date(value);
+  if (isNaN(parsed.getTime())) {
+    throw new Error(`Invalid time value: ${value}`);
+  }
+  return parsed;
+};
+
 const getSigEventsWithChangePointsSchema = z.object({
   streamNames: z.array(z.string()).describe('Stream names to analyze'),
   from: z.string().default('now-1h').describe('Start time (e.g., "now-1h")'),
@@ -48,10 +75,8 @@ When to use:
         const queryService = new QueryService(deps.core, deps.logger);
         const queryClient = await queryService.getClientWithRequest({ request });
 
-        const from = new Date(
-          toolParams.from === 'now-1h' ? Date.now() - 3600000 : toolParams.from
-        );
-        const to = new Date(toolParams.to === 'now' ? Date.now() : toolParams.to);
+        const from = parseRelativeTime(toolParams.from);
+        const to = parseRelativeTime(toolParams.to);
 
         const results = await readSignificantEventsFromAlertsIndices(
           {

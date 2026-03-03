@@ -994,6 +994,18 @@ Record significant deviations, failed approaches, and non-obvious discoveries he
 | 2026-03-03 | WS1 | Sig events results data stream implemented | New `SigEventsResultsClient` at `lib/sig_events_results/results_client.ts`. Creates component template, index template, and data stream (`.streams.sig_events_results-default`) on first use. Supports `writeResult`, `writeResults` (bulk), and `searchResults` with filtering by `queryId`, `streamName`, `queryType`, and time range. |
 | 2026-03-03 | WS1 | `DiscoveryClient.searchSuggestions` and `searchDiscoveries` crash when `params` is `undefined` | Route handlers pass `params.query` which can be `undefined` when no query string parameters are sent. Both methods now accept `params?` (optional) and use optional chaining (`params?.type`, `params?.size ?? 50`, etc.) throughout. Same defensive pattern should be applied to any client method called from a route with all-optional query params. |
 | 2026-03-03 | WS6 | Settings page was static labels only — now has functional connector dropdowns | Replaced placeholder `EuiText` labels with `EuiSuperSelect` dropdowns that load available AI connectors via `useGenAIConnectors`. Each stage has its own selector with a "Use global default" option. Settings are loaded from `GET /internal/streams/_discovery/_settings` and saved via `PUT`. Uses existing `ConnectorIcon` for provider logos. |
+| 2026-03-03 | WS4 | `resolveConnectorId` hardcoded fallback for POC | When no connector ID is provided and no global default is configured, `resolveConnectorId` now falls back to `anthropic-claude-4.6-sonnet` instead of throwing an error. This is a POC-only change — production code should require explicit configuration. |
+| 2026-03-03 | WS4 | `get_stream_features` tool called non-existent `featureClient.getAssets()` | The `FeatureClient` method is `getFeatures(stream)` (returns `{ hits, total }`), not `getAssets()`. `getAssets()` exists on `QueryClient` but not `FeatureClient`. Fixed to `featureClient.getFeatures(streamName)` and destructure `{ hits: features }`. **Lesson:** Always verify the actual client API before writing tool wrappers — method names differ between clients. |
+| 2026-03-03 | WS4 | `upsert_features` tool passed wrong argument shape to `featureClient.bulk()` | `FeatureClient.bulk()` takes two positional arguments `(stream: string, operations: FeatureBulkOperation[])`, not a single object `{ streamName, operations }`. Fixed to pass positional args. **Lesson:** `FeatureClient.bulk(stream, ops)` vs `QueryClient.bulk(definition, ops)` — different clients have different signatures. |
+| 2026-03-03 | WS4 | `get_sig_events_with_change_points` tool failed with "Invalid time value" for relative times | The tool only handled literal `"now-1h"` and `"now"` strings. LLM passes values like `"now-24h"`, `"now-15m"`, `"now-7d"`. Added `parseRelativeTime()` helper that parses `now`, `now-Nd/h/m/s/w` patterns, and ISO date strings. |
+| 2026-03-03 | WS7 | Discoveries tab did not show persisted discoveries | The `DiscoveriesTab` only showed discoveries from the in-memory pipeline task result. Discoveries created by the Agent Builder (via `create_discovery` tool) or persisted by the pipeline were invisible. Fixed: tab now fetches from `GET /internal/streams/_discoveries` and shows a table with severity, title, relevance, level, streams, and creation date. The `Summary` component (pipeline trigger) is shown above the table. |
+| 2026-03-03 | WS2 | `generateDiscoveries` returned raw LLM output instead of persisted discoveries | The pipeline returned the raw extracted discoveries (without UUIDs/timestamps) even though it had already persisted them via `discoveryClient.createDiscovery()`. Fixed: now returns `persistedDiscoveries` (with proper `uuid`, `created_at`, `updated_at`) when available, falling back to raw output only if persistence was skipped. |
+| 2026-03-03 | WS4 | `upsert_sig_events_queries` tool crashed with `Cannot read properties of undefined (reading 'filter')` | `queryClient.bulk()` takes `(definition: Streams.all.Definition, operations)` — a full stream definition as the first positional argument, not `{ streamName, operations }`. The definition is needed because `getIndexPatternsForStream(definition)` reads `definition.stream.ingest.routing` to build ES\|QL queries. Fix: added `getStreamsClient` to `StreamsToolsDependencies`, fetch the stream definition via `streamsClient.getStream(streamName)`, then pass it as the first argument. Also, `StreamQueryInput` requires an `id` field — added `uuidv4()` generation for each query. |
+| 2026-03-03 | WS7 | Discovery detail flyout added to Discoveries tab | The Discoveries table had no detail view. Added `DiscoveryDetailFlyout` component that opens when clicking a row, showing: severity, description, relevance score, level, dates, streams, tags, evidence (with change point info), recommendations (with priority and steps), cross-references (queries, features, related discoveries), and feedback status. |
+| 2026-03-03 | WS4 | Mermaid diagrams not rendering — plugin ordering + missing npm package | `esqlLanguagePlugin` ran before `mermaidLanguagePlugin` and converted all non-esql code blocks to `codeBlock` type, so the mermaid plugin never matched. Fix: reorder so `mermaidLanguagePlugin` runs first. Also, the `mermaid` npm package was not installed — added `mermaid@11.12.3` as a dependency. |
+| 2026-03-03 | WS4 | Mermaid `getBBox is not a function` error | Mermaid v11's `render()` calls `getBBox()` on SVG elements, which requires them to be in a fully visible, laid-out DOM context. Off-screen containers (`left: -9999px`) and hidden containers (`visibility: hidden; height: 0`) all break it. Fix: render directly into the component's mounted `ref` container — a real visible `<div>` already in the page. |
+| 2026-03-03 | WS4 | Mermaid diagrams too small inline + fullscreen modal | Mermaid renders SVGs with fixed pixel dimensions that are often small. Fix: CSS override `& svg { width: 100%; height: auto }` on the inline container so diagrams scale to fill the chat panel. Added fullscreen button that opens an `EuiModal` (90vw × 85vh) with the SVG scaled to fill. |
+| 2026-03-03 | WS4 | `get_stream_features` tool failed with Zod validation errors for `feature.type` and `feature.id` | Some stored features in the `.kibana_streams_features` index are missing required fields (`type`, `id`), causing `featureClient.getFeatures()` to throw a Zod validation error. Fix: added a fallback path that does a raw ES search and manually maps the nested `feature.*` fields with defaults (`type: 'unknown'`, `id` from `uuid`/`_id`). Final filter removes any features still lacking valid `id` or `type`. |
 
 ---
 
@@ -1170,37 +1182,56 @@ All questions have been resolved. Decisions are recorded here for reference.
 
 ---
 
-## Files to Modify (Key Paths)
+## Files Modified (Actual)
+
+### Platform Packages
+- `src/platform/packages/shared/kbn-storage-adapter/types.ts` — added `semantic_text` field type support
 
 ### Schema Package
-- `x-pack/platform/packages/shared/kbn-streams-schema/src/insights/index.ts` → rename to `src/discovery/index.ts` — Discovery, Suggestion, Recommendation types
+- `x-pack/platform/packages/shared/kbn-streams-schema/src/discovery/index.ts` — new: Discovery, Suggestion, Recommendation, DiscoveryPipelineResult types
+- `x-pack/platform/packages/shared/kbn-streams-schema/src/insights/index.ts` — extended Insight type (kept for backward compat)
 - `x-pack/platform/packages/shared/kbn-streams-schema/src/queries/index.ts` — queryType extension
-- `x-pack/platform/packages/shared/kbn-streams-schema/src/feature.ts` — cross-ref fields
-- `x-pack/platform/packages/shared/kbn-streams-schema/index.ts` — exports
+- `x-pack/platform/packages/shared/kbn-streams-schema/index.ts` — exports for new types
 
 ### Streams Plugin (Server)
-- `x-pack/platform/plugins/shared/streams/server/plugin.ts` — Agent Builder registration
-- `x-pack/platform/plugins/shared/streams/server/lib/significant_events/insights/` → rename to `discovery/` — three-stage pipeline
-- `x-pack/platform/plugins/shared/streams/server/lib/discoveries/` — new: DiscoveryClient, DiscoveryService
-- `x-pack/platform/plugins/shared/streams/server/lib/suggestions/` — new: SuggestionService
-- `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/discoveries/` — new: discovery routes
-- `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/suggestions/` — new: suggestion routes
-- `x-pack/platform/plugins/shared/streams/server/agent_builder/` — new: tools, skills, agent registration
+- `x-pack/platform/plugins/shared/streams/server/plugin.ts` — Agent Builder registration, Entity Store startup check, `StreamsToolsDependencies` wiring
+- `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/generate_discoveries.ts` — three-stage pipeline (extract → enrich → suggest), returns persisted discoveries
+- `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/prompts/` — system/user prompts for all 3 stages
+- `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/schema.ts` — discovery Zod schema + submit_discoveries tool
+- `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/suggestion_schema.ts` — suggestion Zod schema + submit_suggestions tool
+- `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/utils.ts` — response extraction, query data collection
+- `x-pack/platform/plugins/shared/streams/server/lib/discoveries/` — DiscoveryClient (CRUD, semantic search, cross-refs, deduplication), DiscoveryService, storage_settings, fields
+- `x-pack/platform/plugins/shared/streams/server/lib/entity_store/entity_store_client.ts` — EntityStoreClient (list, push)
+- `x-pack/platform/plugins/shared/streams/server/lib/sig_events_results/results_client.ts` — SigEventsResultsClient (data stream, write, search)
+- `x-pack/platform/plugins/shared/streams/server/lib/rules/esql/types.ts` — added `queryType` to EsqlRuleParams
+- `x-pack/platform/plugins/shared/streams/server/lib/rules/esql/executor.ts` — STATS execution path branching
+- `x-pack/platform/plugins/shared/streams/server/lib/rules/esql/lib/execute_esql_stats_request.ts` — new: STATS query executor
+- `x-pack/platform/plugins/shared/streams/server/lib/saved_objects/significant_events/discovery_settings.ts` — discovery settings saved object
+- `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/discoveries/route.ts` — discovery + suggestion CRUD routes
+- `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/discovery_settings/route.ts` — settings GET/PUT routes
+- `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/entity_store/route.ts` — entity store proxy routes
+- `x-pack/platform/plugins/shared/streams/server/routes/utils/resolve_connector_id.ts` — hardcoded POC fallback connector
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/` — 11 tool definitions (search_discoveries, get_discovery, create_discovery, run_discovery_pipeline, list_entities, get_stream_features, upsert_features, get_sig_events_queries, upsert_sig_events_queries, get_sig_events_with_change_points, push_entity_definition)
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/types.ts` — StreamsToolsDependencies interface
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/register_tools.ts` — centralized tool registration
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/skills/` — 5 skill definitions (generate_discoveries, extract_stream_features, generate_sig_events_queries, generate_suggestions, push_entity_definition)
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/agents/sig_discovery_agent.ts` — SigDiscovery agent definition
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/constants.ts` — tool/agent ID constants
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/register_agent_builder.ts` — orchestrates all registrations
 
 ### Streams App (UI)
-- `x-pack/platform/plugins/shared/streams_app/public/routes/config.tsx` — new tabs
-- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/page.tsx` — new tabs
-- `x-pack/platform/plugins/shared/streams_app/public/components/discoveries/` — new: DiscoveriesTable, DiscoveryDetailFlyout
-- `x-pack/platform/plugins/shared/streams_app/public/components/suggestions/` — new: SuggestionsTable, SuggestionDetailFlyout
-- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/insights/` → rename to `discoveries/` — DiscoveryCard (renamed from InsightCard), Summary
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/page.tsx` — added Suggestions tab
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/insights/tab.tsx` — fetches persisted discoveries from API, shows table + pipeline trigger
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/insights/summary.tsx` — added `onDiscoveriesGenerated` callback
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/suggestions/suggestions_tab.tsx` — new: SuggestionsTable with flyout, accept/dismiss
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/settings/settings_page.tsx` — functional connector dropdowns via EuiSuperSelect
 
 ### Agent Builder
 - `x-pack/platform/packages/shared/agent-builder/agent-builder-common/base/namespaces.ts` — streams namespace
-- `x-pack/platform/packages/shared/agent-builder/agent-builder-server/allow_lists.ts` — streams tools + agent
-- `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/chat_message_text.tsx` — Mermaid rendering
-
-### Streams AI Package
-- `x-pack/platform/packages/shared/kbn-streams-ai/src/significant_events/` — STATS query support in tools
+- `x-pack/platform/packages/shared/agent-builder/agent-builder-server/allow_lists.ts` — 11 streams tools + agent in allow list
+- `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/chat_message_text.tsx` — Mermaid rendering integration
+- `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/markdown_plugins/mermaid_plugin.tsx` — new: mermaid parsing + rendering
+- `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/markdown_plugins/index.ts` — export mermaid plugin
 
 ---
 

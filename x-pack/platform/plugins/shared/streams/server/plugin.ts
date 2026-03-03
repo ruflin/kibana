@@ -261,6 +261,21 @@ export class StreamsPlugin
           getDiscoveryClient: async (request) => {
             return discoveryService.getClientWithRequest({ request });
           },
+          getStreamsClient: async (request) => {
+            const [ac, fc, sc, qc] = await Promise.all([
+              attachmentService.getClientWithRequest({ request }),
+              featureService.getClientWithRequest({ request }),
+              systemService.getClientWithRequest({ request }),
+              queryService.getClientWithRequest({ request }),
+            ]);
+            return streamsService.getClientWithRequest({
+              request,
+              attachmentClient: ac,
+              queryClient: qc,
+              systemClient: sc,
+              featureClient: fc,
+            });
+          },
           getEsClient: async (request) => {
             const [coreStart] = await core.getStartServices();
             return coreStart.elasticsearch.client.asScoped(request);

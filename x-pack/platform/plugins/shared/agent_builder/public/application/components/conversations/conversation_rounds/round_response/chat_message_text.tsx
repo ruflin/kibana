@@ -203,8 +203,8 @@ export function ChatMessageText({
     return {
       parsingPluginList: [
         loadingCursorPlugin,
-        esqlLanguagePlugin,
         mermaidLanguagePlugin,
+        esqlLanguagePlugin,
         visualizationTagParser,
         renderAttachmentTagParser,
         ...parsingPlugins,

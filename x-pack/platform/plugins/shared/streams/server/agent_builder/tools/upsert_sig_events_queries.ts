@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { v4 as uuidv4 } from 'uuid';
 import { z } from '@kbn/zod';
 import { ToolType } from '@kbn/agent-builder-common';
 import { ToolResultType } from '@kbn/agent-builder-common/tools/tool_result';
@@ -53,18 +54,20 @@ When to use:
         const queryService = new QueryService(deps.core, deps.logger);
         const queryClient = await queryService.getClientWithRequest({ request });
 
-        await queryClient.bulk({
-          streamName: toolParams.streamName,
-          operations: toolParams.queries.map((q) => ({
+        const streamsClient = await deps.getStreamsClient(request);
+        const definition = await streamsClient.getStream(toolParams.streamName);
+
+        await queryClient.bulk(
+          definition,
+          toolParams.queries.map((q) => ({
             index: {
-              query: {
-                title: q.title,
-                kql: q.kql ? { query: q.kql } : undefined,
-                query_type: q.query_type,
-              },
+              id: uuidv4(),
+              title: q.title,
+              kql: { query: q.kql ?? '*' },
+              query_type: q.query_type,
             },
-          })),
-        });
+          }))
+        );
 
         return {
           results: [

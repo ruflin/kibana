@@ -43,7 +43,13 @@ function mapDiscoveryToInsight(d: Discovery): Insight {
   };
 }
 
-export function Summary({ count }: { count: number }) {
+export function Summary({
+  count,
+  onDiscoveriesGenerated,
+}: {
+  count: number;
+  onDiscoveriesGenerated?: () => void;
+}) {
   const aiFeatures = useAIFeatures();
   const {
     core: { notifications },
@@ -99,8 +105,9 @@ export function Summary({ count }: { count: number }) {
         });
       }
       setDiscoveries(discoveries.map(mapDiscoveryToInsight));
+      onDiscoveriesGenerated?.();
     }
-  }, [task, notifications.toasts]);
+  }, [task, notifications.toasts, onDiscoveriesGenerated]);
 
   const { cancelTask, isCancellingTask } = useTaskPolling({
     task,

@@ -176,7 +176,7 @@ export async function generateDiscoveries({
     }
 
     return {
-      discoveries,
+      discoveries: persistedDiscoveries.length > 0 ? persistedDiscoveries : discoveries,
       suggestions,
       tokensUsed: stage2Tokens,
     };
