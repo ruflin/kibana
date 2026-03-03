@@ -8,6 +8,11 @@
 import { z } from '@kbn/zod';
 import { MessageRole } from '@kbn/inference-common';
 import { STREAMS_API_PRIVILEGES } from '../../../../../common/constants';
+import {
+  discoverySettingsSOType,
+  DISCOVERY_SETTINGS_SO_ID,
+  type DiscoverySettingsAttributes,
+} from '../../../../lib/saved_objects/significant_events/discovery_settings';
 import { createServerRoute } from '../../../create_server_route';
 import { assertSignificantEventsAccess } from '../../../utils/assert_significant_events_access';
 import { resolveConnectorId } from '../../../utils/resolve_connector_id';
@@ -26,15 +31,42 @@ Rules:
 - Include at most 30 nodes to keep it readable
 - Return ONLY the Mermaid diagram code, no explanation or markdown fences`;
 
-const generateTopologyRoute = createServerRoute({
-  endpoint: 'POST /internal/streams/_topology',
+const getTopologyRoute = createServerRoute({
+  endpoint: 'GET /internal/streams/_topology',
   options: {
     access: 'internal',
-    summary: 'Generate a topology Mermaid diagram from stream features',
+    summary: 'Get the persisted topology Mermaid diagram',
   },
   security: {
     authz: {
       requiredPrivileges: [STREAMS_API_PRIVILEGES.read],
+    },
+  },
+  handler: async ({ request, getScopedClients, server }) => {
+    const { licensing, uiSettingsClient, soClient } = await getScopedClients({ request });
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+
+    try {
+      const so = await soClient.get<DiscoverySettingsAttributes>(
+        discoverySettingsSOType,
+        DISCOVERY_SETTINGS_SO_ID
+      );
+      return { mermaid: so.attributes.topologyMermaid ?? null };
+    } catch {
+      return { mermaid: null };
+    }
+  },
+});
+
+const generateTopologyRoute = createServerRoute({
+  endpoint: 'POST /internal/streams/_topology',
+  options: {
+    access: 'internal',
+    summary: 'Generate a topology Mermaid diagram from stream features and persist it',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.manage],
     },
   },
   params: z.object({
@@ -43,7 +75,7 @@ const generateTopologyRoute = createServerRoute({
     }),
   }),
   handler: async ({ params, request, getScopedClients, server, logger }) => {
-    const { licensing, uiSettingsClient, featureClient, streamsClient, inferenceClient } =
+    const { licensing, uiSettingsClient, featureClient, streamsClient, inferenceClient, soClient } =
       await getScopedClients({ request });
     await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
 
@@ -99,10 +131,29 @@ const generateTopologyRoute = createServerRoute({
       .replace(/```\s*$/m, '')
       .trim();
 
+    // Persist the generated topology
+    let existing: DiscoverySettingsAttributes = {};
+    try {
+      const so = await soClient.get<DiscoverySettingsAttributes>(
+        discoverySettingsSOType,
+        DISCOVERY_SETTINGS_SO_ID
+      );
+      existing = so.attributes;
+    } catch {
+      // Not found — will create
+    }
+
+    await soClient.create(
+      discoverySettingsSOType,
+      { ...existing, topologyMermaid: mermaidCode },
+      { id: DISCOVERY_SETTINGS_SO_ID, overwrite: true }
+    );
+
     return { mermaid: mermaidCode };
   },
 });
 
 export const internalTopologyRoutes = {
+  ...getTopologyRoute,
   ...generateTopologyRoute,
 };

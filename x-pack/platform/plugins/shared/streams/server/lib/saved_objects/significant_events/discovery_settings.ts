@@ -16,6 +16,7 @@ export const discoverySettingsSOAttributesV1 = schema.object({
   queryGenerationConnectorId: schema.maybe(schema.string()),
   discoveryConnectorId: schema.maybe(schema.string()),
   suggestionConnectorId: schema.maybe(schema.string()),
+  topologyMermaid: schema.maybe(schema.string()),
 });
 
 export type DiscoverySettingsAttributes = TypeOf<typeof discoverySettingsSOAttributesV1>;

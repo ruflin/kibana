@@ -51,7 +51,7 @@ const getMermaid = async (): Promise<typeof import('mermaid').default | null> =>
   }
 };
 
-function MermaidDiagram({ code }: { code: string }) {
+export function MermaidDiagram({ code }: { code: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<'rendering' | 'done' | 'error'>('rendering');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -216,11 +216,30 @@ export function TopologyTab() {
 
   const [mermaidCode, setMermaidCode] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [hasGenerated, setHasGenerated] = useState(false);
+  const [isLoadingPersisted, setIsLoadingPersisted] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPersisted = async () => {
+      try {
+        const result = await streamsRepositoryClient.fetch('GET /internal/streams/_topology', {});
+        if (!cancelled && result.mermaid) {
+          setMermaidCode(result.mermaid);
+        }
+      } catch {
+        // No persisted topology — that's fine
+      } finally {
+        if (!cancelled) setIsLoadingPersisted(false);
+      }
+    };
+    loadPersisted();
+    return () => {
+      cancelled = true;
+    };
+  }, [streamsRepositoryClient]);
 
   const handleGenerate = useCallback(async () => {
     setIsGenerating(true);
-    setMermaidCode(null);
     try {
       const result = await streamsRepositoryClient.fetch('POST /internal/streams/_topology', {
         params: {
@@ -230,7 +249,6 @@ export function TopologyTab() {
         },
       });
       setMermaidCode(result.mermaid);
-      setHasGenerated(true);
     } catch (e) {
       notifications.toasts.addError(e instanceof Error ? e : new Error(String(e)), {
         title: i18n.translate('xpack.streams.topology.errorTitle', {
@@ -242,36 +260,17 @@ export function TopologyTab() {
     }
   }, [streamsRepositoryClient, aiFeatures?.genAiConnectors.selectedConnector, notifications.toasts]);
 
-  useEffect(() => {
-    if (!hasGenerated) {
-      handleGenerate();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (isGenerating) {
+  if (isLoadingPersisted) {
     return (
-      <EuiEmptyPrompt
-        icon={<EuiLoadingSpinner size="xl" />}
-        title={
-          <h3>
-            {i18n.translate('xpack.streams.topology.generatingTitle', {
-              defaultMessage: 'Generating topology diagram...',
-            })}
-          </h3>
-        }
-        body={
-          <p>
-            {i18n.translate('xpack.streams.topology.generatingDescription', {
-              defaultMessage:
-                'Analyzing stream features and generating a visual topology using AI. This may take a moment.',
-            })}
-          </p>
-        }
-      />
+      <EuiFlexGroup justifyContent="center" alignItems="center" style={{ minHeight: 300 }}>
+        <EuiFlexItem grow={false}>
+          <EuiLoadingSpinner size="xl" />
+        </EuiFlexItem>
+      </EuiFlexGroup>
     );
   }
 
-  if (!mermaidCode) {
+  if (!mermaidCode && !isGenerating) {
     return (
       <EuiEmptyPrompt
         icon={<EuiIcon type="visVega" size="xl" />}
@@ -306,17 +305,24 @@ export function TopologyTab() {
       <EuiFlexItem grow={false}>
         <EuiFlexGroup alignItems="center" gutterSize="m">
           <EuiFlexItem grow={false}>
-            <EuiButton iconType="refresh" onClick={handleGenerate}>
-              {i18n.translate('xpack.streams.topology.regenerateButton', {
-                defaultMessage: 'Regenerate',
-              })}
+            <EuiButton
+              iconType="refresh"
+              onClick={handleGenerate}
+              isLoading={isGenerating}
+              isDisabled={isGenerating}
+            >
+              {isGenerating
+                ? i18n.translate('xpack.streams.topology.regeneratingButton', {
+                    defaultMessage: 'Regenerating...',
+                  })
+                : i18n.translate('xpack.streams.topology.regenerateButton', {
+                    defaultMessage: 'Regenerate',
+                  })}
             </EuiButton>
           </EuiFlexItem>
         </EuiFlexGroup>
       </EuiFlexItem>
-      <EuiFlexItem>
-        <MermaidDiagram code={mermaidCode} />
-      </EuiFlexItem>
+      <EuiFlexItem>{mermaidCode && <MermaidDiagram code={mermaidCode} />}</EuiFlexItem>
     </EuiFlexGroup>
   );
 }

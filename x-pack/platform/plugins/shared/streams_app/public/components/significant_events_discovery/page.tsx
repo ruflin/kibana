@@ -24,8 +24,9 @@ import { DiscoveriesTab } from './components/discoveries/tab';
 import { SuggestionsTab } from './components/suggestions/suggestions_tab';
 import { TopologyTab } from './components/topology/topology_tab';
 import { SettingsPage } from './components/settings/settings_page';
+import { OverviewTab } from './components/overview/overview_tab';
 
-const discoveryTabs = ['streams', 'features', 'queries', 'discoveries', 'suggestions', 'topology', 'settings'] as const;
+const discoveryTabs = ['overview', 'streams', 'features', 'queries', 'discoveries', 'suggestions', 'topology', 'settings'] as const;
 type DiscoveryTab = (typeof discoveryTabs)[number];
 
 function isValidDiscoveryTab(value: string): value is DiscoveryTab {
@@ -66,10 +67,18 @@ export function SignificantEventsDiscoveryPage() {
   }
 
   if (!isValidDiscoveryTab(tab)) {
-    return <RedirectTo path="/_discovery/{tab}" params={{ path: { tab: 'streams' } }} />;
+    return <RedirectTo path="/_discovery/{tab}" params={{ path: { tab: 'overview' } }} />;
   }
 
   const tabs = [
+    {
+      id: 'overview',
+      label: i18n.translate('xpack.streams.significantEventsDiscovery.overviewTab', {
+        defaultMessage: 'Overview',
+      }),
+      href: router.link('/_discovery/{tab}', { path: { tab: 'overview' } }),
+      isSelected: tab === 'overview',
+    },
     {
       id: 'streams',
       label: i18n.translate('xpack.streams.significantEventsDiscovery.streamsTab', {
@@ -166,6 +175,7 @@ export function SignificantEventsDiscoveryPage() {
         tabs={tabs}
       />
       <StreamsAppPageTemplate.Body grow>
+        {tab === 'overview' && <OverviewTab />}
         {tab === 'streams' && <StreamsView refreshUnbackedQueriesCount={refetch} />}
         {tab === 'features' && <FeaturesTable />}
         {tab === 'queries' && <QueriesTable />}
