@@ -51,6 +51,7 @@ export const AGENT_BUILDER_BUILTIN_TOOLS = [
   `${internalNamespaces.streams}.upsert_sig_events_queries`,
   `${internalNamespaces.streams}.get_sig_events_with_change_points`,
   `${internalNamespaces.streams}.push_entity_definition`,
+  `${internalNamespaces.streams}.promote_queries`,
 ] as const;
 
 export type AgentBuilderBuiltinTool = (typeof AGENT_BUILDER_BUILTIN_TOOLS)[number];

@@ -12,7 +12,18 @@ import { FeatureClient } from './feature_client';
 import type { StoredFeature } from './stored_feature';
 import type { FeatureStorageSettings } from './storage_settings';
 import { featureStorageSettings } from './storage_settings';
-import { FEATURE_ID, FEATURE_PROPERTIES, FEATURE_SUBTYPE, FEATURE_UUID } from './fields';
+import {
+  FEATURE_CONFIDENCE,
+  FEATURE_DESCRIPTION,
+  FEATURE_ID,
+  FEATURE_LAST_SEEN,
+  FEATURE_PROPERTIES,
+  FEATURE_STATUS,
+  FEATURE_SUBTYPE,
+  FEATURE_TYPE,
+  FEATURE_UUID,
+  STREAM_NAME,
+} from './fields';
 import { storedFeatureSchema } from './stored_feature';
 
 export class FeatureService {
@@ -30,21 +41,40 @@ export class FeatureService {
       featureStorageSettings,
       {
         migrateSource: (source) => {
-          if (!(FEATURE_ID in source)) {
-            const migrated: Record<string, unknown> = {
-              ...source,
-              [FEATURE_ID]: source[FEATURE_UUID],
-              [FEATURE_SUBTYPE]: source['feature.name'],
-              [FEATURE_PROPERTIES]: source['feature.value'],
-            };
-            delete migrated['feature.name'];
-            delete migrated['feature.value'];
+          let candidate = source as Record<string, unknown>;
 
-            storedFeatureSchema.parse(migrated);
-            return migrated as unknown as StoredFeature;
+          if (!(FEATURE_ID in candidate)) {
+            candidate = {
+              ...candidate,
+              [FEATURE_ID]: candidate[FEATURE_UUID],
+              [FEATURE_SUBTYPE]: candidate['feature.name'],
+              [FEATURE_PROPERTIES]: candidate['feature.value'] ?? {},
+            };
+            delete candidate['feature.name'];
+            delete candidate['feature.value'];
           }
 
-          return source as unknown as StoredFeature;
+          const result = storedFeatureSchema.safeParse(candidate);
+          if (!result.success) {
+            this.logger.debug(
+              `Malformed feature document, applying defaults: ${result.error.message}`
+            );
+            const patched: Record<string, unknown> = {
+              ...candidate,
+              [FEATURE_ID]: candidate[FEATURE_ID] ?? 'unknown',
+              [FEATURE_UUID]: candidate[FEATURE_UUID] ?? 'unknown',
+              [FEATURE_TYPE]: candidate[FEATURE_TYPE] ?? 'unknown',
+              [FEATURE_PROPERTIES]: candidate[FEATURE_PROPERTIES] ?? {},
+              [FEATURE_CONFIDENCE]: candidate[FEATURE_CONFIDENCE] ?? 0,
+              [FEATURE_STATUS]: candidate[FEATURE_STATUS] ?? 'active',
+              [FEATURE_LAST_SEEN]: candidate[FEATURE_LAST_SEEN] ?? new Date().toISOString(),
+              [FEATURE_DESCRIPTION]: candidate[FEATURE_DESCRIPTION] ?? '',
+              [STREAM_NAME]: candidate[STREAM_NAME] ?? '',
+            };
+            return storedFeatureSchema.parse(patched);
+          }
+
+          return result.data;
         },
       }
     );

@@ -20,11 +20,12 @@ import { StreamsAppPageTemplate } from '../streams_app_page_template';
 import { FeaturesTable } from './components/features_table/features_table';
 import { QueriesTable } from './components/queries_table/queries_table';
 import { StreamsView } from './components/streams_view/streams_view';
-import { DiscoveriesTab } from './components/insights/tab';
+import { DiscoveriesTab } from './components/discoveries/tab';
 import { SuggestionsTab } from './components/suggestions/suggestions_tab';
+import { TopologyTab } from './components/topology/topology_tab';
 import { SettingsPage } from './components/settings/settings_page';
 
-const discoveryTabs = ['streams', 'features', 'queries', 'discoveries', 'suggestions', 'settings'] as const;
+const discoveryTabs = ['streams', 'features', 'queries', 'discoveries', 'suggestions', 'topology', 'settings'] as const;
 type DiscoveryTab = (typeof discoveryTabs)[number];
 
 function isValidDiscoveryTab(value: string): value is DiscoveryTab {
@@ -121,6 +122,14 @@ export function SignificantEventsDiscoveryPage() {
       isSelected: tab === 'suggestions',
     },
     {
+      id: 'topology',
+      label: i18n.translate('xpack.streams.significantEventsDiscovery.topologyTab', {
+        defaultMessage: 'Topology',
+      }),
+      href: router.link('/_discovery/{tab}', { path: { tab: 'topology' } }),
+      isSelected: tab === 'topology',
+    },
+    {
       id: 'settings',
       label: i18n.translate('xpack.streams.significantEventsDiscovery.settingsTab', {
         defaultMessage: 'Settings',
@@ -162,6 +171,7 @@ export function SignificantEventsDiscoveryPage() {
         {tab === 'queries' && <QueriesTable />}
         {tab === 'discoveries' && <DiscoveriesTab />}
         {tab === 'suggestions' && <SuggestionsTab />}
+        {tab === 'topology' && <TopologyTab />}
         {tab === 'settings' && <SettingsPage />}
       </StreamsAppPageTemplate.Body>
     </>

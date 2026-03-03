@@ -36,6 +36,7 @@ import { internalEntityStoreRoutes } from './internal/streams/entity_store/route
 import { internalTasksRoutes } from './internal/streams/tasks/route';
 import { internalOnboardingRoutes } from './internal/streams/onboarding/route';
 import { internalQueriesRoutes } from './internal/streams/queries/route';
+import { internalTopologyRoutes } from './internal/streams/topology/route';
 
 export const streamsRouteRepository = {
   // internal APIs
@@ -60,6 +61,7 @@ export const streamsRouteRepository = {
   ...internalTasksRoutes,
   ...internalOnboardingRoutes,
   ...internalQueriesRoutes,
+  ...internalTopologyRoutes,
   // public APIs
   ...docCountsRoutes,
   ...crudRoutes,

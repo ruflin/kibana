@@ -5,20 +5,19 @@
  * 2.0.
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   EuiBadge,
   EuiBasicTable,
   EuiButton,
   EuiCodeBlock,
+  EuiEmptyPrompt,
   EuiFlexGroup,
   EuiFlexItem,
   EuiFlyout,
   EuiFlyoutBody,
   EuiFlyoutHeader,
   EuiIcon,
-  EuiLoadingElastic,
-  EuiPanel,
   EuiSpacer,
   EuiText,
   EuiTitle,
@@ -26,14 +25,21 @@ import {
 } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
 import type { Suggestion } from '@kbn/streams-schema';
+import { TaskStatus } from '@kbn/streams-schema';
+import useAsyncFn from 'react-use/lib/useAsyncFn';
+import { useAIFeatures } from '../../../../hooks/use_ai_features';
 import { useKibana } from '../../../../hooks/use_kibana';
 import { useStreamsAppFetch } from '../../../../hooks/use_streams_app_fetch';
+import { useSuggestionPipelineApi } from '../../../../hooks/use_suggestion_pipeline_api';
+import { useTaskPolling } from '../../../../hooks/use_task_polling';
+import { getFormattedError } from '../../../../util/errors';
 
 const typeLabels: Record<string, string> = {
   alert: 'Alert',
   dashboard: 'Dashboard',
   slo: 'SLO',
   viz: 'Visualization',
+  investigation: 'Investigation',
 };
 
 const typeIcons: Record<string, string> = {
@@ -41,6 +47,7 @@ const typeIcons: Record<string, string> = {
   dashboard: 'dashboardApp',
   slo: 'visGauge',
   viz: 'visArea',
+  investigation: 'folderCheck',
 };
 
 const statusColors: Record<string, 'default' | 'success' | 'danger'> = {
@@ -57,12 +64,14 @@ const priorityColors: Record<string, 'danger' | 'warning' | 'primary' | 'hollow'
 };
 
 export function SuggestionsTab() {
+  const aiFeatures = useAIFeatures();
   const {
     dependencies: {
       start: {
         streams: { streamsRepositoryClient },
       },
     },
+    core: { notifications },
   } = useKibana();
 
   const [selectedSuggestion, setSelectedSuggestion] = useState<Suggestion | null>(null);
@@ -75,6 +84,79 @@ export function SuggestionsTab() {
       }),
     [streamsRepositoryClient]
   );
+
+  const {
+    scheduleSuggestionTask,
+    getSuggestionTaskStatus,
+    acknowledgeSuggestionTask,
+    cancelSuggestionTask,
+  } = useSuggestionPipelineApi(aiFeatures?.genAiConnectors.selectedConnector);
+
+  const [{ value: task }, getTaskStatus] = useAsyncFn(getSuggestionTaskStatus);
+  const [{ loading: isSchedulingTask }, scheduleTask] = useAsyncFn(async () => {
+    await scheduleSuggestionTask();
+    await getTaskStatus();
+  }, [scheduleSuggestionTask, getTaskStatus]);
+
+  useEffect(() => {
+    getTaskStatus();
+  }, [getTaskStatus]);
+
+  const previousTaskStatusRef = useRef<TaskStatus | undefined>(undefined);
+
+  useEffect(() => {
+    const previousStatus = previousTaskStatusRef.current;
+    previousTaskStatusRef.current = task?.status;
+
+    if (task?.status === TaskStatus.Failed) {
+      notifications.toasts.addError(getFormattedError(new Error(task.error)), {
+        title: i18n.translate('xpack.streams.suggestions.errorTitle', {
+          defaultMessage: 'Error generating suggestions',
+        }),
+      });
+    }
+
+    if (task?.status === TaskStatus.Completed && previousStatus === TaskStatus.InProgress) {
+      const count = task.suggestions?.length ?? 0;
+      if (count > 0) {
+        notifications.toasts.addSuccess({
+          title: i18n.translate('xpack.streams.suggestions.generatedTitle', {
+            defaultMessage:
+              '{count} {count, plural, one {suggestion} other {suggestions}} generated',
+            values: { count },
+          }),
+        });
+      } else {
+        notifications.toasts.addInfo({
+          title: i18n.translate('xpack.streams.suggestions.noSuggestionsGeneratedTitle', {
+            defaultMessage: 'No suggestions generated',
+          }),
+          text: i18n.translate('xpack.streams.suggestions.noSuggestionsGeneratedDescription', {
+            defaultMessage:
+              'The AI could not generate suggestions from the current discoveries. Make sure discoveries exist first.',
+          }),
+        });
+      }
+      suggestionsFetch.refresh();
+    }
+  }, [task, notifications.toasts, suggestionsFetch]);
+
+  const { cancelTask, isCancellingTask } = useTaskPolling({
+    task,
+    onPoll: getSuggestionTaskStatus,
+    onRefresh: getTaskStatus,
+    onCancel: cancelSuggestionTask,
+  });
+
+  const isGenerating =
+    task?.status === TaskStatus.InProgress || isCancellingTask || isSchedulingTask;
+
+  const handleGenerate = useCallback(async () => {
+    if (task?.status === TaskStatus.Completed || task?.status === TaskStatus.Failed) {
+      await acknowledgeSuggestionTask();
+    }
+    await scheduleTask();
+  }, [task, acknowledgeSuggestionTask, scheduleTask]);
 
   const handleStatusUpdate = useCallback(
     async (uuid: string, status: 'accepted' | 'dismissed') => {
@@ -140,60 +222,95 @@ export function SuggestionsTab() {
     []
   );
 
-  if (suggestionsFetch.loading) {
-    return <EuiLoadingElastic />;
-  }
-
   const suggestions = (suggestionsFetch.value ?? []) as Suggestion[];
-
-  if (suggestions.length === 0) {
-    return (
-      <EuiFlexGroup direction="column" alignItems="center" justifyContent="center">
-        <EuiFlexItem grow={false}>
-          <EuiPanel color="subdued">
-            <EuiFlexGroup
-              direction="column"
-              alignItems="center"
-              justifyContent="center"
-              style={{ minHeight: '30vh', minWidth: '40vh' }}
-            >
-              <EuiFlexItem grow={false}>
-                <EuiIcon type="editorCodeBlock" size="xxl" aria-hidden />
-              </EuiFlexItem>
-              <EuiFlexItem grow={false}>
-                <EuiTitle size="s">
-                  <h2>
-                    {i18n.translate('xpack.streams.suggestions.noSuggestionsTitle', {
-                      defaultMessage: 'No suggestions yet',
-                    })}
-                  </h2>
-                </EuiTitle>
-              </EuiFlexItem>
-              <EuiFlexItem grow={false}>
-                <EuiText size="s" textAlign="center" css={{ maxWidth: 400 }}>
-                  {i18n.translate('xpack.streams.suggestions.noSuggestionsDescription', {
-                    defaultMessage:
-                      'Run the discovery pipeline to generate ES|QL query suggestions from your discoveries.',
-                  })}
-                </EuiText>
-              </EuiFlexItem>
-            </EuiFlexGroup>
-          </EuiPanel>
-        </EuiFlexItem>
-      </EuiFlexGroup>
-    );
-  }
 
   return (
     <>
-      <EuiBasicTable
-        items={suggestions}
-        columns={columns}
-        rowProps={(item) => ({
-          onClick: () => setSelectedSuggestion(item),
-          style: { cursor: 'pointer' },
-        })}
-      />
+      <EuiFlexGroup direction="column" gutterSize="l">
+        <EuiFlexItem grow={false}>
+          <EuiFlexGroup alignItems="center" gutterSize="m">
+            <EuiFlexItem grow={false}>
+              <EuiButton
+                fill
+                iconType="sparkles"
+                onClick={handleGenerate}
+                isDisabled={isGenerating}
+                isLoading={isGenerating}
+                data-test-subj="significant_events_generate_suggestions_button"
+              >
+                {isGenerating
+                  ? i18n.translate('xpack.streams.suggestions.generatingButtonLabel', {
+                      defaultMessage: 'Generating suggestions...',
+                    })
+                  : i18n.translate('xpack.streams.suggestions.generateButtonLabel', {
+                      defaultMessage: 'Generate suggestions',
+                    })}
+              </EuiButton>
+            </EuiFlexItem>
+            {(task?.status === TaskStatus.InProgress || isCancellingTask) && (
+              <EuiFlexItem grow={false}>
+                <EuiButton
+                  color="text"
+                  onClick={cancelTask}
+                  isDisabled={isCancellingTask}
+                  data-test-subj="significant_events_cancel_suggestions_generation_button"
+                >
+                  {isCancellingTask
+                    ? i18n.translate('xpack.streams.suggestions.cancellingTaskButtonLabel', {
+                        defaultMessage: 'Cancelling...',
+                      })
+                    : i18n.translate('xpack.streams.suggestions.cancelTaskButtonLabel', {
+                        defaultMessage: 'Cancel',
+                      })}
+                </EuiButton>
+              </EuiFlexItem>
+            )}
+          </EuiFlexGroup>
+        </EuiFlexItem>
+
+        <EuiFlexItem>
+          {suggestionsFetch.loading ? (
+            <EuiEmptyPrompt
+              icon={<EuiIcon type="clock" size="xl" />}
+              title={
+                <h3>
+                  {i18n.translate('xpack.streams.suggestions.loadingTitle', {
+                    defaultMessage: 'Loading suggestions...',
+                  })}
+                </h3>
+              }
+            />
+          ) : suggestions.length === 0 ? (
+            <EuiEmptyPrompt
+              icon={<EuiIcon type="editorCodeBlock" size="xl" />}
+              title={
+                <h3>
+                  {i18n.translate('xpack.streams.suggestions.noSuggestionsTitle', {
+                    defaultMessage: 'No suggestions yet',
+                  })}
+                </h3>
+              }
+              body={
+                <p>
+                  {i18n.translate('xpack.streams.suggestions.noSuggestionsDescription', {
+                    defaultMessage:
+                      'Click "Generate suggestions" to create ES|QL query suggestions from your discoveries and recommendations.',
+                  })}
+                </p>
+              }
+            />
+          ) : (
+            <EuiBasicTable
+              items={suggestions}
+              columns={columns}
+              rowProps={(item) => ({
+                onClick: () => setSelectedSuggestion(item),
+                style: { cursor: 'pointer' },
+              })}
+            />
+          )}
+        </EuiFlexItem>
+      </EuiFlexGroup>
 
       {selectedSuggestion && (
         <EuiFlyout onClose={() => setSelectedSuggestion(null)} size="m">

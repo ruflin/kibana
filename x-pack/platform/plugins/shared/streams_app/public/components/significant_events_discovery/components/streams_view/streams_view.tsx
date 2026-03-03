@@ -25,7 +25,7 @@ import useAsyncFn from 'react-use/lib/useAsyncFn';
 import type { TableRow } from './utils';
 import { useAIFeatures } from '../../../../hooks/use_ai_features';
 import { useKibana } from '../../../../hooks/use_kibana';
-import { useDiscoveryPipelineApi } from '../../../../hooks/use_insights_discovery_api';
+import { useDiscoveryPipelineApi } from '../../../../hooks/use_discovery_pipeline_api';
 import { useOnboardingApi } from '../../../../hooks/use_onboarding_api';
 import { useStreamsAppRouter } from '../../../../hooks/use_streams_app_router';
 import { useTaskPolling } from '../../../../hooks/use_task_polling';

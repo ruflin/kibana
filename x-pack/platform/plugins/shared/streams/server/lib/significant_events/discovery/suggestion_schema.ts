@@ -18,8 +18,10 @@ const suggestionZodSchema = z.object({
   reason: z.string().describe('Why this query was selected, referencing the source discovery'),
   esql_query: z.string().describe('The actual ES|QL query string'),
   type: z
-    .enum(['alert', 'dashboard', 'slo', 'viz'])
-    .describe('What Kibana object to create from this query'),
+    .enum(['alert', 'dashboard', 'slo', 'viz', 'investigation'])
+    .describe(
+      'What Kibana object to create: alert (alerting rule), dashboard (panel), slo (service level objective), viz (Lens visualization), investigation (case/investigation for human follow-up)'
+    ),
   query_type: z
     .enum(['row', 'stats'])
     .default('row')

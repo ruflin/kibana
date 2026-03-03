@@ -15,8 +15,16 @@ import type { AttachmentToolsOptions } from './types';
 
 const attachmentAddSchema = z.object({
   id: z.string().optional().describe('Optional custom ID for the attachment'),
-  type: z.string().describe('Type of attachment (e.g., "text", "json", "code")'),
-  data: z.record(z.any()).describe('The attachment data/content as a JSON object, required'),
+  type: z
+    .string()
+    .describe(
+      'Type of attachment. Use "text" for plain text/markdown (data: { content: "..." }), "esql" for ES|QL queries (data: { query: "...", description?: "..." }). For structured data like JSON, use "text" with the JSON stringified in the content field.'
+    ),
+  data: z
+    .record(z.any())
+    .describe(
+      'The attachment data object. Shape depends on type: for "text" use { "content": "<text>" }, for "esql" use { "query": "<esql>", "description": "<optional>" }.'
+    ),
   description: z.string().optional().describe('Human-readable description of the attachment'),
 });
 
@@ -31,7 +39,7 @@ export const createAttachmentAddTool = ({
   id: attachmentTools.add,
   type: ToolType.builtin,
   description:
-    'Create a new attachment to store data for later use in the conversation. The "data" field is required and must contain the content to store. Attachments persist across conversation rounds and can be read, updated, or deleted.',
+    'Create a new attachment to store data for later use in the conversation. Use type "text" with data: { "content": "<your text>" } for text/markdown/JSON content. Use type "esql" with data: { "query": "<esql query>" } for ES|QL queries. Do NOT use type "json" — it does not exist; use "text" instead and put JSON in the content field.',
   schema: attachmentAddSchema,
   tags: ['attachment'],
   handler: async ({ id, type, data, description }, _context) => {

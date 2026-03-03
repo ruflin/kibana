@@ -28,7 +28,7 @@ export interface DiscoveryEvidence {
   change_point_p_value?: number;
 }
 
-export type SuggestionType = 'alert' | 'dashboard' | 'slo' | 'viz';
+export type SuggestionType = 'alert' | 'dashboard' | 'slo' | 'viz' | 'investigation';
 export type SuggestionStatus = 'pending' | 'accepted' | 'dismissed';
 
 export interface Recommendation {

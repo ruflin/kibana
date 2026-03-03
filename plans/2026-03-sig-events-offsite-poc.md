@@ -17,7 +17,7 @@ Reference: `poc/feature-skills` (single commit `2fed3b2e`) for patterns on Agent
 | 1 | Entity store integration | Use Security Entity Store HTTP APIs (`PUT /api/entity_store/entities/{entityType}`). LLM decides entity type (host/user/service/generic). No direct plugin dependency. |
 | 2 | Discoveries nesting depth | Max 3 levels (discovery → meta-discovery → meta²-discovery). |
 | 3 | Cross-references | Bi-directional explicit ID references stored in each document. |
-| 4 | Mermaid rendering | Render in existing Agent Builder chat UI conversation messages. |
+| 4 | Mermaid rendering | Render in Agent Builder chat UI conversation messages + standalone Topology tab in SigDiscovery page. |
 | 5 | LLM model selection | SigDiscovery Settings page wins. Agent Builder does not override. Tools read from settings. |
 | 6 | SigDiscovery Agent | Pre-built agent shipped by the Streams plugin via `agentBuilder.agents.register()`. |
 | 7 | Logs tools | Reuse existing observability tools + new streams-specific tools (see Workstream 4). |
@@ -172,7 +172,7 @@ interface Discovery {
 
 // --- Suggestion (ES|QL query suggestions) ---
 
-type SuggestionType = 'alert' | 'dashboard' | 'slo' | 'viz';
+type SuggestionType = 'alert' | 'dashboard' | 'slo' | 'viz' | 'investigation';
 type SuggestionStatus = 'pending' | 'accepted' | 'dismissed';
 
 interface Suggestion {
@@ -262,7 +262,7 @@ Suggestion documents (`doc_type: 'suggestion'`) share the same index. They reuse
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `suggestion_type` | keyword | `'alert'` / `'dashboard'` / `'slo'` / `'viz'` (maps from `Suggestion.type` — renamed to avoid collision with `doc_type`) |
+| `suggestion_type` | keyword | `'alert'` / `'dashboard'` / `'slo'` / `'viz'` / `'investigation'` (maps from `Suggestion.type` — renamed to avoid collision with `doc_type`) |
 | `esql_query` | text | The ES\|QL query being suggested |
 | `esql_query_semantic` | semantic_text | Semantic search over the query |
 | `reason` | text | Why this query was selected |
@@ -443,6 +443,7 @@ Each suggestion is an ES|QL query with a `type` field indicating what Kibana obj
 | `dashboard` | Powers a full dashboard (multiple panels, overview) | `FROM logs-nginx.* \| STATS req_count = COUNT(*), p99 = PERCENTILE(duration, 99) BY service.name, @timestamp = BUCKET(@timestamp, 5m)` |
 | `slo` | Measures a service level indicator for an SLO definition | `FROM logs-nginx.* \| STATS total = COUNT(*), good = COUNT_IF(status < 500) BY service.name \| EVAL sli = good / total` |
 | `viz` | Powers a single visualization (chart, table, metric, heatmap) | `FROM logs-nginx.* \| STATS error_rate = COUNT_IF(status >= 500) / COUNT(*) BY @timestamp = BUCKET(@timestamp, 1h)` |
+| `investigation` | Identifies a finding that requires human follow-up (case/investigation) | N/A — no ES\|QL query; the suggestion describes what to investigate and why |
 
 #### 3b. Suggestion Generation
 
@@ -455,7 +456,7 @@ Output: ES|QL queries with metadata.
 
 The LLM prompt instructs the agent to:
 1. For each high-relevance discovery, generate 1–3 ES|QL queries.
-2. Classify each query by type (`alert`, `dashboard`, `slo`, `viz`).
+2. Classify each query by type (`alert`, `dashboard`, `slo`, `viz`, `investigation`).
 3. Provide a `title` (what the query monitors), `description` (what it does technically), and `reason` (why this query was selected, referencing the discovery).
 4. Use STATS for stats queries (dashboards, SLOs, threshold alerts).
 5. Use row-based queries for event-level alerts.
@@ -466,7 +467,7 @@ Each suggestion includes:
 - `title` — human-readable name (e.g., "Error rate by service")
 - `description` — what the query does (e.g., "Counts 5xx errors per service per 5-minute bucket")
 - `reason` — why it was suggested (e.g., "Discovery found elevated error rates in nginx; this query enables continuous monitoring")
-- `type` — what Kibana object to create (`alert` / `dashboard` / `slo` / `viz`)
+- `type` — what Kibana object to create (`alert` / `dashboard` / `slo` / `viz` / `investigation`)
 - `priority` — derived from the source discovery's severity and relevance_score
 - `discovery_refs` — which discoveries it came from
 - `status: 'pending'` — user must accept/dismiss
@@ -478,6 +479,7 @@ For the POC, "Accept" marks the suggestion as accepted and copies the ES|QL quer
 - `dashboard` → create a dashboard with panels powered by this query
 - `slo` → create an SLO with this query as the SLI definition
 - `viz` → create a single Lens visualization from this query
+- `investigation` → open a case/investigation for human follow-up (no ES|QL query)
 
 Actual Kibana object creation is a stretch goal. The `type` field is informational for the POC — it guides the user on what to do with the query.
 
@@ -538,6 +540,8 @@ Add to `@kbn/agent-builder-server/allow_lists.ts`:
 `streams.get_discovery`,
 `streams.create_discovery`,
 `streams.run_discovery_pipeline`,
+// Streams tools — query promotion
+`streams.promote_queries`,
 // Streams tools — entity store
 `streams.push_entity_definition`,
 `streams.list_entities`,
@@ -558,6 +562,7 @@ Add to `@kbn/agent-builder-server/allow_lists.ts`:
 | `streams.run_discovery_pipeline` | Trigger the three-stage discovery pipeline | `streamNames[]`, optional `connectorId` |
 | `streams.push_entity_definition` | Push entity features to the Security Entity Store | `entities[]` (LLM decides type: host/user/service/generic) |
 | `streams.list_entities` | Search/list entities from the Security Entity Store | `entity_types[]` (required), optional `filterQuery`, `page`, `per_page`, `sort_field`, `sort_order` |
+| `streams.promote_queries` | Promote stored sig events queries to active Kibana alerting rules | `streamName`, optional `queryIds[]` (if omitted, promotes all unbacked queries) |
 
 #### 4c. Skills
 
@@ -574,7 +579,7 @@ Add to `@kbn/agent-builder-server/allow_lists.ts`:
 - Registry tools: `streams.get_stream_features`, `streams.get_sig_events_queries`, `streams.get_sig_events_with_change_points`, `streams.search_discoveries`, `streams.get_discovery`, `streams.create_discovery`, `streams.run_discovery_pipeline`
 
 **Skill: `generate-suggestions`**
-- Content: instructions on generating ES|QL query suggestions from discoveries. Covers: when to use STATS vs row queries, how to classify by type (alert/dashboard/slo/viz), how to write the reason field referencing the source discovery, how to derive priority from relevance_score, and how to use change point data to inform alert threshold suggestions.
+- Content: instructions on generating ES|QL query suggestions from discoveries. Covers: when to use STATS vs row queries, how to classify by type (alert/dashboard/slo/viz/investigation), how to write the reason field referencing the source discovery, how to derive priority from relevance_score, and how to use change point data to inform alert threshold suggestions.
 - Registry tools: `streams.search_discoveries`, `streams.get_discovery`, `streams.get_stream_features`, `streams.get_sig_events_queries`, `streams.get_sig_events_with_change_points`
 
 **Skill: `push-entity-definition`**
@@ -602,7 +607,7 @@ agentBuilder.agents.register({
     instructions: getSigDiscoveryAgentInstructions(),
     tools: [{
       tool_ids: [
-        // Streams tools — all 11
+        // Streams tools — all 12
         'streams.get_stream_features',
         'streams.upsert_features',
         'streams.get_sig_events_queries',
@@ -612,6 +617,7 @@ agentBuilder.agents.register({
         'streams.get_discovery',
         'streams.create_discovery',
         'streams.run_discovery_pipeline',
+        'streams.promote_queries',
         'streams.push_entity_definition',
         'streams.list_entities',
         // Observability tools (globally available from observability_agent_builder)
@@ -833,7 +839,8 @@ Add a `suggestions` tab to the SigDiscovery page:
 Route: `/_discovery/suggestions`
 
 Components:
-- **SuggestionsTable** — list of suggestions with columns: title, type (alert/dashboard/SLO/viz), priority, status, source discoveries
+- **"Generate Suggestions" button** — triggers a dedicated suggestion generation task (`streams_suggestion_generation`) that reads all persisted discoveries and runs only Stage 3. Uses the same task polling pattern as the Discoveries tab (schedule → poll → toast on completion). Cancel button shown during generation.
+- **SuggestionsTable** — list of suggestions with columns: title, type (alert/dashboard/SLO/viz/investigation), priority, status, source discoveries
 - **SuggestionDetailFlyout** — expanded view showing:
   - Title and description
   - ES|QL query with syntax highlighting (read-only code editor)
@@ -842,26 +849,36 @@ Components:
   - "Open in Discover" button (opens ES|QL query in Discover)
   - "Copy query" button
 - **Actions** — "Accept" (marks accepted, copies query), "Dismiss", "Re-generate"
-- **Filters** — type (alert/dashboard/SLO/viz), priority, status (pending/accepted/dismissed)
+- **Filters** — type (alert/dashboard/SLO/viz/investigation), priority, status (pending/accepted/dismissed)
 
-#### 7c. Pipeline Output Tab
+Server-side: `POST /internal/streams/_suggestions/_task` (schedule/cancel/acknowledge) and `POST /internal/streams/_suggestions/_status` (poll). Task type: `streams_suggestion_generation`. Standalone function `generateSuggestionsFromDiscoveries()` reads all persisted discoveries and runs only the suggestion generation prompt (Stage 3).
 
-The existing `/_discovery/pipeline` tab (renamed from "insights") shows the latest pipeline run output:
-- Discovery cards (`DiscoveryCard` — renamed from `InsightCard` in Workstream 0) showing relevance score, severity, change point indicators, and embedded recommendations
-- Summary statistics (total discoveries, average relevance score, change point distribution)
+#### 7c. Topology Tab (New)
+
+Add a `topology` tab to the SigDiscovery page:
+
+Route: `/_discovery/topology`
+
+Components:
+- **MermaidDiagram** — renders a Mermaid diagram generated by the LLM from stream features. Auto-generates when the tab is first opened. Includes fullscreen modal (90vw × 85vh) with scaling SVG.
+- **"Regenerate" button** — re-triggers topology generation on demand.
+- **Loading state** — spinner with description while the LLM generates the diagram.
+- **Error state** — falls back to raw Mermaid source display if rendering fails.
+
+Server-side: `POST /internal/streams/_topology` route. Fetches all features across all streams via `featureClient.getAllFeatures()`, summarizes them (id, title, type, subtype, stream_name, description, confidence), sends to the LLM via `inferenceClient.chatComplete()` with a system prompt instructing Mermaid `graph TD`/`graph LR` generation. Returns raw Mermaid code. The UI strips markdown fences and renders via lazy-loaded `mermaid` npm package.
 
 #### 7d. Updated Route Config
 
 ```typescript
 // In routes/config.tsx, update discovery tabs:
-tabs: ['streams', 'features', 'queries', 'discoveries', 'suggestions', 'pipeline', 'settings']
+tabs: ['streams', 'features', 'queries', 'discoveries', 'suggestions', 'topology', 'settings']
 ```
 
 **Commit plan:**
-- Commit 22: Route config + tab additions
+- Commit 22: Route config + tab additions (discoveries, suggestions, topology)
 - Commit 23: DiscoveriesTable + DiscoveryDetailFlyout
-- Commit 24: SuggestionsTable + SuggestionDetailFlyout
-- Commit 25: Pipeline output tab (renamed from Insights)
+- Commit 24: SuggestionsTable + SuggestionDetailFlyout + "Generate Suggestions" button with task polling
+- Commit 25: TopologyTab with LLM-generated Mermaid diagram
 - Commit 26: Settings tab UI
 
 ---
@@ -935,7 +952,7 @@ Phase 4: Entity Store (Workstream 5)
   Validate: type check, entity mapping unit tests
 
 Phase 5: Settings & UI (Workstreams 6, 7)
-  Commits 20-26: Settings, Discoveries page, Suggestions page
+  Commits 20-26: Settings, Discoveries page, Suggestions page (with Generate button), Topology tab
   Validate: type check streams_app tsconfig, lint, check_changes.ts
 
 Phase 6: ES|QL STATS (Workstream 8b-d)
@@ -1006,6 +1023,15 @@ Record significant deviations, failed approaches, and non-obvious discoveries he
 | 2026-03-03 | WS4 | Mermaid `getBBox is not a function` error | Mermaid v11's `render()` calls `getBBox()` on SVG elements, which requires them to be in a fully visible, laid-out DOM context. Off-screen containers (`left: -9999px`) and hidden containers (`visibility: hidden; height: 0`) all break it. Fix: render directly into the component's mounted `ref` container — a real visible `<div>` already in the page. |
 | 2026-03-03 | WS4 | Mermaid diagrams too small inline + fullscreen modal | Mermaid renders SVGs with fixed pixel dimensions that are often small. Fix: CSS override `& svg { width: 100%; height: auto }` on the inline container so diagrams scale to fill the chat panel. Added fullscreen button that opens an `EuiModal` (90vw × 85vh) with the SVG scaled to fill. |
 | 2026-03-03 | WS4 | `get_stream_features` tool failed with Zod validation errors for `feature.type` and `feature.id` | Some stored features in the `.kibana_streams_features` index are missing required fields (`type`, `id`), causing `featureClient.getFeatures()` to throw a Zod validation error. Fix: added a fallback path that does a raw ES search and manually maps the nested `feature.*` fields with defaults (`type: 'unknown'`, `id` from `uuid`/`_id`). Final filter removes any features still lacking valid `id` or `type`. |
+| 2026-03-03 | WS7 | Discoveries tab simplified — removed flickering and dual data sources | The tab had two competing data sources: `Summary` component with in-memory `Insight[]` state and `DiscoveriesTab` fetching persisted discoveries from the API. This caused layout flickering. Simplified to a single layout: "Generate discoveries" button at top, persisted discoveries table below, flyout on click. Removed dependency on `Summary` component and its `queriesFetch` loading state. |
+| 2026-03-03 | WS0 | Insight → Discovery rename completed on client side | Moved `components/insights/tab.tsx` to `components/discoveries/tab.tsx`. Renamed hook file `use_insights_discovery_api.ts` to `use_discovery_pipeline_api.ts`. Updated all imports in `page.tsx`, `streams_view.tsx`, and the new tab. Old `insights/` directory files (`summary.tsx`, `insight_card.tsx`, `feedback_buttons.tsx`) are now dead code — no longer imported. Server-side `insights/` directory names kept as-is (deeper infrastructure, variable names already use "Discovery"). |
+| 2026-03-03 | WS4 | `promote_queries` tool added to Agent Builder | New tool wraps `queryClient.promoteQueries(definition, queryIds)` to create Kibana alerting rules from stored sig events queries. Takes `streamName` and optional `queryIds`; if no IDs given, promotes all unbacked queries for the stream. Added to allow list (now 12 tools total). |
+| 2026-03-03 | WS3 | `investigation` suggestion type added | Added `'investigation'` to `SuggestionType` union for findings that need human follow-up but don't map to alert/dashboard/SLO/viz. Updated schema, Stage 3 prompt, and suggestions tab UI (label: "Investigation", icon: `folderCheck`). |
+| 2026-03-03 | WS4 | `attachments.add` tool failing — LLM passing wrong type and field names | The tool's schema descriptions were too vague — LLM used `type: "json"` (doesn't exist) and omitted the required `content` field for `text` type. Fix: improved schema descriptions to explicitly list valid types (`text`, `esql`), required data shapes (`{ content: "..." }` for text), and a note that `json` type doesn't exist. |
+| 2026-03-03 | WS3/WS7 | "Generate Suggestions" button added to Suggestions tab | Suggestions were previously only generated as Stage 3 of the discovery pipeline. Added a dedicated suggestion generation task (`streams_suggestion_generation`) that reads all persisted discoveries and runs only Stage 3 (suggestion generation). New routes: `POST /internal/streams/_suggestions/_task` and `POST /internal/streams/_suggestions/_status`. UI uses the same task polling pattern as the Discoveries tab. |
+| 2026-03-03 | WS7 | Topology tab added to SigDiscovery page | New tab that generates a Mermaid diagram from stream features using LLM. Diagram is generated on-demand when the tab is first opened. Uses `POST /internal/streams/_topology` route that fetches all features via `featureClient.getAllFeatures()`, sends a summary to the LLM with a system prompt for Mermaid diagram generation, and returns the raw Mermaid code. UI renders the diagram using the same Mermaid rendering pattern as Agent Builder (lazy-loaded `mermaid` npm package, direct DOM rendering, fullscreen modal). |
+| 2026-03-03 | WS4 | Features tab Zod validation crash on malformed documents | `FeatureService.migrateSource` used `.parse()` which throws on invalid documents. Some stored features are missing required fields (`type`, `id`, `uuid`, `properties`, `confidence`, `status`, `last_seen`). Fix: replaced `.parse()` with `.safeParse()` — if validation fails, apply defaults for all required fields (e.g., `type: 'unknown'`, `confidence: 0`, `status: 'active'`) and re-parse. This makes all feature reads resilient to malformed documents across all consumers (Features tab, Topology tab, Agent Builder tools). |
+| 2026-03-03 | WS7 | Topology route `chatComplete` API requires `system` as top-level parameter | The initial implementation passed the system prompt as a message with `role: 'system'` in the `messages` array. The `inferenceClient.chatComplete()` API expects the system prompt as a top-level `system` parameter, and the `messages` array only accepts `MessageRole.User`, `MessageRole.Assistant`, and `MessageRole.Tool` roles. Passing `'system'` as a role caused an Internal Server Error. Fix: moved the system prompt to the `system` parameter and used `MessageRole.User` from `@kbn/inference-common` for the user message. **Lesson:** Always use the `MessageRole` enum (not string literals) and pass system prompts via the `system` parameter, not as a message. |
 
 ---
 
@@ -1188,7 +1214,7 @@ All questions have been resolved. Decisions are recorded here for reference.
 - `src/platform/packages/shared/kbn-storage-adapter/types.ts` — added `semantic_text` field type support
 
 ### Schema Package
-- `x-pack/platform/packages/shared/kbn-streams-schema/src/discovery/index.ts` — new: Discovery, Suggestion, Recommendation, DiscoveryPipelineResult types
+- `x-pack/platform/packages/shared/kbn-streams-schema/src/discovery/index.ts` — new: Discovery, Suggestion, Recommendation, DiscoveryPipelineResult types; added `investigation` to SuggestionType union
 - `x-pack/platform/packages/shared/kbn-streams-schema/src/insights/index.ts` — extended Insight type (kept for backward compat)
 - `x-pack/platform/packages/shared/kbn-streams-schema/src/queries/index.ts` — queryType extension
 - `x-pack/platform/packages/shared/kbn-streams-schema/index.ts` — exports for new types
@@ -1211,27 +1237,45 @@ All questions have been resolved. Decisions are recorded here for reference.
 - `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/discovery_settings/route.ts` — settings GET/PUT routes
 - `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/entity_store/route.ts` — entity store proxy routes
 - `x-pack/platform/plugins/shared/streams/server/routes/utils/resolve_connector_id.ts` — hardcoded POC fallback connector
-- `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/` — 11 tool definitions (search_discoveries, get_discovery, create_discovery, run_discovery_pipeline, list_entities, get_stream_features, upsert_features, get_sig_events_queries, upsert_sig_events_queries, get_sig_events_with_change_points, push_entity_definition)
-- `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/types.ts` — StreamsToolsDependencies interface
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/` — 12 tool definitions (search_discoveries, get_discovery, create_discovery, run_discovery_pipeline, list_entities, get_stream_features, upsert_features, get_sig_events_queries, upsert_sig_events_queries, get_sig_events_with_change_points, push_entity_definition, promote_queries)
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/promote_queries.ts` — new: promotes stored queries to active Kibana alerting rules
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/types.ts` — StreamsToolsDependencies interface (added `getStreamsClient`)
 - `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/register_tools.ts` — centralized tool registration
 - `x-pack/platform/plugins/shared/streams/server/agent_builder/skills/` — 5 skill definitions (generate_discoveries, extract_stream_features, generate_sig_events_queries, generate_suggestions, push_entity_definition)
 - `x-pack/platform/plugins/shared/streams/server/agent_builder/agents/sig_discovery_agent.ts` — SigDiscovery agent definition
 - `x-pack/platform/plugins/shared/streams/server/agent_builder/constants.ts` — tool/agent ID constants
 - `x-pack/platform/plugins/shared/streams/server/agent_builder/register_agent_builder.ts` — orchestrates all registrations
 
+### Streams Plugin (Server) — Feature Resilience
+- `x-pack/platform/plugins/shared/streams/server/lib/streams/feature/feature_service.ts` — `migrateSource` uses `safeParse()` with default-patching for malformed documents (resilient to missing `type`, `id`, `uuid`, `properties`, `confidence`, `status`, `last_seen`)
+
+### Streams Plugin (Server) — Suggestion Generation
+- `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/generate_suggestions.ts` — new: standalone suggestion generation from persisted discoveries (Stage 3 only)
+- `x-pack/platform/plugins/shared/streams/server/lib/tasks/task_definitions/suggestion_generation.ts` — new: `streams_suggestion_generation` task type
+- `x-pack/platform/plugins/shared/streams/server/lib/tasks/task_definitions/index.ts` — registered suggestion generation task
+- `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/discoveries/route.ts` — added `POST _suggestions/_task` and `POST _suggestions/_status` routes
+
+### Streams Plugin (Server) — Topology
+- `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/topology/route.ts` — new: `POST _topology` route, generates Mermaid diagram from features via LLM
+- `x-pack/platform/plugins/shared/streams/server/routes/index.ts` — registered topology routes
+
 ### Streams App (UI)
-- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/page.tsx` — added Suggestions tab
-- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/insights/tab.tsx` — fetches persisted discoveries from API, shows table + pipeline trigger
-- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/insights/summary.tsx` — added `onDiscoveriesGenerated` callback
-- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/suggestions/suggestions_tab.tsx` — new: SuggestionsTable with flyout, accept/dismiss
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/page.tsx` — added Suggestions, Topology tabs; updated imports for renamed files
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/discoveries/tab.tsx` — (renamed from `insights/tab.tsx`) simplified: "Generate discoveries" button + persisted discoveries table + detail flyout on row click
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/suggestions/suggestions_tab.tsx` — "Generate suggestions" button with task polling, SuggestionsTable with flyout, accept/dismiss; `investigation` type label + icon
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/topology/topology_tab.tsx` — new: Topology tab with LLM-generated Mermaid diagram, auto-generates on tab open, fullscreen modal
 - `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/settings/settings_page.tsx` — functional connector dropdowns via EuiSuperSelect
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/streams_view/streams_view.tsx` — updated import for renamed hook
+- `x-pack/platform/plugins/shared/streams_app/public/hooks/use_discovery_pipeline_api.ts` — (renamed from `use_insights_discovery_api.ts`) React hook for discovery pipeline API
+- `x-pack/platform/plugins/shared/streams_app/public/hooks/use_suggestion_pipeline_api.ts` — new: React hook for suggestion generation task API
 
 ### Agent Builder
 - `x-pack/platform/packages/shared/agent-builder/agent-builder-common/base/namespaces.ts` — streams namespace
-- `x-pack/platform/packages/shared/agent-builder/agent-builder-server/allow_lists.ts` — 11 streams tools + agent in allow list
+- `x-pack/platform/packages/shared/agent-builder/agent-builder-server/allow_lists.ts` — 12 streams tools + agent in allow list
 - `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/chat_message_text.tsx` — Mermaid rendering integration
-- `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/markdown_plugins/mermaid_plugin.tsx` — new: mermaid parsing + rendering
+- `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/markdown_plugins/mermaid_plugin.tsx` — new: mermaid parsing + rendering (direct DOM render for getBBox, inline scaling, fullscreen modal)
 - `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/markdown_plugins/index.ts` — export mermaid plugin
+- `x-pack/platform/plugins/shared/agent_builder/server/services/tools/builtin/attachments/attachment_add.ts` — improved schema descriptions to guide LLM on valid types and data shapes
 
 ---
 
