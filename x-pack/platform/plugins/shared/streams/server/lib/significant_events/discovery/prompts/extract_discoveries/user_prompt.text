@@ -1,0 +1,7 @@
+Analyze the significant events for this data stream and generate structured discoveries.
+
+`data stream`
+{{{streamName}}}
+
+`queries with event data`
+{{{queries}}}

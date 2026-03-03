@@ -47,10 +47,12 @@ interface StreamsSignificantEventsQueriesGeneratedProps {
   tool_usage: SignificantEventsToolUsage;
 }
 
-interface StreamsInsightsGeneratedProps {
+interface StreamsDiscoveriesGeneratedProps {
   input_tokens_used: number;
   output_tokens_used: number;
   cached_tokens_used?: number;
+  discovery_count?: number;
+  suggestion_count?: number;
 }
 
 interface StreamsProcessingPipelineSuggestedProps {
@@ -80,7 +82,7 @@ export {
   type StreamsSystemIdentificationIdentifiedProps,
   type StreamsDescriptionGeneratedProps,
   type StreamsSignificantEventsQueriesGeneratedProps,
-  type StreamsInsightsGeneratedProps,
+  type StreamsDiscoveriesGeneratedProps,
   type StreamsProcessingPipelineSuggestedProps,
   type StreamsFeaturesIdentifiedProps,
 };

@@ -58,7 +58,7 @@ const MESSAGE_BUCKETS: Record<number, string[]> = {
   ],
   40: [
     i18n.translate('xpack.streams.useWaitingForAiMessage.40s.1', {
-      defaultMessage: 'Compiling insights into a final response...',
+      defaultMessage: 'Compiling discoveries into a final response...',
     }),
   ],
   45: [

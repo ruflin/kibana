@@ -8,7 +8,9 @@
 import type { SavedObjectsServiceSetup } from '@kbn/core/server';
 
 import { getStreamsPromptsSavedObject } from './significant_events/prompts_config';
+import { getDiscoverySettingsSavedObject } from './significant_events/discovery_settings';
 
 export const registerStreamsSavedObjects = (savedObjectsService: SavedObjectsServiceSetup) => {
   savedObjectsService.registerType(getStreamsPromptsSavedObject());
+  savedObjectsService.registerType(getDiscoverySettingsSavedObject());
 };

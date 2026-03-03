@@ -20,7 +20,7 @@ import { useKibana } from '../../../../hooks/use_kibana';
 import { useStreamsAppFetch } from '../../../../hooks/use_streams_app_fetch';
 import { Summary } from './summary';
 
-export function InsightsTab() {
+export function DiscoveriesTab() {
   const {
     dependencies: {
       start: {
@@ -68,7 +68,7 @@ export function InsightsTab() {
                 <EuiTitle size="s">
                   <h2>
                     {i18n.translate(
-                      'xpack.streams.sigEventsDiscovery.insightsTab.noEventsFoundTitle',
+                      'xpack.streams.sigEventsDiscovery.discoveriesTab.noEventsFoundTitle',
                       {
                         defaultMessage: 'No events found to analyze',
                       }
@@ -79,7 +79,7 @@ export function InsightsTab() {
               <EuiFlexItem grow={false}>
                 <EuiText size="s" textAlign="center" css={{ maxWidth: 400 }}>
                   {i18n.translate(
-                    'xpack.streams.sigEventsDiscovery.insightsTab.noEventsFoundDescription',
+                    'xpack.streams.sigEventsDiscovery.discoveriesTab.noEventsFoundDescription',
                     {
                       defaultMessage:
                         'Newly created queries need time to collect data before analysis can begin.',

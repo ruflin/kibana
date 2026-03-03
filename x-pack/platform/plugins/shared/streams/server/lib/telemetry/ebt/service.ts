@@ -12,7 +12,7 @@ import {
   streamsSystemIdentificationIdentifiedEventType,
   streamsDescriptionGeneratedEventType,
   streamsSignificantEventsGeneratedEventType,
-  streamsInsightsGeneratedEventType,
+  streamsDiscoveriesGeneratedEventType,
   streamsProcessingPipelineSuggestedEventType,
   streamsFeaturesIdentifiedEventType,
 } from './events';
@@ -30,7 +30,7 @@ export class EbtTelemetryService {
     this.analytics.registerEventType(streamsSystemIdentificationIdentifiedEventType);
     this.analytics.registerEventType(streamsDescriptionGeneratedEventType);
     this.analytics.registerEventType(streamsSignificantEventsGeneratedEventType);
-    this.analytics.registerEventType(streamsInsightsGeneratedEventType);
+    this.analytics.registerEventType(streamsDiscoveriesGeneratedEventType);
     this.analytics.registerEventType(streamsProcessingPipelineSuggestedEventType);
     this.analytics.registerEventType(streamsFeaturesIdentifiedEventType);
   }

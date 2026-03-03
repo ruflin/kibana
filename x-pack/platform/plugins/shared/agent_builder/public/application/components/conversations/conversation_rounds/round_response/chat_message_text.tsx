@@ -41,6 +41,8 @@ import {
   visualizationTagParser,
   renderAttachmentTagParser,
   createRenderAttachmentRenderer,
+  mermaidLanguagePlugin,
+  MermaidRenderer,
 } from './markdown_plugins';
 import { useStepsFromPrevRounds } from '../../../../hooks/use_conversation';
 import { useConversationContext } from '../../../../context/conversation/conversation_context';
@@ -150,6 +152,14 @@ export function ChatMessageText({
           </>
         );
       },
+      mermaid: (props) => {
+        return (
+          <>
+            <MermaidRenderer value={props.value} />
+            <EuiSpacer size="m" />
+          </>
+        );
+      },
       table: (props) => (
         <>
           <EuiTable
@@ -194,6 +204,7 @@ export function ChatMessageText({
       parsingPluginList: [
         loadingCursorPlugin,
         esqlLanguagePlugin,
+        mermaidLanguagePlugin,
         visualizationTagParser,
         renderAttachmentTagParser,
         ...parsingPlugins,

@@ -22,8 +22,8 @@ Reference: `poc/feature-skills` (single commit `2fed3b2e`) for patterns on Agent
 | 6 | SigDiscovery Agent | Pre-built agent shipped by the Streams plugin via `agentBuilder.agents.register()`. |
 | 7 | Logs tools | Reuse existing observability tools + new streams-specific tools (see Workstream 4). |
 | 8 | Data persistence | Sig events query *results* → own data stream. Discoveries + suggestions → single managed index (`.kibana_streams_discoveries`). Features stay in `.kibana_streams_features`. |
-| 9 | Semantic indexing | Assume model deployed. Use `semantic_text` field type with inference ID `.elser-2-elasticsearch` (create index directly, not via StorageIndexAdapter which lacks `semantic_text` support). |
-| 10 | ES\|QL STATS | Extend query schema with `queryType: 'row' \| 'aggregation'`, allow raw ES\|QL for aggregation queries, add separate execution/result handling path. |
+| 9 | Semantic indexing | Assume model deployed. Use `semantic_text` field type with inference ID `.elser-2-elasticsearch`. `StorageIndexAdapter` has been extended to support `semantic_text` natively via `types.semantic_text({ inference_id })`. |
+| 10 | ES\|QL STATS | Extend query schema with `queryType: 'row' \| 'stats'`, allow raw ES\|QL for stats queries, add separate execution/result handling path. |
 
 ---
 
@@ -226,7 +226,7 @@ The score is used for:
 
 Extend existing types:
 - `Feature`: add `discovery_refs: string[]` and `query_refs: string[]` for bi-directional refs.
-- `StreamQuery`: add `queryType: 'row' | 'aggregation'`, make `kql` optional when `queryType === 'aggregation'`, add `feature_refs: string[]` and `discovery_refs: string[]`.
+- `StreamQuery`: add `queryType: 'row' | 'stats'`, make `kql` optional when `queryType === 'stats'`, add `feature_refs: string[]` and `discovery_refs: string[]`.
 
 #### 1b. Discoveries Index
 
@@ -284,7 +284,7 @@ Mapping follows the existing alerts pattern but includes aggregation result supp
 | `@timestamp` | date | |
 | `query_id` | keyword | Reference to query asset UUID |
 | `stream_name` | keyword | |
-| `query_type` | keyword | `'row'` or `'aggregation'` |
+| `query_type` | keyword | `'row'` or `'stats'` |
 | `result` | object (enabled: false) | Raw result payload |
 | `event_count` | long | |
 
@@ -389,7 +389,7 @@ FROM stream | WHERE KQL("...") | METADATA _id, _source
 ```
 Returns `{ _id, _source }[]`.
 
-**Aggregation queries (new):**
+**Stats queries (new):**
 ```
 FROM stream | WHERE KQL("...") | STATS count = COUNT(*) BY host.name
 ```
@@ -399,7 +399,7 @@ The tool detects query type from the query schema (`queryType` field) or by pars
 
 `get_query_results` similarly branches:
 - Row queries → return documents
-- Aggregation queries → return tabular results with column metadata
+- Stats queries → return tabular results with column metadata
 
 #### 2c. Cross-Reference Writing
 
@@ -457,7 +457,7 @@ The LLM prompt instructs the agent to:
 1. For each high-relevance discovery, generate 1–3 ES|QL queries.
 2. Classify each query by type (`alert`, `dashboard`, `slo`, `viz`).
 3. Provide a `title` (what the query monitors), `description` (what it does technically), and `reason` (why this query was selected, referencing the discovery).
-4. Use STATS for aggregation queries (dashboards, SLOs, threshold alerts).
+4. Use STATS for stats queries (dashboards, SLOs, threshold alerts).
 5. Use row-based queries for event-level alerts.
 6. Reference the correct stream indices from the discovery's `stream_refs`.
 
@@ -566,7 +566,7 @@ Add to `@kbn/agent-builder-server/allow_lists.ts`:
 - Registry tools: `streams.get_stream_features`, `streams.upsert_features`
 
 **Skill: `generate-sig-events-queries`**
-- Content: instructions on analyzing features and generating KQL/ES|QL queries. Covers: how to use existing change point data to inform query design, when to generate row vs aggregation queries.
+- Content: instructions on analyzing features and generating KQL/ES|QL queries. Covers: how to use existing change point data to inform query design, when to generate row vs stats queries.
 - Registry tools: `streams.get_stream_features`, `streams.get_sig_events_queries`, `streams.upsert_sig_events_queries`, `streams.get_sig_events_with_change_points`
 
 **Skill: `generate-discoveries`**
@@ -868,44 +868,44 @@ tabs: ['streams', 'features', 'queries', 'discoveries', 'suggestions', 'pipeline
 
 ### Workstream 8: ES|QL STATS Support
 
-**Goal:** Full ES|QL support including aggregation queries.
+**Goal:** Full ES|QL support including stats (aggregation) queries.
 
 #### 8a. Query Schema Extension
 
 In `@kbn/streams-schema`:
-- Add `queryType?: 'row' | 'aggregation'` to `StreamQuery` (default `'row'`).
-- Make `kql` optional when `queryType === 'aggregation'`.
-- For aggregation queries, `esql.query` contains the full ES|QL (not derived from KQL).
+- Add `queryType?: 'row' | 'stats'` to `StreamQuery` (default `'row'`).
+- Make `kql` optional when `queryType === 'stats'`.
+- For stats queries, `esql.query` contains the full ES|QL (not derived from KQL).
 
 #### 8b. Query Execution
 
 In `executeEsqlRequest`:
 - Detect query type from schema or by parsing ES|QL AST for STATS commands.
 - Row queries: existing path (return `{ _id, _source }[]`).
-- Aggregation queries: return `{ columns, values }` (raw tabular result).
+- Stats queries: return `{ columns, values }` (raw tabular result).
 
 #### 8c. LLM Generation
 
 Update the `add_queries` tool schema to accept:
-- `queryType: 'row' | 'aggregation'`
-- `esql_query` (raw ES|QL, required when `queryType === 'aggregation'`)
+- `queryType: 'row' | 'stats'`
+- `esql_query` (raw ES|QL, required when `queryType === 'stats'`)
 - `kql` (required when `queryType === 'row'`)
 
-Update prompts to explain when to use STATS (e.g., "Use aggregation queries when you need counts, averages, or groupings over time windows").
+Update prompts to explain when to use STATS (e.g., "Use stats queries when you need counts, averages, or groupings over time windows").
 
 #### 8d. Rule Executor
 
-For aggregation queries, the rule executor needs a different alerting model:
-- **Threshold-based:** Fire when an aggregation value exceeds a threshold.
+For stats queries, the rule executor needs a different alerting model:
+- **Threshold-based:** Fire when a stats value exceeds a threshold.
 - **Change-based:** Fire when a STATS result changes significantly from baseline.
 
-For the POC, aggregation query results are stored in the results data stream but may not create alerts (alerts are a stretch goal for STATS queries).
+For the POC, stats query results are stored in the results data stream but may not create alerts (alerts are a stretch goal for STATS queries).
 
 **Commit plan:**
 - Commit 27: Query schema extension
 - Commit 28: Execution path for STATS
 - Commit 29: LLM generation updates for STATS
-- Commit 30: Results storage for aggregation queries
+- Commit 30: Results storage for stats queries
 
 ---
 
@@ -972,7 +972,28 @@ Record significant deviations, failed approaches, and non-obvious discoveries he
 
 | Date | Workstream | What Changed | Why |
 |------|-----------|--------------|-----|
-| *(filled during implementation)* | | | |
+| 2026-03-02 | WS1 | `StorageIndexAdapter` used instead of `esClient.indices.create` for `.kibana_streams_discoveries` | `StorageIndexAdapter` provides managed lifecycle (template, alias, write index). `semantic_text` fields are deferred — they require either extending `StorageIndexAdapter` or a post-creation `putMapping` call. For the POC, basic fields are sufficient; semantic search can be added via `putMapping` in a follow-up commit. |
+| 2026-03-02 | WS1 | `nested` type not supported by `StorageIndexAdapter` — used `object({ enabled: false })` for `evidence` and `recommendations` | `StorageIndexAdapter` types only support `keyword`, `text`, `long`, `date`, `boolean`, `object`. Nested queries are not needed for the POC since evidence/recommendations are read as whole arrays. If nested filtering is needed later, switch to direct index creation. |
+| 2026-03-02 | WS1 | `feedback` field type mismatch — `null` not assignable to `string \| undefined` in StorageIndexAdapter | The `Discovery.feedback` type includes `null` but StorageIndexAdapter keyword fields expect `string \| undefined`. Fixed by coercing `null` to `undefined` on write (`feedback ?? undefined`). |
+| 2026-03-02 | WS0 | `IStorageClient` vs `SimpleIStorageClient` — `Record<string, unknown>` fails type check | `IStorageClient<Settings, Doc>` requires exact type match between document type and storage schema. Must use `SimpleIStorageClient<Settings>` which derives the document type from settings. This is a non-obvious pattern — the FeatureClient uses `IStorageClient` with a custom `StoredFeature` type that exactly matches the schema. |
+| 2026-03-02 | WS4 | Agent Builder `setup()` is synchronous — cannot use `await import()` | The Streams plugin `setup()` method is not async. Dynamic imports for Agent Builder registration must use `.then()` instead of `await`. |
+| 2026-03-02 | WS4 | Only 5 of 11 planned tools added to allow list | The initial implementation focused on discovery-specific tools. The remaining 6 tools (`get_stream_features`, `upsert_features`, `get_sig_events_queries`, `upsert_sig_events_queries`, `get_sig_events_with_change_points`, `push_entity_definition`) need to be added to the allow list and registered via `agentBuilder.tools.register()`. |
+| 2026-03-02 | WS4 | Tool implementations not registered | Allow list entries were added but `agentBuilder.tools.register()` was never called. Tools need actual implementation code that wraps the underlying services (DiscoveryClient, FeatureClient, QueryClient, etc.). This is the largest remaining gap. |
+| 2026-03-02 | WS2/WS3 | Stage 3 (suggestion generation) not implemented | The pipeline currently returns `suggestions: []`. A third prompt stage needs to be added that takes enriched discoveries and generates ES\|QL query suggestions. |
+| 2026-03-02 | WS8 | `query_type` uses `'row' \| 'stats'` instead of `'row' \| 'aggregation'` | The plan specified `'aggregation'` but the implementation used `'stats'` (matching the ES\|QL keyword). Plan updated to use `'stats'` throughout for consistency with ES\|QL terminology. |
+| 2026-03-03 | WS1 | `semantic_text` field type added to `StorageIndexAdapter` | Extended `StorageMappingPropertyType` union, `StorageMappingProperty` union, `types` factory object, and `PrimitiveOf` mapping in `kbn-storage-adapter/types.ts`. This is a platform-level change that benefits all consumers. `semantic_text` fields use `inference_id` parameter (default `.elser-2-elasticsearch`). |
+| 2026-03-03 | WS1 | Semantic fields added to discoveries index | Added `title_semantic`, `description_semantic`, `esql_query_semantic` to `storage_settings.ts` using `types.semantic_text({ inference_id: '.elser-2-elasticsearch' })`. `DiscoveryClient` write methods populate semantic fields by copying from source fields (e.g., `title_semantic = title`). Semantic search uses `{ semantic: { field, query } }` query type. |
+| 2026-03-03 | WS4 | All 11 tools implemented and registered | Tools are created in `agent_builder/tools/` and registered via `agentBuilder.tools.register()` in `register_agent_builder.ts`. Tool handlers receive `StreamsToolsDependencies` which provides `getDiscoveryClient(request)` and `core` for lazy service instantiation. Some tools (e.g., `run_discovery_pipeline`) instantiate services inline since they need the full pipeline context. |
+| 2026-03-03 | WS4 | 5 skills implemented | Added `extract-stream-features`, `generate-sig-events-queries`, `generate-suggestions`, `push-entity-definition` skills alongside the existing `generate-discoveries` skill. Each skill references the appropriate tool IDs. |
+| 2026-03-03 | WS2/WS3 | Stage 3 (suggestion generation) implemented | Added `GenerateSuggestionsPrompt`, `suggestion_schema.ts`, and integrated Stage 3 into `generateDiscoveries()`. The pipeline now: Stage 1 (extract) → Stage 2 (enrich) → Stage 3 (generate suggestions). Suggestions are persisted via `DiscoveryClient.createSuggestion()`. Stage 3 failures are caught and logged without failing the entire pipeline. |
+| 2026-03-03 | WS4 | `readSignificantEventsFromAlertsIndices` requires `queryClient` + `scopedClusterClient` | The function signature takes `(params, { queryClient, scopedClusterClient })`, not `esClient` directly. The `get_sig_events_with_change_points` tool instantiates `QueryService` to get a scoped `queryClient`. `from`/`to` must be `Date` objects, not strings. |
+| 2026-03-03 | WS7 | Suggestions tab added to SigDiscovery page | New `SuggestionsTab` component at `components/suggestions/suggestions_tab.tsx`. Uses `GET /internal/streams/_suggestions` and `POST /internal/streams/_suggestions/{uuid}/_status` APIs. Shows type icon, priority badge, status badge, and flyout with ES\|QL code block. Accept/dismiss buttons update suggestion status. |
+| 2026-03-03 | WS5 | Entity Store enablement uses index existence check, not HTTP API | Direct HTTP call to `POST /api/entity_store/enable` would require Security Solution plugin dependency. Instead, the Streams plugin checks for `.entities.v1.latest.*` indices on startup and logs a message if not found. The entity store must be enabled separately via Security Solution. |
+| 2026-03-03 | WS8 | ES\|QL STATS execution path implemented | Added `queryType` field to `EsqlRuleParams`. The rule executor now branches: `row` queries use the existing `executeEsqlRequest` (expects `_id`/`_source` columns), `stats` queries use new `executeEsqlStatsRequest` (returns tabular results as key-value rows). STATS alerts store `stats_result` and `stats_columns` in `original_source`. |
+| 2026-03-03 | WS4 | Mermaid rendering added to Agent Builder chat UI | New `mermaidLanguagePlugin` (parsing) and `MermaidRenderer` (rendering) in `markdown_plugins/`. The plugin intercepts ` ```mermaid ` code blocks and renders them via lazy-loaded `mermaid` npm package. Falls back to raw source display if the package is not available or rendering fails. |
+| 2026-03-03 | WS1 | Sig events results data stream implemented | New `SigEventsResultsClient` at `lib/sig_events_results/results_client.ts`. Creates component template, index template, and data stream (`.streams.sig_events_results-default`) on first use. Supports `writeResult`, `writeResults` (bulk), and `searchResults` with filtering by `queryId`, `streamName`, `queryType`, and time range. |
+| 2026-03-03 | WS1 | `DiscoveryClient.searchSuggestions` and `searchDiscoveries` crash when `params` is `undefined` | Route handlers pass `params.query` which can be `undefined` when no query string parameters are sent. Both methods now accept `params?` (optional) and use optional chaining (`params?.type`, `params?.size ?? 50`, etc.) throughout. Same defensive pattern should be applied to any client method called from a route with all-optional query params. |
+| 2026-03-03 | WS6 | Settings page was static labels only — now has functional connector dropdowns | Replaced placeholder `EuiText` labels with `EuiSuperSelect` dropdowns that load available AI connectors via `useGenAIConnectors`. Each stage has its own selector with a "Use global default" option. Settings are loaded from `GET /internal/streams/_discovery/_settings` and saved via `PUT`. Uses existing `ConnectorIcon` for provider logos. |
 
 ---
 

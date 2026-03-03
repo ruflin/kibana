@@ -107,40 +107,40 @@ export const ONBOARDING_SCHEDULING_FAILURE_TITLE = i18n.translate(
   }
 );
 
-export const DISCOVER_INSIGHTS_BUTTON_LABEL = i18n.translate(
-  'xpack.streams.significantEventsDiscovery.streamsView.discoverInsightsButtonLabel',
+export const DISCOVER_DISCOVERIES_BUTTON_LABEL = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.streamsView.discoverDiscoveriesButtonLabel',
   {
-    defaultMessage: 'Discover Insights',
+    defaultMessage: 'Discover',
   }
 );
 
-export const INSIGHTS_SCHEDULING_FAILURE_TITLE = i18n.translate(
-  'xpack.streams.significantEventsDiscovery.streamsView.insightsSchedulingErrorTitle',
+export const DISCOVERIES_SCHEDULING_FAILURE_TITLE = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.streamsView.discoveriesSchedulingErrorTitle',
   {
-    defaultMessage: 'Could not start insight generation',
+    defaultMessage: 'Could not start discovery generation',
   }
 );
 
-export function getInsightsCompleteToastTitle(count: number): string {
+export function getDiscoveriesCompleteToastTitle(count: number): string {
   return i18n.translate(
-    'xpack.streams.significantEventsDiscovery.streamsView.insightsCompleteToastTitle',
+    'xpack.streams.significantEventsDiscovery.streamsView.discoveriesCompleteToastTitle',
     {
-      defaultMessage: '{count} {count, plural, one {insight} other {insights}} found',
+      defaultMessage: '{count} {count, plural, one {discovery} other {discoveries}} found',
       values: { count },
     }
   );
 }
 
-export const INSIGHTS_COMPLETE_TOAST_VIEW_BUTTON = i18n.translate(
-  'xpack.streams.significantEventsDiscovery.streamsView.insightsCompleteToastViewButton',
+export const DISCOVERIES_COMPLETE_TOAST_VIEW_BUTTON = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.streamsView.discoveriesCompleteToastViewButton',
   {
-    defaultMessage: 'View insights',
+    defaultMessage: 'View discoveries',
   }
 );
 
-export const NO_INSIGHTS_TOAST_TITLE = i18n.translate(
-  'xpack.streams.significantEventsDiscovery.streamsView.noInsightsToastTitle',
+export const NO_DISCOVERIES_TOAST_TITLE = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.streamsView.noDiscoveriesToastTitle',
   {
-    defaultMessage: 'No insights found',
+    defaultMessage: 'No discoveries found',
   }
 );

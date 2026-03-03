@@ -29,34 +29,34 @@ const impactColors: Record<InsightImpactLevel, 'danger' | 'warning' | 'primary' 
 };
 
 const impactLabels: Record<InsightImpactLevel, string> = {
-  critical: i18n.translate('xpack.streams.insights.impact.critical', {
+  critical: i18n.translate('xpack.streams.discoveries.severity.critical', {
     defaultMessage: 'Critical',
   }),
-  high: i18n.translate('xpack.streams.insights.impact.high', {
+  high: i18n.translate('xpack.streams.discoveries.severity.high', {
     defaultMessage: 'High',
   }),
-  medium: i18n.translate('xpack.streams.insights.impact.medium', {
+  medium: i18n.translate('xpack.streams.discoveries.severity.medium', {
     defaultMessage: 'Medium',
   }),
-  low: i18n.translate('xpack.streams.insights.impact.low', {
+  low: i18n.translate('xpack.streams.discoveries.severity.low', {
     defaultMessage: 'Low',
   }),
 };
 
-interface InsightCardProps {
+interface DiscoveryCardProps {
   insight: Insight;
   index: number;
 }
 
-export function InsightCard({ insight, index }: InsightCardProps) {
+export function DiscoveryCard({ insight, index }: DiscoveryCardProps) {
   const [isOpen, toggleIsOpen] = useToggle(index === 0);
-  const accordionId = useGeneratedHtmlId({ prefix: 'insightAccordion' });
+  const accordionId = useGeneratedHtmlId({ prefix: 'discoveryAccordion' });
 
   return (
     <EuiPanel hasBorder paddingSize="m">
       <EuiAccordion
         id={accordionId}
-        data-test-subj="streamsInsightCardAccordion"
+        data-test-subj="streamsDiscoveryCardAccordion"
         forceState={isOpen ? 'open' : 'closed'}
         onToggle={toggleIsOpen}
         buttonContent={
@@ -86,7 +86,7 @@ export function InsightCard({ insight, index }: InsightCardProps) {
             <EuiSpacer size="m" />
             <EuiText size="xs">
               <strong>
-                {i18n.translate('xpack.streams.insights.evidence', {
+                {i18n.translate('xpack.streams.discoveries.evidence', {
                   defaultMessage: 'Evidence:',
                 })}
               </strong>
@@ -102,7 +102,7 @@ export function InsightCard({ insight, index }: InsightCardProps) {
                       </EuiFlexItem>
                       <EuiFlexItem>
                         <EuiText size="xs">
-                          {i18n.translate('xpack.streams.insights.evidenceDescription', {
+                          {i18n.translate('xpack.streams.discoveries.evidenceDescription', {
                             defaultMessage: '{queryTitle} ({eventCount} events)',
                             values: { queryTitle: ev.queryTitle, eventCount: ev.eventCount },
                           })}
@@ -121,7 +121,7 @@ export function InsightCard({ insight, index }: InsightCardProps) {
             <EuiSpacer size="m" />
             <EuiText size="xs">
               <strong>
-                {i18n.translate('xpack.streams.insights.recommendations', {
+                {i18n.translate('xpack.streams.discoveries.recommendations', {
                   defaultMessage: 'Recommendations:',
                 })}
               </strong>

@@ -31,6 +31,7 @@ import { registerFeatureFlags } from './feature_flags';
 import { ContentService } from './lib/content/content_service';
 import { registerRules } from './lib/rules/register_rules';
 import { AttachmentService } from './lib/streams/attachments/attachment_service';
+import { DiscoveryService } from './lib/discoveries';
 import { QueryService } from './lib/streams/assets/query/query_service';
 import { StreamsService } from './lib/streams/service';
 import { EbtTelemetryService, StatsTelemetryService } from './lib/telemetry';
@@ -112,6 +113,7 @@ export class StreamsPlugin
     const systemService = new SystemService(core, this.logger);
     const contentService = new ContentService(core, this.logger);
     const queryService = new QueryService(core, this.logger);
+    const discoveryService = new DiscoveryService(core, this.logger);
     const taskService = new TaskService(plugins.taskManager);
 
     const getScopedClients = async ({
@@ -126,6 +128,7 @@ export class StreamsPlugin
         systemClient,
         contentClient,
         queryClient,
+        discoveryClient,
       ] = await Promise.all([
         core.getStartServices(),
         attachmentService.getClientWithRequest({ request }),
@@ -133,6 +136,7 @@ export class StreamsPlugin
         systemService.getClientWithRequest({ request }),
         contentService.getClient(),
         queryService.getClientWithRequest({ request }),
+        discoveryService.getClientWithRequest({ request }),
       ]);
 
       const uiSettingsClient = coreStart.uiSettings.asScopedToClient(
@@ -168,6 +172,7 @@ export class StreamsPlugin
         inferenceClient,
         contentClient,
         queryClient,
+        discoveryClient,
         fieldsMetadataClient,
         licensing,
         uiSettingsClient,
@@ -248,6 +253,22 @@ export class StreamsPlugin
 
     registerFeatureFlags(core, this.logger);
 
+    if (plugins.agentBuilder) {
+      import('./agent_builder/register_agent_builder').then(({ registerAgentBuilder }) => {
+        registerAgentBuilder(plugins.agentBuilder!, this.logger, {
+          core,
+          logger: this.logger,
+          getDiscoveryClient: async (request) => {
+            return discoveryService.getClientWithRequest({ request });
+          },
+          getEsClient: async (request) => {
+            const [coreStart] = await core.getStartServices();
+            return coreStart.elasticsearch.client.asScoped(request);
+          },
+        });
+      });
+    }
+
     if (plugins.globalSearch) {
       plugins.globalSearch.registerResultProvider(
         createStreamsGlobalSearchResultProvider(core, this.logger)
@@ -269,7 +290,24 @@ export class StreamsPlugin
 
     this.processorSuggestionsService.setConsoleStart(plugins.console);
 
+    this.enableEntityStore(core).catch((e) => {
+      this.logger.debug(`Entity Store enablement skipped or failed: ${e.message}`);
+    });
+
     return {};
+  }
+
+  private async enableEntityStore(core: CoreStart): Promise<void> {
+    const internalEsClient = core.elasticsearch.client.asInternalUser;
+    const entityStoreIndex = '.entities.v1.latest.*';
+    try {
+      await internalEsClient.indices.getAlias({ name: entityStoreIndex });
+      this.logger.debug('Entity Store indices already exist, skipping enablement');
+    } catch {
+      this.logger.info(
+        'Entity Store indices not found. Entity Store should be enabled via Security Solution.'
+      );
+    }
   }
 
   public stop() {}

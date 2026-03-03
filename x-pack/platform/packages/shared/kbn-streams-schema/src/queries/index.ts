@@ -16,6 +16,7 @@ import type { SignificantEventsResponse } from '../api/significant_events';
 interface StreamQueryBase {
   id: string;
   title: string;
+  query_type?: 'row' | 'stats';
 }
 
 export interface StreamQuery extends StreamQueryBase {
@@ -48,6 +49,10 @@ export interface StreamQuery extends StreamQueryBase {
 const streamQueryBaseSchema: z.Schema<StreamQueryBase> = z.object({
   id: NonEmptyString,
   title: NonEmptyString,
+  query_type: z
+    .enum(['row', 'stats'])
+    .optional()
+    .describe('Type of ES|QL query: row (default) or stats (aggregation)'),
 });
 
 export type StreamQueryInput = Omit<StreamQuery, 'esql'>;

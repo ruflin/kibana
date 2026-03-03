@@ -19,6 +19,7 @@ import type { QueryClient } from '../lib/streams/assets/query/query_client';
 import type { StreamsClient } from '../lib/streams/client';
 import type { EbtTelemetryClient } from '../lib/telemetry';
 import type { StreamsServer } from '../types';
+import type { DiscoveryClient } from '../lib/discoveries';
 import type { FeatureClient } from '../lib/streams/feature/feature_client';
 import type { ProcessorSuggestionsService } from '../lib/streams/ingest_pipelines/processor_suggestions_service';
 import type { TaskClient } from '../lib/tasks/task_client';
@@ -41,6 +42,7 @@ export interface RouteHandlerScopedClients {
   inferenceClient: InferenceClient;
   contentClient: ContentClient;
   queryClient: QueryClient;
+  discoveryClient: DiscoveryClient;
   licensing: LicensingPluginStart;
   uiSettingsClient: IUiSettingsClient;
   fieldsMetadataClient: IFieldsMetadataClient;

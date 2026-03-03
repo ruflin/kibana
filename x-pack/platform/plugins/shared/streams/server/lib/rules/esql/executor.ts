@@ -18,6 +18,7 @@ import objectHash from 'object-hash';
 import { MAX_ALERTS_PER_EXECUTION } from './common';
 import { buildEsqlSearchRequest } from './lib/build_esql_search_request';
 import { executeEsqlRequest } from './lib/execute_esql_request';
+import { executeEsqlStatsRequest } from './lib/execute_esql_stats_request';
 import type { EsqlRuleInstanceState, EsqlRuleParams } from './types';
 
 export async function getRuleExecutor(
@@ -46,6 +47,37 @@ export async function getRuleExecutor(
     to: now.clone().toISOString(),
     previousOriginalDocumentIds,
   });
+
+  if (params.queryType === 'stats') {
+    return executeStatsPath({ esqlRequest, services, logger, spaceId, rule });
+  }
+
+  return executeRowPath({
+    esqlRequest,
+    services,
+    logger,
+    spaceId,
+    rule,
+    previousOriginalDocumentIds,
+  });
+}
+
+async function executeRowPath({
+  esqlRequest,
+  services,
+  logger,
+  spaceId,
+  rule,
+  previousOriginalDocumentIds,
+}: {
+  esqlRequest: { query: string; filter: import('@elastic/elasticsearch').estypes.QueryDslQueryContainer };
+  services: PersistenceServices & { scopedClusterClient: { asCurrentUser: import('@kbn/core/server').ElasticsearchClient } };
+  logger: import('@kbn/core/server').Logger;
+  spaceId: string;
+  rule: { id: string };
+  previousOriginalDocumentIds: string[];
+}) {
+  const { scopedClusterClient, alertWithPersistence } = services;
 
   const results = await executeEsqlRequest({
     esClient: scopedClusterClient.asCurrentUser,
@@ -79,7 +111,6 @@ export async function getRuleExecutor(
 
   const { createdAlerts, errors } = await alertWithPersistence(
     alerts,
-    // keep refresh false to optimize performance as we don't need to read these alerts back immediately
     false,
     MAX_ALERTS_PER_EXECUTION
   );
@@ -95,6 +126,63 @@ export async function getRuleExecutor(
   return {
     state: {
       previousOriginalDocumentIds: originalDocumentIds,
+    },
+  };
+}
+
+async function executeStatsPath({
+  esqlRequest,
+  services,
+  logger,
+  spaceId,
+  rule,
+}: {
+  esqlRequest: { query: string; filter: import('@elastic/elasticsearch').estypes.QueryDslQueryContainer };
+  services: PersistenceServices & { scopedClusterClient: { asCurrentUser: import('@kbn/core/server').ElasticsearchClient } };
+  logger: import('@kbn/core/server').Logger;
+  spaceId: string;
+  rule: { id: string };
+}) {
+  const { scopedClusterClient, alertWithPersistence } = services;
+
+  const statsResults = await executeEsqlStatsRequest({
+    esClient: scopedClusterClient.asCurrentUser,
+    esqlRequest,
+    logger,
+  });
+
+  if (statsResults.length === 0) {
+    return {
+      state: {
+        previousOriginalDocumentIds: [],
+      },
+    };
+  }
+
+  const alerts = statsResults.map((row, idx) => {
+    const alertDocId = objectHash([JSON.stringify(row.values), rule.id, spaceId, idx]);
+    return {
+      _id: alertDocId,
+      _source: {
+        original_source: {
+          _id: alertDocId,
+          query_type: 'stats' as const,
+          stats_result: row.values,
+          stats_columns: row.columns.map((c) => c.name),
+        },
+      },
+    };
+  });
+
+  const { errors } = await alertWithPersistence(alerts, false, MAX_ALERTS_PER_EXECUTION);
+
+  if (!isEmpty(errors)) {
+    logger.debug(() => `STATS alerts bulk process finished with errors: ${JSON.stringify(errors)}`);
+  }
+
+  return {
+    state: {
+      previousOriginalDocumentIds: [],
     },
   };
 }

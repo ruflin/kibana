@@ -38,6 +38,19 @@ export const AGENT_BUILDER_BUILTIN_TOOLS = [
   `${internalNamespaces.security}.attack_discovery_search`,
   `${internalNamespaces.security}.security_labs_search`,
   `${internalNamespaces.security}.alerts`,
+
+  // Streams (SigDiscovery)
+  `${internalNamespaces.streams}.search_discoveries`,
+  `${internalNamespaces.streams}.get_discovery`,
+  `${internalNamespaces.streams}.create_discovery`,
+  `${internalNamespaces.streams}.run_discovery_pipeline`,
+  `${internalNamespaces.streams}.list_entities`,
+  `${internalNamespaces.streams}.get_stream_features`,
+  `${internalNamespaces.streams}.upsert_features`,
+  `${internalNamespaces.streams}.get_sig_events_queries`,
+  `${internalNamespaces.streams}.upsert_sig_events_queries`,
+  `${internalNamespaces.streams}.get_sig_events_with_change_points`,
+  `${internalNamespaces.streams}.push_entity_definition`,
 ] as const;
 
 export type AgentBuilderBuiltinTool = (typeof AGENT_BUILDER_BUILTIN_TOOLS)[number];
@@ -49,6 +62,7 @@ export type AgentBuilderBuiltinTool = (typeof AGENT_BUILDER_BUILTIN_TOOLS)[numbe
 export const AGENT_BUILDER_BUILTIN_AGENTS = [
   `${internalNamespaces.observability}.agent`,
   `${internalNamespaces.security}.agent`,
+  `${internalNamespaces.streams}.sig_discovery_agent`,
 ] as const;
 
 export type AgentBuilderBuiltinAgent = (typeof AGENT_BUILDER_BUILTIN_AGENTS)[number];

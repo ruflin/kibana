@@ -104,7 +104,7 @@ export const PROMOTE_ALL_CALLOUT_DESCRIPTION = i18n.translate(
   'xpack.streams.significantEventsDiscovery.queriesTable.promoteAllCalloutDescription',
   {
     defaultMessage:
-      'Enable scheduled runs for these queries so their results are saved as Significant events, powering Insight generation.',
+      'Enable scheduled runs for these queries so their results are saved as Significant events, powering Discovery generation.',
   }
 );
 

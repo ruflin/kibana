@@ -9,7 +9,7 @@ import { useAbortController } from '@kbn/react-hooks';
 import { useMemo } from 'react';
 import { useKibana } from './use_kibana';
 
-export function useInsightsDiscoveryApi(connectorId?: string) {
+export function useDiscoveryPipelineApi(connectorId?: string) {
   const {
     dependencies: {
       start: {
@@ -22,8 +22,8 @@ export function useInsightsDiscoveryApi(connectorId?: string) {
 
   return useMemo(
     () => ({
-      scheduleInsightsDiscoveryTask: async (streamNames?: string[]) => {
-        await streamsRepositoryClient.fetch('POST /internal/streams/_insights/_task', {
+      scheduleDiscoveryPipelineTask: async (streamNames?: string[]) => {
+        await streamsRepositoryClient.fetch('POST /internal/streams/_discovery/_task', {
           signal,
           params: {
             body: {
@@ -34,13 +34,13 @@ export function useInsightsDiscoveryApi(connectorId?: string) {
           },
         });
       },
-      getInsightsDiscoveryTaskStatus: async () => {
-        return streamsRepositoryClient.fetch('POST /internal/streams/_insights/_status', {
+      getDiscoveryPipelineTaskStatus: async () => {
+        return streamsRepositoryClient.fetch('POST /internal/streams/_discovery/_status', {
           signal,
         });
       },
-      cancelInsightsDiscoveryTask: async () => {
-        return streamsRepositoryClient.fetch('POST /internal/streams/_insights/_task', {
+      cancelDiscoveryPipelineTask: async () => {
+        return streamsRepositoryClient.fetch('POST /internal/streams/_discovery/_task', {
           signal,
           params: {
             body: {
@@ -49,8 +49,8 @@ export function useInsightsDiscoveryApi(connectorId?: string) {
           },
         });
       },
-      acknowledgeInsightsDiscoveryTask: async () => {
-        return streamsRepositoryClient.fetch('POST /internal/streams/_insights/_task', {
+      acknowledgeDiscoveryPipelineTask: async () => {
+        return streamsRepositoryClient.fetch('POST /internal/streams/_discovery/_task', {
           signal,
           params: {
             body: {

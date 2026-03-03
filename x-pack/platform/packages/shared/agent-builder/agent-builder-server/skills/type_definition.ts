@@ -37,6 +37,7 @@ export type SkillsDirectoryStructure = Directory<{
       endpoint: FileDirectory<{}>;
     }>;
     search: FileDirectory<{}>;
+    streams: FileDirectory<{}>;
   }>;
 }>;
 

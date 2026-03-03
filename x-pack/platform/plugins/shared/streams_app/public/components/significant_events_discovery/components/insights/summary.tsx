@@ -18,15 +18,30 @@ import { i18n } from '@kbn/i18n';
 import { TaskStatus } from '@kbn/streams-schema';
 import React, { useEffect, useRef, useState } from 'react';
 import useAsyncFn from 'react-use/lib/useAsyncFn';
-import type { Insight } from '@kbn/streams-schema';
+import type { Discovery, Insight } from '@kbn/streams-schema';
 import { useAIFeatures } from '../../../../hooks/use_ai_features';
-import { useInsightsDiscoveryApi } from '../../../../hooks/use_insights_discovery_api';
+import { useDiscoveryPipelineApi } from '../../../../hooks/use_insights_discovery_api';
 import { useKibana } from '../../../../hooks/use_kibana';
 import { useTaskPolling } from '../../../../hooks/use_task_polling';
 import { getFormattedError } from '../../../../util/errors';
 import { ConnectorListButton } from '../../../connector_list_button/connector_list_button';
 import { FeedbackButtons } from './feedback_buttons';
-import { InsightCard } from './insight_card';
+import { DiscoveryCard } from './insight_card';
+
+function mapDiscoveryToInsight(d: Discovery): Insight {
+  return {
+    title: d.title,
+    description: d.description,
+    impact: d.severity,
+    evidence: d.evidence.map((e) => ({
+      streamName: e.stream_name,
+      queryTitle: e.query_title,
+      featureName: e.feature_name,
+      eventCount: e.event_count,
+    })),
+    recommendations: (d.recommendations ?? []).flatMap((r) => [r.title, ...r.steps]),
+  };
+}
 
 export function Summary({ count }: { count: number }) {
   const aiFeatures = useAIFeatures();
@@ -35,21 +50,21 @@ export function Summary({ count }: { count: number }) {
   } = useKibana();
 
   const {
-    scheduleInsightsDiscoveryTask,
-    getInsightsDiscoveryTaskStatus,
-    acknowledgeInsightsDiscoveryTask,
-    cancelInsightsDiscoveryTask,
-  } = useInsightsDiscoveryApi(aiFeatures?.genAiConnectors.selectedConnector);
+    scheduleDiscoveryPipelineTask,
+    getDiscoveryPipelineTaskStatus,
+    acknowledgeDiscoveryPipelineTask,
+    cancelDiscoveryPipelineTask,
+  } = useDiscoveryPipelineApi(aiFeatures?.genAiConnectors.selectedConnector);
 
-  const [{ value: task }, getTaskStatus] = useAsyncFn(getInsightsDiscoveryTaskStatus);
+  const [{ value: task }, getTaskStatus] = useAsyncFn(getDiscoveryPipelineTaskStatus);
   const [{ loading: isSchedulingTask }, scheduleTask] = useAsyncFn(async () => {
     /**
      * Combining scheduling and immediate status update to prevent
      * React updating the UI in between states causing flickering
      */
-    await scheduleInsightsDiscoveryTask();
+    await scheduleDiscoveryPipelineTask();
     await getTaskStatus();
-  }, [scheduleInsightsDiscoveryTask, getTaskStatus]);
+  }, [scheduleDiscoveryPipelineTask, getTaskStatus]);
 
   useEffect(() => {
     getTaskStatus();
@@ -63,53 +78,54 @@ export function Summary({ count }: { count: number }) {
 
     if (task?.status === TaskStatus.Failed) {
       notifications.toasts.addError(getFormattedError(new Error(task.error)), {
-        title: i18n.translate('xpack.streams.insights.errorTitle', {
-          defaultMessage: 'Error generating insights',
+        title: i18n.translate('xpack.streams.discoveries.errorTitle', {
+          defaultMessage: 'Error generating discoveries',
         }),
       });
       return;
     }
 
     if (task?.status === TaskStatus.Completed) {
-      if (previousStatus === TaskStatus.InProgress && task.insights.length === 0) {
+      const discoveries = task.discoveries ?? [];
+      if (previousStatus === TaskStatus.InProgress && discoveries.length === 0) {
         notifications.toasts.addInfo({
-          title: i18n.translate('xpack.streams.insights.noInsightsTitle', {
-            defaultMessage: 'No insights found',
+          title: i18n.translate('xpack.streams.discoveries.noDiscoveriesTitle', {
+            defaultMessage: 'No discoveries found',
           }),
-          text: i18n.translate('xpack.streams.insights.noInsightsDescription', {
+          text: i18n.translate('xpack.streams.discoveries.noDiscoveriesDescription', {
             defaultMessage:
-              'The AI could not generate any insights from the current significant events. Try again later when more events are available.',
+              'The AI could not generate any discoveries from the current significant events. Try again later when more events are available.',
           }),
         });
       }
-      setInsights(task.insights);
+      setDiscoveries(discoveries.map(mapDiscoveryToInsight));
     }
   }, [task, notifications.toasts]);
 
   const { cancelTask, isCancellingTask } = useTaskPolling({
     task,
-    onPoll: getInsightsDiscoveryTaskStatus,
+    onPoll: getDiscoveryPipelineTaskStatus,
     onRefresh: getTaskStatus,
-    onCancel: cancelInsightsDiscoveryTask,
+    onCancel: cancelDiscoveryPipelineTask,
   });
 
-  const [insights, setInsights] = useState<Insight[] | null>(null);
+  const [discoveries, setDiscoveries] = useState<Insight[] | null>(null);
 
-  const onGenerateInsightsClick = async () => {
+  const onGenerateDiscoveriesClick = async () => {
     await scheduleTask();
   };
 
-  const onRegenerateInsightsClick = async () => {
-    await acknowledgeInsightsDiscoveryTask();
+  const onRegenerateDiscoveriesClick = async () => {
+    await acknowledgeDiscoveryPipelineTask();
     await scheduleTask();
 
-    setInsights(null);
+    setDiscoveries(null);
   };
 
   const isGenerateButtonPending =
     task?.status === TaskStatus.InProgress || isCancellingTask || isSchedulingTask;
 
-  if (insights && insights.length > 0) {
+  if (discoveries && discoveries.length > 0) {
     return (
       <EuiFlexGroup direction="column">
         <EuiFlexItem>
@@ -123,13 +139,13 @@ export function Summary({ count }: { count: number }) {
                   <EuiButton
                     fill={true}
                     iconType="refresh"
-                    onClick={onRegenerateInsightsClick}
+                    onClick={onRegenerateDiscoveriesClick}
                     disabled={isSchedulingTask}
                     isLoading={isSchedulingTask}
-                    data-test-subj="significant_events_regenerate_insights_button"
+                    data-test-subj="significant_events_regenerate_discoveries_button"
                   >
-                    {i18n.translate('xpack.streams.insights.regenerateButtonLabel', {
-                      defaultMessage: 'Re-generate insights',
+                    {i18n.translate('xpack.streams.discoveries.regenerateButtonLabel', {
+                      defaultMessage: 'Re-generate discoveries',
                     })}
                   </EuiButton>
                 </EuiFlexItem>
@@ -137,9 +153,9 @@ export function Summary({ count }: { count: number }) {
             </EuiPanel>
             <EuiPanel hasShadow={false}>
               <EuiFlexGroup direction="column" gutterSize="m">
-                {insights.map((insight, idx) => (
+                {discoveries.map((insight, idx) => (
                   <EuiFlexItem key={idx}>
-                    <InsightCard insight={insight} index={idx} />
+                    <DiscoveryCard insight={insight} index={idx} />
                   </EuiFlexItem>
                 ))}
               </EuiFlexGroup>
@@ -167,7 +183,7 @@ export function Summary({ count }: { count: number }) {
               <EuiTitle size="s">
                 <h2>
                   {i18n.translate(
-                    'xpack.streams.sigEventsDiscovery.insightsTab.significantEventsFoundTitle',
+                    'xpack.streams.sigEventsDiscovery.discoveriesTab.significantEventsFoundTitle',
                     {
                       defaultMessage:
                         '{count} significant {count, plural, one {event} other {events}} detected',
@@ -182,10 +198,10 @@ export function Summary({ count }: { count: number }) {
             <EuiFlexItem grow={false}>
               <EuiText size="s" textAlign="center" css={{ maxWidth: 400 }}>
                 {i18n.translate(
-                  'xpack.streams.sigEventsDiscovery.insightsTab.significantEventsFoundDescription',
+                  'xpack.streams.sigEventsDiscovery.discoveriesTab.significantEventsFoundDescription',
                   {
                     defaultMessage:
-                      'Start extracting insights from your logs, and understand what they mean with the power of AI and Elastic Observability.',
+                      'Start extracting discoveries from your logs, and understand what they mean with the power of AI and Elastic Observability.',
                   }
                 )}
               </EuiText>
@@ -199,16 +215,16 @@ export function Summary({ count }: { count: number }) {
                     iconType: 'sparkles',
                     children:
                       task?.status === TaskStatus.InProgress
-                        ? i18n.translate('xpack.streams.insights.generatingButtonLabel', {
-                            defaultMessage: 'Generating insights',
+                        ? i18n.translate('xpack.streams.discoveries.generatingButtonLabel', {
+                            defaultMessage: 'Generating discoveries',
                           })
-                        : i18n.translate('xpack.streams.insights.generateButtonLabel', {
-                            defaultMessage: 'Generate insights',
+                        : i18n.translate('xpack.streams.discoveries.generateButtonLabel', {
+                            defaultMessage: 'Generate discoveries',
                           }),
-                    onClick: onGenerateInsightsClick,
+                    onClick: onGenerateDiscoveriesClick,
                     isDisabled: isGenerateButtonPending,
                     isLoading: isGenerateButtonPending,
-                    'data-test-subj': 'significant_events_generate_insights_button',
+                    'data-test-subj': 'significant_events_generate_discoveries_button',
                   }}
                 />
 
@@ -216,13 +232,13 @@ export function Summary({ count }: { count: number }) {
                   <EuiButton
                     onClick={cancelTask}
                     isDisabled={isCancellingTask}
-                    data-test-subj="significant_events_cancel_insights_generation_button"
+                    data-test-subj="significant_events_cancel_discoveries_generation_button"
                   >
                     {isCancellingTask
-                      ? i18n.translate('xpack.streams.insights.cancellingTaskButtonLabel', {
+                      ? i18n.translate('xpack.streams.discoveries.cancellingTaskButtonLabel', {
                           defaultMessage: 'Cancelling',
                         })
-                      : i18n.translate('xpack.streams.insights.cancelTaskButtonLabel', {
+                      : i18n.translate('xpack.streams.discoveries.cancelTaskButtonLabel', {
                           defaultMessage: 'Cancel',
                         })}
                   </EuiButton>

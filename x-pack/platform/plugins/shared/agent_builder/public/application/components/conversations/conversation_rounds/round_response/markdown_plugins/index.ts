@@ -13,3 +13,4 @@ export {
 } from './render_attachment_plugin';
 export { loadingCursorPlugin, Cursor } from './cursor_plugin';
 export { esqlLanguagePlugin } from './esql_plugin';
+export { mermaidLanguagePlugin, MermaidRenderer } from './mermaid_plugin';

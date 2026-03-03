@@ -16,12 +16,16 @@ export const esqlRuleInstanceState = z.object({
   previousOriginalDocumentIds: z.string().array().optional(),
 }) satisfies z.Schema<EsqlRuleInstanceState>;
 
+export type EsqlQueryType = 'row' | 'stats';
+
 export interface EsqlRuleParams extends RuleTypeParams {
   query: string;
   timestampField: string;
+  queryType?: EsqlQueryType;
 }
 
 export const esqlRuleParams = z.object({
   query: z.string(),
   timestampField: z.string(),
+  queryType: z.enum(['row', 'stats']).optional(),
 }) satisfies z.Schema<EsqlRuleParams>;

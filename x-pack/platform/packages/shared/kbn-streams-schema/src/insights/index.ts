@@ -6,24 +6,32 @@
  */
 
 import type { ChatCompletionTokenCount } from '@kbn/inference-common';
+import type { DiscoverySeverity } from '../discovery';
 
-export type InsightImpactLevel = 'critical' | 'high' | 'medium' | 'low';
+/**
+ * @deprecated Use Discovery instead
+ */
+export type InsightImpactLevel = DiscoverySeverity;
 
-interface InsightEvidence {
-  streamName: string;
-  queryTitle: string;
-  featureName?: string;
-  eventCount: number;
-}
-
+/**
+ * @deprecated Use Discovery instead
+ */
 export interface Insight {
   title: string;
   description: string;
   impact: InsightImpactLevel;
-  evidence: InsightEvidence[];
+  evidence: Array<{
+    streamName: string;
+    queryTitle: string;
+    featureName?: string;
+    eventCount: number;
+  }>;
   recommendations: string[];
 }
 
+/**
+ * @deprecated Use DiscoveryPipelineResult instead
+ */
 export interface InsightsResult {
   insights: Insight[];
   tokensUsed: ChatCompletionTokenCount;

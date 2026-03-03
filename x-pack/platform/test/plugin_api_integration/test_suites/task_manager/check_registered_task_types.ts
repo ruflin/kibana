@@ -240,7 +240,7 @@ export default function ({ getService }: FtrProviderContext) {
         'slo:temp-summary-cleanup-task',
         'streams_description_generation',
         'streams_features_identification',
-        'streams_insights_discovery',
+        'streams_discovery_pipeline',
         'streams_onboarding',
         'streams_significant_events_queries_generation',
         'streams_systems_identification',

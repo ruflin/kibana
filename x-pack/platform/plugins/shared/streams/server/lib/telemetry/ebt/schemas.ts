@@ -11,7 +11,7 @@ import type {
   StreamsSystemIdentificationIdentifiedProps,
   StreamsDescriptionGeneratedProps,
   StreamsSignificantEventsQueriesGeneratedProps,
-  StreamsInsightsGeneratedProps,
+  StreamsDiscoveriesGeneratedProps,
   StreamsStateErrorProps,
   StreamsProcessingPipelineSuggestedProps,
   StreamsFeaturesIdentifiedProps,
@@ -219,7 +219,7 @@ const streamsSignificantEventsQueriesGeneratedSchema: RootSchema<StreamsSignific
     },
   };
 
-const streamsInsightsGeneratedSchema: RootSchema<StreamsInsightsGeneratedProps> = {
+const streamsDiscoveriesGeneratedSchema: RootSchema<StreamsDiscoveriesGeneratedProps> = {
   input_tokens_used: {
     type: 'long',
     _meta: {
@@ -236,6 +236,20 @@ const streamsInsightsGeneratedSchema: RootSchema<StreamsInsightsGeneratedProps> 
     type: 'long',
     _meta: {
       description: 'The number of cached tokens used for the generation request',
+      optional: true,
+    },
+  },
+  discovery_count: {
+    type: 'long',
+    _meta: {
+      description: 'The number of discoveries generated',
+      optional: true,
+    },
+  },
+  suggestion_count: {
+    type: 'long',
+    _meta: {
+      description: 'The number of suggestions generated',
       optional: true,
     },
   },
@@ -344,7 +358,7 @@ export {
   streamsSystemIdentificationIdentifiedSchema,
   streamsDescriptionGeneratedSchema,
   streamsSignificantEventsQueriesGeneratedSchema,
-  streamsInsightsGeneratedSchema,
+  streamsDiscoveriesGeneratedSchema,
   streamsProcessingPipelineSuggestedSchema,
   streamsFeaturesIdentifiedSchema,
 };

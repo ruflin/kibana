@@ -204,6 +204,18 @@ export { TaskStatus, type TaskResult } from './src/tasks/types';
 export type { GenerateDescriptionResult } from './src/api/description_generation';
 export type { IdentifyFeaturesResult } from './src/api/features';
 
+export type {
+  DiscoveryPipelineResult,
+  Discovery,
+  DiscoverySeverity,
+  DiscoveryEvidence,
+  Recommendation,
+  Suggestion,
+  SuggestionType,
+  SuggestionStatus,
+  ChangePointType,
+} from './src/discovery';
+/** @deprecated Use Discovery types instead. Kept for backward compatibility during migration. */
 export type { InsightsResult, Insight, InsightImpactLevel } from './src/insights';
 export type { OnboardingResult } from './src/onboarding';
 export { OnboardingStep } from './src/onboarding';

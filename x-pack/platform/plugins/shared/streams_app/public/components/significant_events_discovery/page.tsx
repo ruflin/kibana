@@ -20,9 +20,11 @@ import { StreamsAppPageTemplate } from '../streams_app_page_template';
 import { FeaturesTable } from './components/features_table/features_table';
 import { QueriesTable } from './components/queries_table/queries_table';
 import { StreamsView } from './components/streams_view/streams_view';
-import { InsightsTab } from './components/insights/tab';
+import { DiscoveriesTab } from './components/insights/tab';
+import { SuggestionsTab } from './components/suggestions/suggestions_tab';
+import { SettingsPage } from './components/settings/settings_page';
 
-const discoveryTabs = ['streams', 'features', 'queries', 'insights'] as const;
+const discoveryTabs = ['streams', 'features', 'queries', 'discoveries', 'suggestions', 'settings'] as const;
 type DiscoveryTab = (typeof discoveryTabs)[number];
 
 function isValidDiscoveryTab(value: string): value is DiscoveryTab {
@@ -103,12 +105,28 @@ export function SignificantEventsDiscoveryPage() {
       isSelected: tab === 'queries',
     },
     {
-      id: 'insights',
-      label: i18n.translate('xpack.streams.significantEventsDiscovery.insightsTab', {
-        defaultMessage: 'Insights',
+      id: 'discoveries',
+      label: i18n.translate('xpack.streams.significantEventsDiscovery.discoveriesTab', {
+        defaultMessage: 'Discoveries',
       }),
-      href: router.link('/_discovery/{tab}', { path: { tab: 'insights' } }),
-      isSelected: tab === 'insights',
+      href: router.link('/_discovery/{tab}', { path: { tab: 'discoveries' } }),
+      isSelected: tab === 'discoveries',
+    },
+    {
+      id: 'suggestions',
+      label: i18n.translate('xpack.streams.significantEventsDiscovery.suggestionsTab', {
+        defaultMessage: 'Suggestions',
+      }),
+      href: router.link('/_discovery/{tab}', { path: { tab: 'suggestions' } }),
+      isSelected: tab === 'suggestions',
+    },
+    {
+      id: 'settings',
+      label: i18n.translate('xpack.streams.significantEventsDiscovery.settingsTab', {
+        defaultMessage: 'Settings',
+      }),
+      href: router.link('/_discovery/{tab}', { path: { tab: 'settings' } }),
+      isSelected: tab === 'settings',
     },
   ];
 
@@ -142,7 +160,9 @@ export function SignificantEventsDiscoveryPage() {
         {tab === 'streams' && <StreamsView refreshUnbackedQueriesCount={refetch} />}
         {tab === 'features' && <FeaturesTable />}
         {tab === 'queries' && <QueriesTable />}
-        {tab === 'insights' && <InsightsTab />}
+        {tab === 'discoveries' && <DiscoveriesTab />}
+        {tab === 'suggestions' && <SuggestionsTab />}
+        {tab === 'settings' && <SettingsPage />}
       </StreamsAppPageTemplate.Body>
     </>
   );
