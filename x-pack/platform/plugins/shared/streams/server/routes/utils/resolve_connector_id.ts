@@ -7,19 +7,17 @@
 
 import type { IUiSettingsClient, Logger } from '@kbn/core/server';
 import { GEN_AI_SETTINGS_DEFAULT_AI_CONNECTOR } from '@kbn/management-settings-ids';
-import { StatusError } from '../../lib/streams/errors/status_error';
 
 /**
  * Resolves the connector ID to use for AI operations.
  *
  * If a connectorId is provided, it will be used.
  * Otherwise, it will check the uiSettings for a default AI connector.
- * If no connector is found, it will throw an error.
+ * Falls back to a hardcoded POC connector if none is configured.
  *
  * @param connectorId - Optional connector ID provided by the client
  * @param uiSettingsClient - UI settings client to fetch the default connector setting
  * @returns The resolved connector ID
- * @throws StatusError if no connector ID is provided and no default is configured
  */
 
 // TODO: Import from gen-ai-settings-plugin (package) once available
@@ -45,8 +43,10 @@ export async function resolveConnectorId({
     return defaultConnector;
   }
 
-  throw new StatusError(
-    'No AI connector configured. Please set a default AI connector in Stack Management > AI Connectors.',
-    400
+  // POC hardcoded fallback — use the local Anthropic connector when no default is configured
+  const HARDCODED_FALLBACK_CONNECTOR = 'anthropic-claude-4-6-sonnet';
+  logger.debug(
+    `No connector ID provided and no default configured, falling back to hardcoded connector: ${HARDCODED_FALLBACK_CONNECTOR}`
   );
+  return HARDCODED_FALLBACK_CONNECTOR;
 }
