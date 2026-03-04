@@ -7,7 +7,6 @@
 
 import type { ToolSchema } from '@kbn/inference-common';
 import { z } from '@kbn/zod';
-import zodToJsonSchema from 'zod-to-json-schema';
 import type { Discovery } from '@kbn/streams-schema';
 
 export const SUBMIT_DISCOVERIES_TOOL_NAME = 'submit_discoveries';
@@ -24,67 +23,92 @@ const CHANGE_POINT_TYPES = [
 ] as const;
 
 /**
- * Lenient evidence schema used for the tool definition exposed to the LLM.
- * Uses z.string() for change_point_type so the inference layer does not reject
- * responses where the LLM sends an unexpected value (e.g. "none", "unknown").
- * Strict validation is done separately in parseDiscoveriesWithErrors.
+ * Raw JSON Schema for the submit_discoveries tool definition exposed to the LLM.
+ * Written directly (not via zodToJsonSchema) to avoid round-trip issues where
+ * @n8n/json-schema-to-zod re-interprets the schema more strictly than intended.
+ * All optional fields accept null to handle LLM responses that use null instead
+ * of omitting the field.
  */
-const discoveryEvidenceToolSchema = z.object({
-  stream_name: z.string().describe('The name of the stream where this evidence was found'),
-  query_title: z.string().describe('The title of the query that detected these events'),
-  feature_name: z
-    .string()
-    .optional()
-    .describe('The system or feature the query was generated for (e.g., kubernetes, nginx)'),
-  event_count: z.number().describe('Number of events detected by this query'),
-  change_point_type: z
-    .string()
-    .optional()
-    .describe(`Type of change point detected. One of: ${CHANGE_POINT_TYPES.join(', ')}`),
-  change_point_p_value: z
-    .number()
-    .optional()
-    .describe('Statistical significance of the change point (lower = more significant)'),
-});
-
-/**
- * Lenient discovery schema used for the tool definition exposed to the LLM.
- * severity and relevance_score use broader types to avoid inference-layer
- * rejections when the LLM sends slightly out-of-range values.
- */
-const discoveryToolSchema = z.object({
-  title: z.string().describe('Short, actionable title summarizing the discovery'),
-  description: z.string().describe('Detailed explanation of what is happening and why it matters'),
-  severity: z
-    .string()
-    .describe(
-      'Severity level: "critical" (service down), "high" (degraded), "medium" (potential issue), "low" (informational)'
-    ),
-  relevance_score: z
-    .number()
-    .describe(
-      'Relevance score 0-100 based on: impact breadth (30%), evidence confidence (25%), novelty (25%), actionability (20%)'
-    ),
-  evidence: z
-    .array(discoveryEvidenceToolSchema)
-    .describe('Evidence supporting this discovery from streams and queries'),
-  sample_events: z
-    .array(z.record(z.unknown()))
-    .optional()
-    .describe('Sample event payloads demonstrating the pattern'),
-  recommendations: z
-    .array(z.string())
-    .optional()
-    .describe('Actionable steps to investigate or resolve the issue'),
-});
-
-const discoveriesToolArgsSchema = z.object({
-  discoveries: z.array(discoveryToolSchema),
-});
-
-export const discoveriesSchema = zodToJsonSchema(discoveriesToolArgsSchema, {
-  $refStrategy: 'none',
-}) as unknown as ToolSchema;
+export const discoveriesSchema: ToolSchema = {
+  type: 'object',
+  properties: {
+    discoveries: {
+      type: 'array',
+      description: 'List of significant discoveries identified from the data streams',
+      items: {
+        type: 'object',
+        properties: {
+          title: {
+            type: 'string',
+            description: 'Short, actionable title summarizing the discovery',
+          },
+          description: {
+            type: 'string',
+            description: 'Detailed explanation of what is happening and why it matters',
+          },
+          severity: {
+            type: 'string',
+            description:
+              'Severity level: "critical" (service down), "high" (degraded), "medium" (potential issue), "low" (informational)',
+          },
+          relevance_score: {
+            type: 'number',
+            description:
+              'Relevance score 0-100 based on: impact breadth (30%), evidence confidence (25%), novelty (25%), actionability (20%)',
+          },
+          evidence: {
+            type: 'array',
+            description: 'Evidence supporting this discovery from streams and queries',
+            items: {
+              type: 'object',
+              properties: {
+                stream_name: {
+                  type: 'string',
+                  description: 'The name of the stream where this evidence was found',
+                },
+                query_title: {
+                  type: 'string',
+                  description: 'The title of the query that detected these events',
+                },
+                feature_name: {
+                  type: 'string',
+                  description:
+                    'The system or feature the query was generated for (e.g., kubernetes, nginx)',
+                },
+                event_count: {
+                  type: 'number',
+                  description: 'Number of events detected by this query',
+                },
+                change_point_type: {
+                  type: 'string',
+                  description: `Type of change point detected. One of: ${CHANGE_POINT_TYPES.join(', ')}`,
+                },
+                change_point_p_value: {
+                  type: 'number',
+                  description:
+                    'Statistical significance of the change point (lower = more significant)',
+                },
+              },
+              required: ['stream_name', 'query_title', 'event_count'],
+            },
+          },
+          sample_events: {
+            type: 'array',
+            description: 'Sample event payloads demonstrating the pattern',
+            items: { type: 'object' },
+          },
+          recommendations: {
+            type: 'array',
+            description: 'Actionable steps to investigate or resolve the issue',
+            items: { type: 'string' },
+          },
+        },
+        required: ['title', 'description', 'severity', 'relevance_score'],
+      },
+    },
+  },
+  required: ['discoveries'],
+};
 
 /**
  * Strict evidence schema used when parsing the LLM response after it passes
