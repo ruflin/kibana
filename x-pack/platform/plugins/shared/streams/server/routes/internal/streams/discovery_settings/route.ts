@@ -57,6 +57,7 @@ const getDiscoverySettingsRoute = createServerRoute({
       queryGenerationConnectorId: settings.queryGenerationConnectorId ?? defaultConnectorId,
       discoveryConnectorId: settings.discoveryConnectorId ?? defaultConnectorId,
       suggestionConnectorId: settings.suggestionConnectorId ?? defaultConnectorId,
+      enableMetricsTraces: settings.enableMetricsTraces ?? false,
       defaultConnectorId,
     };
   },
@@ -79,6 +80,7 @@ const updateDiscoverySettingsRoute = createServerRoute({
       queryGenerationConnectorId: z.string().optional(),
       discoveryConnectorId: z.string().optional(),
       suggestionConnectorId: z.string().optional(),
+      enableMetricsTraces: z.boolean().optional(),
     }),
   }),
   handler: async ({ params, request, getScopedClients, server }) => {

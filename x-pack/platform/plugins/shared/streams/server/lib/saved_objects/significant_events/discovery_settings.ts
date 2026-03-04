@@ -19,7 +19,11 @@ export const discoverySettingsSOAttributesV1 = schema.object({
   topologyMermaid: schema.maybe(schema.string()),
 });
 
-export type DiscoverySettingsAttributes = TypeOf<typeof discoverySettingsSOAttributesV1>;
+export const discoverySettingsSOAttributesV2 = discoverySettingsSOAttributesV1.extends({
+  enableMetricsTraces: schema.maybe(schema.boolean()),
+});
+
+export type DiscoverySettingsAttributes = TypeOf<typeof discoverySettingsSOAttributesV2>;
 
 export const getDiscoverySettingsSavedObject = (): SavedObjectsType => {
   return {
@@ -39,6 +43,18 @@ export const getDiscoverySettingsSavedObject = (): SavedObjectsType => {
         schemas: {
           forwardCompatibility: discoverySettingsSOAttributesV1.extends({}, { unknowns: 'ignore' }),
           create: discoverySettingsSOAttributesV1,
+        },
+      },
+      '2': {
+        changes: [
+          {
+            type: 'mappings_addition',
+            addedMappings: {},
+          },
+        ],
+        schemas: {
+          forwardCompatibility: discoverySettingsSOAttributesV2.extends({}, { unknowns: 'ignore' }),
+          create: discoverySettingsSOAttributesV2,
         },
       },
     },

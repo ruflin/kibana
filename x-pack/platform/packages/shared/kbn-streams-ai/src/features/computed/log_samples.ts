@@ -14,6 +14,8 @@ const SAMPLE_SIZE = 5;
 export const logSamplesGenerator: ComputedFeatureGenerator = {
   type: LOG_SAMPLES_FEATURE_TYPE,
 
+  applicableStreamTypes: ['logs'],
+
   description: 'Raw sample log documents from the stream',
 
   llmInstructions: `Contains raw sample log documents from the stream.

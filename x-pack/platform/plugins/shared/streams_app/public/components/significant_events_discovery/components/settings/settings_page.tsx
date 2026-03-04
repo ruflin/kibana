@@ -16,6 +16,7 @@ import {
   EuiPanel,
   EuiSpacer,
   EuiSuperSelect,
+  EuiSwitch,
   EuiText,
   EuiTitle,
 } from '@elastic/eui';
@@ -33,6 +34,7 @@ interface DiscoverySettings {
   discoveryConnectorId?: string;
   suggestionConnectorId?: string;
   defaultConnectorId?: string;
+  enableMetricsTraces?: boolean;
 }
 
 export function SettingsPage() {
@@ -63,8 +65,8 @@ export function SettingsPage() {
     useState<string>(EMPTY_CONNECTOR_VALUE);
   const [queryGenerationConnectorId, setQueryGenerationConnectorId] =
     useState<string>(EMPTY_CONNECTOR_VALUE);
-  const [suggestionConnectorId, setSuggestionConnectorId] =
-    useState<string>(EMPTY_CONNECTOR_VALUE);
+  const [suggestionConnectorId, setSuggestionConnectorId] = useState<string>(EMPTY_CONNECTOR_VALUE);
+  const [enableMetricsTraces, setEnableMetricsTraces] = useState<boolean>(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -76,6 +78,7 @@ export function SettingsPage() {
       setFeatureExtractionConnectorId(s.featureExtractionConnectorId ?? EMPTY_CONNECTOR_VALUE);
       setQueryGenerationConnectorId(s.queryGenerationConnectorId ?? EMPTY_CONNECTOR_VALUE);
       setSuggestionConnectorId(s.suggestionConnectorId ?? EMPTY_CONNECTOR_VALUE);
+      setEnableMetricsTraces(s.enableMetricsTraces ?? false);
     }
   }, [settingsFetch.value]);
 
@@ -132,6 +135,7 @@ export function SettingsPage() {
             featureExtractionConnectorId: toSend(featureExtractionConnectorId),
             queryGenerationConnectorId: toSend(queryGenerationConnectorId),
             suggestionConnectorId: toSend(suggestionConnectorId),
+            enableMetricsTraces,
           },
         },
       });
@@ -147,6 +151,7 @@ export function SettingsPage() {
     featureExtractionConnectorId,
     queryGenerationConnectorId,
     suggestionConnectorId,
+    enableMetricsTraces,
   ]);
 
   if (settingsFetch.loading || genAiConnectors.loading) {
@@ -197,9 +202,35 @@ export function SettingsPage() {
             <EuiFlexItem>
               <EuiFormRow
                 label={i18n.translate(
-                  'xpack.streams.sigDiscovery.settings.defaultConnectorLabel',
-                  { defaultMessage: 'Default Connector' }
+                  'xpack.streams.sigDiscovery.settings.enableMetricsTracesLabel',
+                  { defaultMessage: 'Enable metrics and traces' }
                 )}
+                helpText={i18n.translate(
+                  'xpack.streams.sigDiscovery.settings.enableMetricsTracesHelp',
+                  {
+                    defaultMessage:
+                      'When enabled, feature extraction and sig events discovery will also process metrics and traces streams. Off by default.',
+                  }
+                )}
+                fullWidth
+              >
+                <EuiSwitch
+                  label={i18n.translate(
+                    'xpack.streams.sigDiscovery.settings.enableMetricsTracesSwitch',
+                    { defaultMessage: 'Enable metrics and traces' }
+                  )}
+                  checked={enableMetricsTraces}
+                  onChange={(e) => setEnableMetricsTraces(e.target.checked)}
+                  data-test-subj="sigDiscoveryEnableMetricsTracesSwitch"
+                />
+              </EuiFormRow>
+            </EuiFlexItem>
+
+            <EuiFlexItem>
+              <EuiFormRow
+                label={i18n.translate('xpack.streams.sigDiscovery.settings.defaultConnectorLabel', {
+                  defaultMessage: 'Default Connector',
+                })}
                 helpText={i18n.translate(
                   'xpack.streams.sigDiscovery.settings.defaultConnectorHelp',
                   {
@@ -220,10 +251,9 @@ export function SettingsPage() {
 
             <EuiFlexItem>
               <EuiFormRow
-                label={i18n.translate(
-                  'xpack.streams.sigDiscovery.settings.stage1ConnectorLabel',
-                  { defaultMessage: 'Stage 1: Extract Discoveries' }
-                )}
+                label={i18n.translate('xpack.streams.sigDiscovery.settings.stage1ConnectorLabel', {
+                  defaultMessage: 'Stage 1: Extract Discoveries',
+                })}
                 helpText={i18n.translate(
                   'xpack.streams.sigDiscovery.settings.stage1ConnectorHelp',
                   {
@@ -244,10 +274,9 @@ export function SettingsPage() {
 
             <EuiFlexItem>
               <EuiFormRow
-                label={i18n.translate(
-                  'xpack.streams.sigDiscovery.settings.stage2ConnectorLabel',
-                  { defaultMessage: 'Stage 2: Enrich with Recommendations' }
-                )}
+                label={i18n.translate('xpack.streams.sigDiscovery.settings.stage2ConnectorLabel', {
+                  defaultMessage: 'Stage 2: Enrich with Recommendations',
+                })}
                 helpText={i18n.translate(
                   'xpack.streams.sigDiscovery.settings.stage2ConnectorHelp',
                   {
@@ -268,10 +297,9 @@ export function SettingsPage() {
 
             <EuiFlexItem>
               <EuiFormRow
-                label={i18n.translate(
-                  'xpack.streams.sigDiscovery.settings.stage3ConnectorLabel',
-                  { defaultMessage: 'Stage 3: Generate Suggestions' }
-                )}
+                label={i18n.translate('xpack.streams.sigDiscovery.settings.stage3ConnectorLabel', {
+                  defaultMessage: 'Stage 3: Generate Suggestions',
+                })}
                 helpText={i18n.translate(
                   'xpack.streams.sigDiscovery.settings.stage3ConnectorHelp',
                   {

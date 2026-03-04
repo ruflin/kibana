@@ -20,6 +20,12 @@ export interface ComputedFeatureGeneratorOptions {
 }
 
 /**
+ * Stream data types that computed feature generators can be scoped to.
+ * Derived from the stream name prefix (e.g. "logs-*", "metrics-*", "traces-*").
+ */
+export type StreamDataType = 'logs' | 'metrics' | 'traces' | 'unknown';
+
+/**
  * Interface for computed feature generators.
  * Each generator is responsible for producing a specific type of computed feature.
  */
@@ -39,6 +45,12 @@ export interface ComputedFeatureGenerator {
    * This is automatically included in prompts so the LLM knows how to leverage this feature.
    */
   llmInstructions: string;
+
+  /**
+   * Optional list of stream data types this generator applies to.
+   * When omitted, the generator runs for all stream types.
+   */
+  applicableStreamTypes?: StreamDataType[];
 
   /**
    * Generates the computed value for this feature.

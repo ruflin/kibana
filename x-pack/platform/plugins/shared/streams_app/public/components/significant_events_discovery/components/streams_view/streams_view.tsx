@@ -31,6 +31,7 @@ import { useStreamsAppRouter } from '../../../../hooks/use_streams_app_router';
 import { useTaskPolling } from '../../../../hooks/use_task_polling';
 import { getFormattedError } from '../../../../util/errors';
 import { StreamsAppSearchBar } from '../../../streams_app_search_bar';
+import { useStreamsAppFetch } from '../../../../hooks/use_streams_app_fetch';
 import { useOnboardingStatusUpdateQueue } from '../../hooks/use_onboarding_status_update_queue';
 import {
   DISCOVER_DISCOVERIES_BUTTON_LABEL,
@@ -64,18 +65,37 @@ export function StreamsView({ refreshUnbackedQueriesCount }: StreamsViewProps) {
     core: {
       notifications: { toasts },
     },
+    dependencies: {
+      start: {
+        streams: { streamsRepositoryClient },
+      },
+    },
   } = useKibana();
   const isInitialStatusUpdateDone = useRef(false);
   const [searchQuery, setSearchQuery] = useState<Query | undefined>();
   const [isWaitingForDiscoveriesTask, setIsWaitingForDiscoveriesTask] = useState(false);
+
+  const discoverySettingsFetch = useStreamsAppFetch(
+    async ({ signal }) =>
+      streamsRepositoryClient.fetch('GET /internal/streams/_discovery/_settings', { signal }),
+    [streamsRepositoryClient]
+  );
+
+  const enableMetricsTraces = discoverySettingsFetch.value?.enableMetricsTraces ?? false;
+
   const streamsListFetch = useFetchStreams({
     select: (result) => {
       return {
         ...result,
-        /**
-         * Significant events discovery for now only works with logs streams.
-         */
-        streams: result.streams.filter((stream) => stream.stream.name.startsWith('logs')),
+        streams: result.streams.filter((stream) => {
+          if (stream.stream.name.startsWith('logs')) return true;
+          if (enableMetricsTraces) {
+            return (
+              stream.stream.name.startsWith('metrics') || stream.stream.name.startsWith('traces')
+            );
+          }
+          return false;
+        }),
       };
     },
   });

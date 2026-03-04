@@ -10,7 +10,13 @@ import { datasetAnalysisGenerator } from './dataset_analysis';
 import { errorLogsGenerator } from './error_logs';
 import { logPatternsGenerator } from './log_patterns';
 import { logSamplesGenerator } from './log_samples';
-import type { ComputedFeatureGenerator, ComputedFeatureGeneratorOptions } from './types';
+import { metricSamplesGenerator } from './metric_samples';
+import { traceSamplesGenerator } from './trace_samples';
+import type {
+  ComputedFeatureGenerator,
+  ComputedFeatureGeneratorOptions,
+  StreamDataType,
+} from './types';
 
 /**
  * Internal registry for computed feature generators.
@@ -45,9 +51,21 @@ const generators: ComputedFeatureGenerator[] = [
   logSamplesGenerator,
   logPatternsGenerator,
   errorLogsGenerator,
+  metricSamplesGenerator,
+  traceSamplesGenerator,
 ];
 
 generators.forEach((generator) => registry.register(generator));
+
+/**
+ * Derives the stream data type from the stream name prefix.
+ */
+function getStreamDataType(streamName: string): StreamDataType {
+  if (streamName.startsWith('logs')) return 'logs';
+  if (streamName.startsWith('metrics')) return 'metrics';
+  if (streamName.startsWith('traces')) return 'traces';
+  return 'unknown';
+}
 
 /**
  * Returns formatted LLM instructions for all computed feature types.
@@ -79,13 +97,21 @@ function toComputedFeature(
 }
 
 /**
- * Generates all computed features by running all registered generators in parallel.
+ * Generates all computed features by running all applicable generators in parallel.
+ * Generators with `applicableStreamTypes` are only run when the stream name matches
+ * one of the specified types. Generators without `applicableStreamTypes` run for all streams.
  */
 export async function generateAllComputedFeatures(
   options: ComputedFeatureGeneratorOptions
 ): Promise<BaseFeature[]> {
+  const streamDataType = getStreamDataType(options.stream.name);
+  const applicableGenerators = registry.getAll().filter((generator) => {
+    if (!generator.applicableStreamTypes) return true;
+    return generator.applicableStreamTypes.includes(streamDataType);
+  });
+
   return Promise.all(
-    registry.getAll().map(async (generator) => {
+    applicableGenerators.map(async (generator) => {
       const value = await generator.generate(options);
       return toComputedFeature(generator, value, options.stream.name);
     })

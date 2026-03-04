@@ -16,12 +16,16 @@ export const DATASET_ANALYSIS_FEATURE_TYPE = 'dataset_analysis' as const;
 export const LOG_SAMPLES_FEATURE_TYPE = 'log_samples' as const;
 export const LOG_PATTERNS_FEATURE_TYPE = 'log_patterns' as const;
 export const ERROR_LOGS_FEATURE_TYPE = 'error_logs' as const;
+export const METRIC_SAMPLES_FEATURE_TYPE = 'metric_samples' as const;
+export const TRACE_SAMPLES_FEATURE_TYPE = 'trace_samples' as const;
 
 export const COMPUTED_FEATURE_TYPES = [
   DATASET_ANALYSIS_FEATURE_TYPE,
   LOG_SAMPLES_FEATURE_TYPE,
   LOG_PATTERNS_FEATURE_TYPE,
   ERROR_LOGS_FEATURE_TYPE,
+  METRIC_SAMPLES_FEATURE_TYPE,
+  TRACE_SAMPLES_FEATURE_TYPE,
 ] as const;
 
 export const baseFeatureSchema = z.object({

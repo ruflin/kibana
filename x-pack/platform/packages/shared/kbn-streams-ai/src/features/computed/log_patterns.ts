@@ -16,6 +16,8 @@ const MAX_PATTERNS = 5;
 export const logPatternsGenerator: ComputedFeatureGenerator = {
   type: LOG_PATTERNS_FEATURE_TYPE,
 
+  applicableStreamTypes: ['logs'],
+
   description: 'Log message patterns identified through categorization analysis',
 
   llmInstructions: `Contains log message patterns identified by analyzing the log messages in the stream.

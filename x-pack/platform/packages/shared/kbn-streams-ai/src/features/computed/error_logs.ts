@@ -29,6 +29,8 @@ const ERROR_FILTER: QueryDslQueryContainer = {
 export const errorLogsGenerator: ComputedFeatureGenerator = {
   type: ERROR_LOGS_FEATURE_TYPE,
 
+  applicableStreamTypes: ['logs'],
+
   description: 'Sample error logs extracted from the stream',
 
   llmInstructions: `Contains sample error logs from the stream, filtered by log.level: error or messages containing error/exception keywords.
