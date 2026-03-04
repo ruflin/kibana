@@ -45,10 +45,8 @@ export async function resolveConnectorId({
     return defaultConnector;
   }
 
-  // POC hardcoded fallback — use the local Anthropic connector when no default is configured
-  const HARDCODED_FALLBACK_CONNECTOR = 'anthropic-claude-4.6-sonnet';
-  logger.debug(
-    `No connector ID provided and no default configured, falling back to hardcoded connector: ${HARDCODED_FALLBACK_CONNECTOR}`
+  throw new StatusError(
+    'No AI connector configured. Please set a default AI connector in Stack Management > AI Connectors.',
+    400
   );
-  return HARDCODED_FALLBACK_CONNECTOR;
 }
