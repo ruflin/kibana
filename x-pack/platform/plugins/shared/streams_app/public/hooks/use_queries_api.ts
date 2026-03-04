@@ -10,12 +10,19 @@ import type { StreamQuery } from '@kbn/streams-schema';
 import { useMemo } from 'react';
 import { useKibana } from './use_kibana';
 
+interface BackfillResult {
+  scheduled: number;
+  skipped: number;
+  errors: string[];
+}
+
 interface QueriesApi {
   promote: ({ queryIds }: { queryIds: string[] }) => Promise<{ promoted: number }>;
   promoteAll: () => Promise<{ promoted: number }>;
   upsertQuery: ({ query, streamName }: { query: StreamQuery; streamName: string }) => Promise<void>;
   removeQuery: ({ queryId, streamName }: { queryId: string; streamName: string }) => Promise<void>;
   getUnbackedQueriesCount: (signal?: AbortSignal | null) => Promise<{ count: number }>;
+  backfill: (options?: { lookbackHours?: number }) => Promise<BackfillResult>;
   abort: () => void;
 }
 
@@ -74,6 +81,16 @@ export function useQueriesApi(): QueriesApi {
       getUnbackedQueriesCount: async (requestSignal?: AbortSignal | null) => {
         return streamsRepositoryClient.fetch('GET /internal/streams/queries/_unbacked_count', {
           signal: requestSignal ?? signal,
+        });
+      },
+      backfill: async (options?: { lookbackHours?: number }) => {
+        return streamsRepositoryClient.fetch('POST /internal/streams/queries/_backfill', {
+          params: {
+            body: {
+              lookbackHours: options?.lookbackHours ?? 1,
+              runActions: false,
+            },
+          },
         });
       },
       abort: () => {

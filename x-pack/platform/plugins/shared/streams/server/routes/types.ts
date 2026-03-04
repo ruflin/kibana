@@ -12,6 +12,7 @@ import type { InferenceClient } from '@kbn/inference-common';
 import type { LicensingPluginStart } from '@kbn/licensing-plugin/server';
 import type { DefaultRouteHandlerResources } from '@kbn/server-route-repository';
 import type { IUiSettingsClient } from '@kbn/core/server';
+import type { RulesClient } from '@kbn/alerting-plugin/server';
 import type { IFieldsMetadataClient } from '@kbn/fields-metadata-plugin/server/services/fields_metadata/types';
 import type { ContentClient } from '../lib/content/content_client';
 import type { AttachmentClient } from '../lib/streams/attachments/attachment_client';
@@ -43,6 +44,7 @@ export interface RouteHandlerScopedClients {
   contentClient: ContentClient;
   queryClient: QueryClient;
   discoveryClient: DiscoveryClient;
+  rulesClient: RulesClient;
   licensing: LicensingPluginStart;
   uiSettingsClient: IUiSettingsClient;
   fieldsMetadataClient: IFieldsMetadataClient;

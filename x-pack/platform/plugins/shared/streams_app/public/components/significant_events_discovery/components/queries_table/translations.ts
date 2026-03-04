@@ -233,3 +233,27 @@ export const REGENERATE_QUERIES_ERROR_TOAST_TITLE = i18n.translate(
   'xpack.streams.significantEventsDiscovery.queriesTable.regenerateQueriesErrorToastTitle',
   { defaultMessage: 'Failed to regenerate queries' }
 );
+
+export const BACKFILL_BUTTON = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.backfillButton',
+  { defaultMessage: 'Backfill (1h)' }
+);
+
+export const BACKFILL_SUCCESS_TOAST_TITLE = (count: number) =>
+  i18n.translate(
+    'xpack.streams.significantEventsDiscovery.queriesTable.backfillSuccessToastTitle',
+    {
+      defaultMessage: 'Backfill scheduled for {count} rule(s)',
+      values: { count },
+    }
+  );
+
+export const BACKFILL_ERROR_TOAST_TITLE = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.backfillErrorToastTitle',
+  { defaultMessage: 'Failed to schedule backfill' }
+);
+
+export const BACKFILL_NO_RULES_TOAST_TITLE = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.backfillNoRulesToastTitle',
+  { defaultMessage: 'No promoted rules to backfill. Promote queries first.' }
+);

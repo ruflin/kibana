@@ -147,6 +147,7 @@ export class StreamsPlugin
       const soClient = coreStart.savedObjects.getScopedClient(request);
       const inferenceClient = pluginsStart.inference.getClient({ request });
       const licensing = pluginsStart.licensing;
+      const rulesClient = await pluginsStart.alerting.getRulesClientWithRequest(request);
       const fieldsMetadataClient = await pluginsStart.fieldsMetadata.getClient(request);
       const taskClient = await taskService.getClient(
         coreStart,
@@ -173,6 +174,7 @@ export class StreamsPlugin
         contentClient,
         queryClient,
         discoveryClient,
+        rulesClient,
         fieldsMetadataClient,
         licensing,
         uiSettingsClient,

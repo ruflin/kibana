@@ -92,6 +92,10 @@ import {
   REGENERATE_QUERIES_ERROR_TOAST_TITLE,
   REGENERATE_QUERIES_NO_STREAMS_TOAST_TITLE,
   REGENERATE_QUERIES_SUCCESS_TOAST_TITLE,
+  BACKFILL_BUTTON,
+  BACKFILL_SUCCESS_TOAST_TITLE,
+  BACKFILL_ERROR_TOAST_TITLE,
+  BACKFILL_NO_RULES_TOAST_TITLE,
 } from './translations';
 import { PromoteAction } from './promote_action';
 import { QueryDetailsFlyout } from './query_details_flyout';
@@ -138,7 +142,7 @@ export function QueriesTable() {
   } = useFetchStreams();
   const { count: unbackedCount } = useUnbackedQueriesCount();
   const queryClient = useQueryClient();
-  const { promoteAll, upsertQuery, removeQuery } = useQueriesApi();
+  const { promoteAll, upsertQuery, removeQuery, backfill } = useQueriesApi();
 
   const invalidateQueriesData = useCallback(
     async () =>
@@ -218,6 +222,32 @@ export function QueriesTable() {
     onError: (error) => {
       toasts.addError(getFormattedError(error), {
         title: PROMOTE_ALL_ERROR_TOAST_TITLE,
+      });
+    },
+  });
+
+  const backfillMutation = useMutation<
+    { scheduled: number; skipped: number; errors: string[] },
+    Error
+  >({
+    mutationFn: () => backfill({ lookbackHours: 1 }),
+    onSuccess: async ({ scheduled, errors: backfillErrors }) => {
+      if (scheduled > 0) {
+        toasts.addSuccess(BACKFILL_SUCCESS_TOAST_TITLE(scheduled));
+      } else {
+        toasts.addWarning({ title: BACKFILL_NO_RULES_TOAST_TITLE });
+      }
+      if (backfillErrors.length > 0) {
+        toasts.addWarning({
+          title: `${backfillErrors.length} rule(s) failed`,
+          text: backfillErrors.join('\n'),
+        });
+      }
+      setTimeout(() => invalidateQueriesData(), 15000);
+    },
+    onError: (error) => {
+      toasts.addError(getFormattedError(error), {
+        title: BACKFILL_ERROR_TOAST_TITLE,
       });
     },
   });
@@ -507,6 +537,18 @@ export function QueriesTable() {
               data-test-subj="queriesRegenerateQueriesButton"
             >
               {REGENERATE_QUERIES_BUTTON}
+            </EuiButton>
+          </EuiFlexItem>
+          <EuiFlexItem grow={false}>
+            <EuiButton
+              iconType="clock"
+              size="s"
+              isLoading={backfillMutation.isLoading}
+              disabled={backfillMutation.isLoading}
+              onClick={() => backfillMutation.mutate()}
+              data-test-subj="queriesBackfillButton"
+            >
+              {BACKFILL_BUTTON}
             </EuiButton>
           </EuiFlexItem>
         </EuiFlexGroup>
