@@ -95,7 +95,7 @@ export const discoveriesSchema: ToolSchema = {
           sample_events: {
             type: 'array',
             description: 'Sample event payloads demonstrating the pattern',
-            items: { type: 'object' },
+            items: { type: 'object', properties: {} },
           },
           recommendations: {
             type: 'array',

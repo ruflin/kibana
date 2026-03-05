@@ -21,6 +21,11 @@ import { createUpsertSigEventsQueriesTool } from './upsert_sig_events_queries';
 import { createGetSigEventsWithChangePointsTool } from './get_sig_events_with_change_points';
 import { createPushEntityDefinitionTool } from './push_entity_definition';
 import { createPromoteQueriesTool } from './promote_queries';
+import { createSearchEventsTool } from './search_events';
+import { createGetLogPatternsTool } from './get_log_patterns';
+import { createRunLogRateAnalysisTool } from './run_log_rate_analysis';
+import { createGetQueryResultsTool } from './get_query_results';
+import { createGetQueryDefinitionsTool } from './get_query_definitions';
 
 export const registerTools = (
   agentBuilder: AgentBuilderPluginSetup,
@@ -39,6 +44,11 @@ export const registerTools = (
     createGetSigEventsWithChangePointsTool({ deps }),
     createPushEntityDefinitionTool({ deps }),
     createPromoteQueriesTool({ deps }),
+    createSearchEventsTool({ deps }),
+    createGetLogPatternsTool({ deps }),
+    createRunLogRateAnalysisTool({ deps }),
+    createGetQueryResultsTool({ deps }),
+    createGetQueryDefinitionsTool({ deps }),
   ];
 
   for (const tool of tools) {

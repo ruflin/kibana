@@ -52,6 +52,11 @@ export const AGENT_BUILDER_BUILTIN_TOOLS = [
   `${internalNamespaces.streams}.get_sig_events_with_change_points`,
   `${internalNamespaces.streams}.push_entity_definition`,
   `${internalNamespaces.streams}.promote_queries`,
+  `${internalNamespaces.streams}.search_events`,
+  `${internalNamespaces.streams}.get_log_patterns`,
+  `${internalNamespaces.streams}.run_log_rate_analysis`,
+  `${internalNamespaces.streams}.get_query_results`,
+  `${internalNamespaces.streams}.get_query_definitions`,
 ] as const;
 
 export type AgentBuilderBuiltinTool = (typeof AGENT_BUILDER_BUILTIN_TOOLS)[number];
