@@ -257,3 +257,62 @@ export const BACKFILL_NO_RULES_TOAST_TITLE = i18n.translate(
   'xpack.streams.significantEventsDiscovery.queriesTable.backfillNoRulesToastTitle',
   { defaultMessage: 'No promoted rules to backfill. Promote queries first.' }
 );
+
+export const PURPOSE_COLUMN = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.purposeColumn',
+  { defaultMessage: 'Purpose' }
+);
+
+export const PURPOSE_FILTER_ALL = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.purposeFilterAll',
+  { defaultMessage: 'All' }
+);
+
+export const PURPOSE_LABELS: Record<string, string> = {
+  detection: i18n.translate(
+    'xpack.streams.significantEventsDiscovery.queriesTable.purposeDetection',
+    { defaultMessage: 'Detection' }
+  ),
+  exclusion: i18n.translate(
+    'xpack.streams.significantEventsDiscovery.queriesTable.purposeExclusion',
+    { defaultMessage: 'Exclusion' }
+  ),
+  stats: i18n.translate('xpack.streams.significantEventsDiscovery.queriesTable.purposeStats', {
+    defaultMessage: 'Stats',
+  }),
+  baseline: i18n.translate(
+    'xpack.streams.significantEventsDiscovery.queriesTable.purposeBaseline',
+    { defaultMessage: 'Baseline' }
+  ),
+  correlation: i18n.translate(
+    'xpack.streams.significantEventsDiscovery.queriesTable.purposeCorrelation',
+    { defaultMessage: 'Correlation' }
+  ),
+};
+
+export const QUERY_TYPE_COLUMN = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.queryTypeColumn',
+  { defaultMessage: 'Query type' }
+);
+
+export const QUERY_TYPE_LABELS: Record<string, string> = {
+  row: i18n.translate('xpack.streams.significantEventsDiscovery.queriesTable.queryTypeRow', {
+    defaultMessage: 'Row',
+  }),
+  stats: i18n.translate('xpack.streams.significantEventsDiscovery.queriesTable.queryTypeStats', {
+    defaultMessage: 'Stats',
+  }),
+};
+
+export const PURPOSE_FILTER_LABEL = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.purposeFilterLabel',
+  { defaultMessage: 'Filter by purpose' }
+);
+
+export const PROMOTE_ALL_MEDIUM_CALLOUT_DESCRIPTION = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.promoteAllMediumCalloutDescription',
+  {
+    defaultMessage:
+      'Enable scheduled runs for medium and higher impact queries so their results are saved as Significant events, powering Discovery generation.',
+  }
+);

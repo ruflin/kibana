@@ -13,10 +13,27 @@ import { conditionSchema } from '@kbn/streamlang';
 import { primitive } from '../shared/record_types';
 import type { SignificantEventsResponse } from '../api/significant_events';
 
+/**
+ * The purpose of a sig events query — describes *why* the query exists.
+ *
+ * - `detection`  (default) Detects specific significant events (errors, failures, anomalies).
+ * - `exclusion`  Identifies known-noisy or low-signal patterns to filter out (noise canceling).
+ * - `stats`      Aggregation-based metrics: error rates, throughput, latency percentiles, etc.
+ * - `baseline`   Captures normal operating ranges as a reference for anomaly detection.
+ * - `correlation` Cross-field or cross-stream correlation to surface co-occurring patterns.
+ */
+export type StreamQueryPurpose = 'detection' | 'exclusion' | 'stats' | 'baseline' | 'correlation';
+
 interface StreamQueryBase {
   id: string;
   title: string;
   query_type?: 'row' | 'stats';
+  /**
+   * The purpose of this query. Defaults to `detection`.
+   * Use `exclusion` for noise-canceling queries, `stats` for aggregation metrics,
+   * `baseline` for normal-range references, and `correlation` for co-occurrence analysis.
+   */
+  query_purpose?: StreamQueryPurpose;
 }
 
 export interface StreamQuery extends StreamQueryBase {
@@ -37,6 +54,10 @@ export interface StreamQuery extends StreamQueryBase {
   /**
    * Full ES|QL query built from the stream indices, KQL query, and feature filter.
    * Example: FROM stream,stream.* | WHERE KQL("message: error")
+   *
+   * For stats queries (query_type: 'stats'), this is the raw ES|QL aggregation query
+   * provided directly rather than derived from KQL.
+   * Example: FROM stream | STATS error_rate = COUNT_IF(http.response.status_code >= 500) / COUNT(*) BY BUCKET(@timestamp, 5m)
    */
   esql: {
     query: string;
@@ -53,9 +74,23 @@ const streamQueryBaseSchema: z.Schema<StreamQueryBase> = z.object({
     .enum(['row', 'stats'])
     .optional()
     .describe('Type of ES|QL query: row (default) or stats (aggregation)'),
+  query_purpose: z
+    .enum(['detection', 'exclusion', 'stats', 'baseline', 'correlation'])
+    .optional()
+    .describe(
+      'Purpose of the query: detection (default), exclusion (noise-canceling), stats (aggregation metrics), baseline (normal-range reference), correlation (co-occurrence analysis)'
+    ),
 });
 
-export type StreamQueryInput = Omit<StreamQuery, 'esql'>;
+export type StreamQueryInput = Omit<StreamQuery, 'esql'> & {
+  /**
+   * Raw ES|QL query override. When provided, this is used as-is instead of deriving
+   * the query from `kql` + `feature`. Required for `query_type: 'stats'` queries.
+   *
+   * Example: `FROM stream | STATS error_rate = COUNT_IF(http.response.status_code >= 500) / COUNT(*) BY BUCKET(@timestamp, 5m)`
+   */
+  esql_override?: string;
+};
 
 export const streamQueryInputSchema: z.Schema<StreamQueryInput> = z.intersection(
   streamQueryBaseSchema,
@@ -72,6 +107,12 @@ export const streamQueryInputSchema: z.Schema<StreamQueryInput> = z.intersection
     }),
     severity_score: z.number().optional(),
     evidence: z.array(z.string()).optional(),
+    esql_override: z
+      .string()
+      .optional()
+      .describe(
+        'Raw ES|QL query override. Used as-is instead of deriving from KQL. Required for stats queries.'
+      ),
   })
 );
 
@@ -102,6 +143,12 @@ export const upsertStreamQueryRequestSchema = z.object({
   }),
   severity_score: z.number().optional(),
   evidence: z.array(z.string()).optional(),
+  query_purpose: z
+    .enum(['detection', 'exclusion', 'stats', 'baseline', 'correlation'])
+    .optional()
+    .describe(
+      'Purpose of the query: detection (default), exclusion (noise-canceling), stats (aggregation metrics), baseline (normal-range reference), correlation (co-occurrence analysis)'
+    ),
 });
 
 export interface QueriesGetResponse {

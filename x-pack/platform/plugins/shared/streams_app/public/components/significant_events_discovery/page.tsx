@@ -25,8 +25,19 @@ import { SuggestionsTab } from './components/suggestions/suggestions_tab';
 import { TopologyTab } from './components/topology/topology_tab';
 import { SettingsPage } from './components/settings/settings_page';
 import { OverviewTab } from './components/overview/overview_tab';
+import { SkillsTab } from './components/skills/skills_tab';
 
-const discoveryTabs = ['overview', 'streams', 'features', 'queries', 'discoveries', 'suggestions', 'topology', 'settings'] as const;
+const discoveryTabs = [
+  'overview',
+  'streams',
+  'features',
+  'queries',
+  'discoveries',
+  'suggestions',
+  'topology',
+  'skills',
+  'settings',
+] as const;
 type DiscoveryTab = (typeof discoveryTabs)[number];
 
 function isValidDiscoveryTab(value: string): value is DiscoveryTab {
@@ -139,6 +150,14 @@ export function SignificantEventsDiscoveryPage() {
       isSelected: tab === 'topology',
     },
     {
+      id: 'skills',
+      label: i18n.translate('xpack.streams.significantEventsDiscovery.skillsTab', {
+        defaultMessage: 'Skills',
+      }),
+      href: router.link('/_discovery/{tab}', { path: { tab: 'skills' } }),
+      isSelected: tab === 'skills',
+    },
+    {
       id: 'settings',
       label: i18n.translate('xpack.streams.significantEventsDiscovery.settingsTab', {
         defaultMessage: 'Settings',
@@ -182,6 +201,7 @@ export function SignificantEventsDiscoveryPage() {
         {tab === 'discoveries' && <DiscoveriesTab />}
         {tab === 'suggestions' && <SuggestionsTab />}
         {tab === 'topology' && <TopologyTab />}
+        {tab === 'skills' && <SkillsTab />}
         {tab === 'settings' && <SettingsPage />}
       </StreamsAppPageTemplate.Body>
     </>

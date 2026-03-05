@@ -38,6 +38,7 @@ import { internalOnboardingRoutes } from './internal/streams/onboarding/route';
 import { internalQueriesRoutes } from './internal/streams/queries/route';
 import { internalTopologyRoutes } from './internal/streams/topology/route';
 import { internalBackfillRoutes } from './internal/streams/backfill/route';
+import { internalSkillExecutionRoutes } from './internal/streams/skill_execution/route';
 
 export const streamsRouteRepository = {
   // internal APIs
@@ -64,6 +65,7 @@ export const streamsRouteRepository = {
   ...internalQueriesRoutes,
   ...internalTopologyRoutes,
   ...internalBackfillRoutes,
+  ...internalSkillExecutionRoutes,
   // public APIs
   ...docCountsRoutes,
   ...crudRoutes,

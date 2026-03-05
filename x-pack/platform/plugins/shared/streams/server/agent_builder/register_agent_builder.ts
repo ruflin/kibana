@@ -8,30 +8,27 @@
 import type { AgentBuilderPluginSetup } from '@kbn/agent-builder-plugin/server';
 import type { Logger } from '@kbn/logging';
 import { createSigDiscoveryAgentDefinition } from './agents/sig_discovery_agent';
-import { generateDiscoveriesSkill } from './skills/generate_discoveries_skill';
-import { extractStreamFeaturesSkill } from './skills/extract_stream_features_skill';
-import { generateSigEventsQueriesSkill } from './skills/generate_sig_events_queries_skill';
-import { generateSuggestionsSkill } from './skills/generate_suggestions_skill';
-import { pushEntityDefinitionSkill } from './skills/push_entity_definition_skill';
+import { createStreamSkills } from './skills/create_skills';
 import { registerTools } from './tools/register_tools';
 import type { StreamsToolsDependencies } from './tools/types';
+import type { GetScopedClients } from '../routes/types';
 
 export const registerAgentBuilder = (
   agentBuilder: AgentBuilderPluginSetup,
   logger: Logger,
-  toolsDeps: StreamsToolsDependencies
+  toolsDeps: StreamsToolsDependencies,
+  getScopedClients: GetScopedClients
 ): void => {
   registerTools(agentBuilder, toolsDeps);
 
   agentBuilder.agents.register(createSigDiscoveryAgentDefinition());
 
-  agentBuilder.skills.register(generateDiscoveriesSkill);
-  agentBuilder.skills.register(extractStreamFeaturesSkill);
-  agentBuilder.skills.register(generateSigEventsQueriesSkill);
-  agentBuilder.skills.register(generateSuggestionsSkill);
-  agentBuilder.skills.register(pushEntityDefinitionSkill);
+  const skills = createStreamSkills({ getScopedClients, logger });
+  for (const skill of skills) {
+    agentBuilder.skills.register(skill);
+  }
 
   logger.debug(
-    'Successfully registered SigDiscovery agent, 5 skills, and 11 tools in Agent Builder'
+    `Successfully registered SigDiscovery agent, ${skills.length} skills, and tools in Agent Builder`
   );
 };

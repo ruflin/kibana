@@ -91,6 +91,7 @@ export {
 export {
   type StreamQuery,
   type StreamQueryInput,
+  type StreamQueryPurpose,
   type QueriesGetResponse,
   type QueriesOccurrencesGetResponse,
   upsertStreamQueryRequestSchema,

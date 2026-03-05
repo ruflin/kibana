@@ -1080,6 +1080,9 @@ Record significant deviations, failed approaches, and non-obvious discoveries he
 | 2026-03-05 | WS2 | Recommendations changed from `string[]` to structured objects in LLM schema | LLM tool schema now requests `{ title, description, priority }` objects instead of plain strings. Prompts instruct the LLM to generate a short plain-text title and a detailed markdown description. Strict parsing schema uses `z.union` to handle both legacy strings and new objects for backward compatibility. |
 | 2026-03-05 | WS1 | Semantic indexing for recommendation titles and descriptions | Added `recommendations_title_semantic` and `recommendations_description_semantic` fields to discovery storage. `DiscoveryClient` concatenates recommendation titles/descriptions and indexes them into these semantic fields on create and update. |
 | 2026-03-05 | WS7 | Recommendation descriptions rendered as markdown in all UI locations | Insights tab and Overview tab switched from `<EuiText>` to `<EuiMarkdownFormat>` for recommendation descriptions. Discoveries tab already used `EuiMarkdownFormat`. Overview tab truncation increased from 120 to 200 chars. |
+| 2026-03-05 | WS4 | Skill execution engine implemented | Skills can now be executed programmatically via `POST /internal/streams/_skills/{skillId}/_execute`. Each skill has a `getInlineTools` method that returns a `BuiltinSkillBoundedTool` wrapping a `SkillExecutionHandler`. Handlers bridge to the existing task infrastructure (onboarding tasks for features/queries, discovery pipeline for discoveries, suggestion generation for suggestions). The agent builder plugin's `SkillsStart` contract was not extended — execution is handled entirely by the streams plugin's route, which creates handlers with `getScopedClients` access. **Lesson:** Skill execution in the agent builder context requires `ToolHandlerContext` (with `esClient`, `modelProvider`, etc.), which is only available during agent runs. For programmatic execution outside of chat, a separate route that directly calls the underlying task infrastructure is simpler and more reliable. |
+| 2026-03-05 | WS4 | `investigate_stream` skill added | New skill combining all analysis tools (features, queries, change points, log patterns, log rate analysis, search events, query results). Useful for comprehensive stream investigation. Execution handler schedules onboarding with features + queries + discoveries steps. |
+| 2026-03-05 | WS7 | Skills tab added to SigDiscovery page | New tab with skill cards showing name, description, and Run button. Stream selector (EuiComboBox) lets users choose which streams to target. Skills that don't support direct execution show a "Chat only" badge. Execution results shown in a callout above the cards. |
 
 ---
 
@@ -1365,6 +1368,19 @@ All questions have been resolved. Decisions are recorded here for reference.
 - `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/markdown_plugins/mermaid_plugin.tsx` — new: mermaid parsing + rendering (direct DOM render for getBBox, inline scaling, fullscreen modal)
 - `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/markdown_plugins/index.ts` — export mermaid plugin
 - `x-pack/platform/plugins/shared/agent_builder/server/services/tools/builtin/attachments/attachment_add.ts` — improved schema descriptions to guide LLM on valid types and data shapes
+
+### Skill Execution Engine
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/skills/skill_execution.ts` — new: `createExecuteTool` factory that wraps a `SkillExecutionHandler` into a `BuiltinSkillBoundedTool` with proper `ToolHandlerReturn` format
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/skills/execution_handlers.ts` — new: execution handlers for each skill that bridge to the task infrastructure (`scheduleOnboardingForStreams`, discovery pipeline, suggestion generation)
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/skills/create_skills.ts` — new: factory that builds skill definitions with `getInlineTools` injected, wiring each skill to its execution handler
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/skills/investigate_stream_skill.ts` — new: `investigate_stream` skill combining analysis tools (features + queries + discoveries)
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/register_agent_builder.ts` — updated to accept `getScopedClients` and use `createStreamSkills` factory for skill registration
+- `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/skill_execution/route.ts` — new: `GET /internal/streams/_skills` (list skills) and `POST /internal/streams/_skills/{skillId}/_execute` (execute skill) routes
+- `x-pack/platform/plugins/shared/streams/server/routes/index.ts` — registered skill execution routes
+- `x-pack/platform/plugins/shared/streams/server/plugin.ts` — passes `getScopedClients` to `registerAgentBuilder`
+- `x-pack/platform/plugins/shared/streams_app/public/hooks/use_skill_execution_api.ts` — new: `useSkillsApi` and `useSkillExecution` React hooks for listing and executing skills
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/skills/skills_tab.tsx` — new: Skills tab with skill cards, stream selector, and Run buttons
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/page.tsx` — added Skills tab to SigDiscovery page
 
 ---
 

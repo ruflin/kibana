@@ -9,11 +9,25 @@ import { conditionToESQLAst } from '@kbn/streamlang';
 import { BasicPrettyPrinter, Builder } from '@kbn/esql-language';
 import type { StreamQueryInput } from '../queries';
 
+/**
+ * Builds an ES|QL query from stream indices and a query input.
+ *
+ * For row queries (default): generates `FROM indices | WHERE KQL("...")` with an optional
+ * feature filter appended via `AND`.
+ *
+ * For stats queries: when `input.esql_override` is provided, the raw ES|QL string is
+ * returned as-is (the caller is responsible for including a valid FROM clause).
+ * This allows full ES|QL aggregation queries such as STATS, BUCKET, PERCENTILE, etc.
+ */
 export const buildEsqlQuery = (
   indices: string[],
-  input: Pick<StreamQueryInput, 'kql' | 'feature'>,
+  input: Pick<StreamQueryInput, 'kql' | 'feature' | 'esql_override'>,
   includeMetadata: boolean = false
 ): string => {
+  if (input.esql_override) {
+    return input.esql_override;
+  }
+
   const fromCommand = Builder.command({
     name: 'from',
     args: [

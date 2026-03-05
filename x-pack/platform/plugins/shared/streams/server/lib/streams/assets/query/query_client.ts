@@ -33,6 +33,7 @@ import {
   QUERY_FEATURE_NAME,
   QUERY_FEATURE_TYPE,
   QUERY_KQL_BODY,
+  QUERY_PURPOSE,
   QUERY_SEVERITY_SCORE,
   QUERY_TITLE,
   RULE_BACKED,
@@ -141,6 +142,7 @@ type QueryLinkStorageFields = Omit<QueryLink, 'query' | 'stream_name'> & {
   [QUERY_KQL_BODY]: string;
   [QUERY_ESQL_QUERY]: string;
   [QUERY_SEVERITY_SCORE]?: number;
+  [QUERY_PURPOSE]?: string;
 };
 
 export type StoredQueryLink = QueryLinkStorageFields & {
@@ -191,6 +193,7 @@ function fromStorage(link: StoredQueryLink): QueryLink {
         : undefined,
       severity_score: storageFields[QUERY_SEVERITY_SCORE],
       evidence: storageFields[QUERY_EVIDENCE],
+      query_purpose: storageFields[QUERY_PURPOSE] as StreamQuery['query_purpose'],
     },
   } satisfies QueryLink;
 }
@@ -209,6 +212,7 @@ function toStorage(definition: Streams.all.Definition, request: QueryLinkRequest
     [QUERY_FEATURE_TYPE]: query.feature ? query.feature.type : '',
     [QUERY_SEVERITY_SCORE]: query.severity_score,
     [QUERY_EVIDENCE]: query.evidence,
+    [QUERY_PURPOSE]: query.query_purpose,
     [RULE_BACKED]: request.rule_backed,
     [RULE_ID]: link.rule_id,
   } as StoredQueryLink;

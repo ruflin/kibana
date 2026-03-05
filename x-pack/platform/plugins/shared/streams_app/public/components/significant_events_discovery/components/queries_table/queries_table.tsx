@@ -9,6 +9,7 @@ import {
   EuiBadge,
   EuiBasicTable,
   EuiButton,
+  EuiButtonGroup,
   EuiButtonIcon,
   EuiCallOut,
   EuiEmptyPrompt,
@@ -96,6 +97,12 @@ import {
   BACKFILL_SUCCESS_TOAST_TITLE,
   BACKFILL_ERROR_TOAST_TITLE,
   BACKFILL_NO_RULES_TOAST_TITLE,
+  PURPOSE_COLUMN,
+  PURPOSE_LABELS,
+  PURPOSE_FILTER_ALL,
+  PURPOSE_FILTER_LABEL,
+  QUERY_TYPE_COLUMN,
+  QUERY_TYPE_LABELS,
 } from './translations';
 import { PromoteAction } from './promote_action';
 import { QueryDetailsFlyout } from './query_details_flyout';
@@ -108,7 +115,11 @@ export function QueriesTable() {
   const { euiTheme } = useEuiTheme();
   const {
     dependencies: {
-      start: { unifiedSearch, share, streams: { streamsRepositoryClient } },
+      start: {
+        unifiedSearch,
+        share,
+        streams: { streamsRepositoryClient },
+      },
     },
     core: {
       notifications: { toasts },
@@ -118,6 +129,7 @@ export function QueriesTable() {
   const aiFeatures = useAIFeatures();
   const [searchQuery, setSearchQuery] = useState('');
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [purposeFilter, setPurposeFilter] = useState<string>('all');
 
   const [pagination, setPagination] = useState<{
     index: number;
@@ -304,7 +316,24 @@ export function QueriesTable() {
     []
   );
 
-  const tableItems = queriesData?.queries ?? [];
+  const allItems = useMemo(() => queriesData?.queries ?? [], [queriesData?.queries]);
+
+  const tableItems = useMemo(() => {
+    if (purposeFilter === 'all') return allItems;
+    return allItems.filter((item) => (item.query.query_purpose ?? 'detection') === purposeFilter);
+  }, [allItems, purposeFilter]);
+
+  const purposeFilterButtons = useMemo(
+    () => [
+      { id: 'all', label: PURPOSE_FILTER_ALL },
+      { id: 'detection', label: PURPOSE_LABELS.detection },
+      { id: 'exclusion', label: PURPOSE_LABELS.exclusion },
+      { id: 'stats', label: PURPOSE_LABELS.stats },
+      { id: 'baseline', label: PURPOSE_LABELS.baseline },
+      { id: 'correlation', label: PURPOSE_LABELS.correlation },
+    ],
+    []
+  );
 
   const columns: Array<EuiBasicTableColumn<SignificantEventQueryRow>> = useMemo(() => {
     const streamDefinitions = streamsData?.streams ?? [];
@@ -330,6 +359,35 @@ export function QueriesTable() {
         render: (_: unknown, item: SignificantEventQueryRow) => (
           <EuiLink onClick={() => {}}>{item.query.title}</EuiLink>
         ),
+      },
+      {
+        field: 'query.query_purpose',
+        name: PURPOSE_COLUMN,
+        width: '120px',
+        render: (_: unknown, item: SignificantEventQueryRow) => {
+          const purpose = item.query.query_purpose ?? 'detection';
+          const colorMap: Record<string, string> = {
+            detection: 'primary',
+            exclusion: 'warning',
+            stats: 'accent',
+            baseline: 'default',
+            correlation: 'success',
+          };
+          return (
+            <EuiBadge color={colorMap[purpose] ?? 'hollow'}>
+              {PURPOSE_LABELS[purpose] ?? purpose}
+            </EuiBadge>
+          );
+        },
+      },
+      {
+        field: 'query.query_type',
+        name: QUERY_TYPE_COLUMN,
+        width: '90px',
+        render: (_: unknown, item: SignificantEventQueryRow) => {
+          const queryType = item.query.query_type ?? 'row';
+          return <EuiBadge color="hollow">{QUERY_TYPE_LABELS[queryType] ?? queryType}</EuiBadge>;
+        },
       },
       {
         field: 'query.severity_score',
@@ -498,6 +556,25 @@ export function QueriesTable() {
         </EuiFlexGroup>
       </EuiFlexItem>
       <EuiFlexItem grow={false}>
+        <EuiFlexGroup gutterSize="s" alignItems="center">
+          <EuiFlexItem grow={false}>
+            <EuiText size="xs" color="subdued">
+              {PURPOSE_FILTER_LABEL}
+            </EuiText>
+          </EuiFlexItem>
+          <EuiFlexItem grow={false}>
+            <EuiButtonGroup
+              legend={PURPOSE_FILTER_LABEL}
+              options={purposeFilterButtons}
+              idSelected={purposeFilter}
+              onChange={(id) => setPurposeFilter(id)}
+              buttonSize="compressed"
+              isFullWidth={false}
+            />
+          </EuiFlexItem>
+        </EuiFlexGroup>
+      </EuiFlexItem>
+      <EuiFlexItem grow={false}>
         <EuiPanel hasBorder hasShadow={false}>
           <EuiFlexGroup direction="column" gutterSize="s">
             <EuiFlexItem grow={false}>
@@ -521,7 +598,11 @@ export function QueriesTable() {
       <EuiFlexItem grow={false}>
         <EuiFlexGroup gutterSize="s" alignItems="center">
           <EuiFlexItem grow={false}>
-            <EuiText size="s">{getEventsCount(queriesData?.total ?? 0)}</EuiText>
+            <EuiText size="s">
+              {getEventsCount(
+                purposeFilter === 'all' ? queriesData?.total ?? 0 : tableItems.length
+              )}
+            </EuiText>
           </EuiFlexItem>
           <EuiFlexItem grow={false}>
             <EuiButton
@@ -569,7 +650,7 @@ export function QueriesTable() {
           pagination={{
             pageIndex: pagination.index,
             pageSize: pagination.size,
-            totalItemCount: queriesData?.total ?? 0,
+            totalItemCount: purposeFilter === 'all' ? queriesData?.total ?? 0 : tableItems.length,
             pageSizeOptions: [...PAGE_SIZE_OPTIONS],
           }}
           onChange={onTableChange}

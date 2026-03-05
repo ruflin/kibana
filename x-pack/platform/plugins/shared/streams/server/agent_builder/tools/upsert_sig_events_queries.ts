@@ -19,12 +19,26 @@ const upsertSigEventsQueriesSchema = z.object({
     .array(
       z.object({
         title: z.string().describe('Query title'),
-        kql: z.string().optional().describe('KQL filter (required for row queries)'),
+        kql: z
+          .string()
+          .optional()
+          .describe('KQL filter. Required for row queries. Use "*" to match all events.'),
         query_type: z
           .enum(['row', 'stats'])
           .default('row')
-          .describe('Query type: row for filtering, stats for aggregation'),
-        esql_query: z.string().optional().describe('Raw ES|QL query (required for stats queries)'),
+          .describe('ES|QL execution type: row for event-level filtering, stats for aggregation'),
+        query_purpose: z
+          .enum(['detection', 'exclusion', 'stats', 'baseline', 'correlation'])
+          .default('detection')
+          .describe(
+            'Purpose of the query: detection (default, detects significant events), exclusion (noise-canceling, filters known-noisy patterns), stats (aggregation metrics like error rates), baseline (normal operating range reference), correlation (co-occurrence analysis)'
+          ),
+        esql_query: z
+          .string()
+          .optional()
+          .describe(
+            'Raw ES|QL query string. Required for stats queries (query_type: stats). Must include a FROM clause targeting the stream. Example: "FROM logs | STATS error_rate = COUNT_IF(http.response.status_code >= 500) / COUNT(*) BY BUCKET(@timestamp, 5m)"'
+          ),
       })
     )
     .describe('Queries to upsert'),
@@ -40,12 +54,20 @@ export const createUpsertSigEventsQueriesTool = ({
   const toolDefinition: BuiltinToolDefinition<typeof upsertSigEventsQueriesSchema> = {
     id: UPSERT_SIG_EVENTS_QUERIES_TOOL_ID,
     type: ToolType.builtin,
-    description: `Write sig events query definitions for a stream. These define the KQL/ES|QL queries that detect significant events.
+    description: `Write sig events query definitions for a stream. Supports multiple query purposes:
+
+- detection (default): KQL row queries that detect specific significant events (errors, failures, anomalies)
+- exclusion: KQL row queries that identify known-noisy patterns to filter out (health checks, heartbeats, debug logs)
+- stats: Raw ES|QL aggregation queries for metrics like error rates, throughput, latency percentiles
+- baseline: Aggregation queries capturing normal operating ranges as anomaly detection references
+- correlation: Aggregation queries surfacing co-occurring patterns across fields or streams
 
 When to use:
 - Creating new detection queries for a stream
-- Updating existing query definitions
-- Adding STATS-based aggregation queries`,
+- Adding noise-canceling exclusion queries to suppress known-good patterns
+- Adding STATS-based aggregation queries for error rates, throughput, or latency
+- Adding baseline queries to establish normal operating ranges
+- Updating existing query definitions`,
     schema: upsertSigEventsQueriesSchema,
     tags: ['streams', 'queries'],
     handler: async (toolParams, { request }) => {
@@ -65,8 +87,11 @@ When to use:
               title: q.title,
               kql: { query: q.kql ?? '*' },
               query_type: q.query_type,
+              query_purpose: q.query_purpose,
+              esql_override: q.esql_query,
             },
-          }))
+          })),
+          { createRules: false }
         );
 
         return {
@@ -84,7 +109,11 @@ When to use:
           results: [
             {
               type: ToolResultType.error,
-              data: { message: `Failed to upsert sig events queries: ${error.message}` },
+              data: {
+                message: `Failed to upsert sig events queries: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              },
             },
           ],
         };
