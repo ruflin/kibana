@@ -1071,6 +1071,16 @@ Record significant deviations, failed approaches, and non-obvious discoveries he
 | 2026-03-03 | WS7 | Topology diagram annotates active issues | Topology route now fetches active discoveries (relevance >= 30, up to 20) via `discoveryClient.searchDiscoveries()` and includes them in the LLM prompt. Affected nodes get dashed borders color-coded by severity (critical = red/3px, high = orange/2px, medium/low = yellow/2px). Issues are matched to nodes via `stream_refs` and `evidence[].feature_name`. |
 | 2026-03-03 | WS2 | Sig events backfill route and UI button | Problem: replayed snapshot data has no future events, so sig events rules (2-minute window) find nothing, alerts index stays empty, and discovery generation has no data. Solution: added `POST /internal/streams/queries/_backfill` route that fetches all promoted (rule-backed) query links, extracts unique rule IDs, and calls `rulesClient.scheduleBackfill()` with a configurable time range (default 1 hour). Each rule gets 60 backfill executions (1-minute schedule × 1 hour). Added `rulesClient` to `RouteHandlerScopedClients` and `getScopedClients`. UI: "Backfill (1h)" button in Queries tab triggers the route; auto-refreshes data after 15 seconds. |
 
+| 2026-03-04 | WS2 | `submit_discoveries` tool schema replaced with raw JSON Schema | The `zodToJsonSchema` → `@n8n/json-schema-to-zod` round-trip in the inference plugin re-introduced strict validation that rejected valid LLM output (e.g., `null` values, missing optional fields). Fix: replaced `zodToJsonSchema(discoveriesSchema)` with a hand-written JSON Schema object that explicitly marks all fields as optional and uses `items: { type: 'object', properties: {} }` for arrays. A separate strict Zod schema (`discoveryStrictSchema`) handles internal parsing with `.transform()` and `.catch()` for graceful coercion. |
+| 2026-03-04 | WS4 | Hardcoded fallback connector ID had a typo | `anthropic-claude-4.6-sonnet` (with dot) should be `anthropic-claude-4-6-sonnet` (with hyphens) to match the actual connector ID in `kibana.dev.yml`. |
+| 2026-03-04 | WS4 | 5 analysis tools added to agent builder | New tools: `search_events` (ad-hoc ES|QL), `get_log_patterns` (categorize_text aggregation), `run_log_rate_analysis` (baseline vs deviation), `get_query_results` (query-specific results), `get_query_definitions` (query definitions). These were previously only available as internal pipeline tools — now also registered as agent builder tools for direct chat use. Total agent builder tools: ~17. |
+| 2026-03-04 | WS7 | Features tab: system features hidden by default + stream filter | Added `showSystemFeatures` toggle (default off) and `EuiComboBox` multi-select filter for streams. System features are identified via `isComputedFeature()`. Both filters are applied client-side via `useMemo`. |
+| 2026-03-04 | WS7 | Onboarding extended with Discovery + Suggestion generation | "Onboard Stream" button previously only triggered Features Identification and Queries Generation. Added `DiscoveryGeneration` and `SuggestionGeneration` to `OnboardingStep` enum. Onboarding task runner now schedules `STREAMS_DISCOVERY_PIPELINE_TASK_TYPE` and `STREAMS_SUGGESTION_GENERATION_TASK_TYPE` as additional steps. Default steps in the onboarding route updated to include all four. |
+| 2026-03-04 | WS6 | Settings page: LLM selection for all pipeline stages | Previously only Discovery, Recommendation, and Suggestion stages had connector selectors. Added selectors for Feature Extraction (`onboardingFeatureExtractionConnectorId`), Sig Events Generation (`onboardingSigEventsConnectorId`), and Topology Generation (`topologyConnectorId`). Discovery settings saved object extended to V3 with these new fields. |
+| 2026-03-05 | WS2 | Recommendations changed from `string[]` to structured objects in LLM schema | LLM tool schema now requests `{ title, description, priority }` objects instead of plain strings. Prompts instruct the LLM to generate a short plain-text title and a detailed markdown description. Strict parsing schema uses `z.union` to handle both legacy strings and new objects for backward compatibility. |
+| 2026-03-05 | WS1 | Semantic indexing for recommendation titles and descriptions | Added `recommendations_title_semantic` and `recommendations_description_semantic` fields to discovery storage. `DiscoveryClient` concatenates recommendation titles/descriptions and indexes them into these semantic fields on create and update. |
+| 2026-03-05 | WS7 | Recommendation descriptions rendered as markdown in all UI locations | Insights tab and Overview tab switched from `<EuiText>` to `<EuiMarkdownFormat>` for recommendation descriptions. Discoveries tab already used `EuiMarkdownFormat`. Overview tab truncation increased from 120 to 200 chars. |
+
 ---
 
 ## Validation Gate (After Every Commit)
@@ -1255,13 +1265,25 @@ All questions have been resolved. Decisions are recorded here for reference.
 - `x-pack/platform/packages/shared/kbn-streams-schema/src/discovery/index.ts` — new: Discovery, Suggestion, Recommendation, DiscoveryPipelineResult types; added `investigation` to SuggestionType union
 - `x-pack/platform/packages/shared/kbn-streams-schema/src/insights/index.ts` — extended Insight type (kept for backward compat)
 - `x-pack/platform/packages/shared/kbn-streams-schema/src/queries/index.ts` — queryType extension
-- `x-pack/platform/packages/shared/kbn-streams-schema/index.ts` — exports for new types
+- `x-pack/platform/packages/shared/kbn-streams-schema/src/feature.ts` — added `METRIC_SAMPLES_FEATURE_TYPE` and `TRACE_SAMPLES_FEATURE_TYPE` constants
+- `x-pack/platform/packages/shared/kbn-streams-schema/src/onboarding/index.ts` — added `DiscoveryGeneration` and `SuggestionGeneration` to `OnboardingStep` enum; extended `OnboardingResult`
+- `x-pack/platform/packages/shared/kbn-streams-schema/index.ts` — exports for new types including metric/trace feature types
+
+### Streams AI Package
+- `x-pack/platform/packages/shared/kbn-streams-ai/src/features/computed/metric_samples.ts` — new: metric samples computed feature generator
+- `x-pack/platform/packages/shared/kbn-streams-ai/src/features/computed/trace_samples.ts` — new: trace samples computed feature generator
+- `x-pack/platform/packages/shared/kbn-streams-ai/src/features/computed/types.ts` — added `StreamDataType` type and `applicableStreamTypes` field to `ComputedFeatureGenerator`
+- `x-pack/platform/packages/shared/kbn-streams-ai/src/features/computed/index.ts` — added `getStreamDataType` helper; filters generators by stream type
+- `x-pack/platform/packages/shared/kbn-streams-ai/src/features/computed/log_samples.ts` — annotated with `applicableStreamTypes: ['logs']`
+- `x-pack/platform/packages/shared/kbn-streams-ai/src/features/computed/log_patterns.ts` — annotated with `applicableStreamTypes: ['logs']`
+- `x-pack/platform/packages/shared/kbn-streams-ai/src/features/computed/error_logs.ts` — annotated with `applicableStreamTypes: ['logs']`
+- `x-pack/platform/packages/shared/kbn-streams-ai/src/significant_events/system_prompt.text` — updated with data-type-specific query guidance for metrics and traces
 
 ### Streams Plugin (Server)
 - `x-pack/platform/plugins/shared/streams/server/plugin.ts` — Agent Builder registration, Entity Store startup check, `StreamsToolsDependencies` wiring
 - `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/generate_discoveries.ts` — three-stage pipeline using `executeAsReasoningAgent` (extract → enrich → suggest), returns persisted discoveries with proper cross-references
 - `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/pipeline_tools.ts` — new: 8 internal pipeline tools (get_sig_events_with_change_points, get_log_patterns, run_log_rate_analysis, search_events, get_query_results, get_stream_features, search_discoveries, get_query_definitions) as callback functions for the reasoning agent
-- `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/prompts/` — system/user prompts for all 3 stages; Stage 1 prompt rewritten to instruct tool-based investigation workflow
+- `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/prompts/` — system/user prompts for all 3 stages; Stage 1 prompt rewritten to instruct tool-based investigation workflow; extract/enrich prompts updated to request structured recommendations with plain-text title and markdown description
 - `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/schema.ts` — discovery Zod schema + submit_discoveries tool
 - `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/suggestion_schema.ts` — suggestion Zod schema + submit_suggestions tool
 - `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/utils.ts` — response extraction, query data collection, ES|QL validation for suggestions
@@ -1271,12 +1293,12 @@ All questions have been resolved. Decisions are recorded here for reference.
 - `x-pack/platform/plugins/shared/streams/server/lib/rules/esql/types.ts` — added `queryType` to EsqlRuleParams
 - `x-pack/platform/plugins/shared/streams/server/lib/rules/esql/executor.ts` — STATS execution path branching
 - `x-pack/platform/plugins/shared/streams/server/lib/rules/esql/lib/execute_esql_stats_request.ts` — new: STATS query executor
-- `x-pack/platform/plugins/shared/streams/server/lib/saved_objects/significant_events/discovery_settings.ts` — discovery settings saved object
+- `x-pack/platform/plugins/shared/streams/server/lib/saved_objects/significant_events/discovery_settings.ts` — discovery settings saved object (V1 → V2 with `enableMetricsTraces` → V3 with `onboardingFeatureExtractionConnectorId`, `onboardingSigEventsConnectorId`, `topologyConnectorId`)
 - `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/discoveries/route.ts` — discovery + suggestion CRUD routes
-- `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/discovery_settings/route.ts` — settings GET/PUT routes
+- `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/discovery_settings/route.ts` — settings GET/PUT routes; extended with `enableMetricsTraces`, `onboardingFeatureExtractionConnectorId`, `onboardingSigEventsConnectorId`, `topologyConnectorId`
 - `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/entity_store/route.ts` — entity store proxy routes
 - `x-pack/platform/plugins/shared/streams/server/routes/utils/resolve_connector_id.ts` — hardcoded POC fallback connector
-- `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/` — 12 tool definitions (search_discoveries, get_discovery, create_discovery, run_discovery_pipeline, list_entities, get_stream_features, upsert_features, get_sig_events_queries, upsert_sig_events_queries, get_sig_events_with_change_points, push_entity_definition, promote_queries)
+- `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/` — ~17 tool definitions (search_discoveries, get_discovery, create_discovery, run_discovery_pipeline, list_entities, get_stream_features, upsert_features, get_sig_events_queries, upsert_sig_events_queries, get_sig_events_with_change_points, push_entity_definition, promote_queries, search_events, get_log_patterns, run_log_rate_analysis, get_query_results, get_query_definitions)
 - `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/promote_queries.ts` — new: promotes stored queries to active Kibana alerting rules
 - `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/types.ts` — StreamsToolsDependencies interface (added `getStreamsClient`)
 - `x-pack/platform/plugins/shared/streams/server/agent_builder/tools/register_tools.ts` — centralized tool registration
@@ -1315,15 +1337,30 @@ All questions have been resolved. Decisions are recorded here for reference.
 - `x-pack/platform/plugins/shared/streams/server/plugin.ts` — added `rulesClient` to `getScopedClients` via `pluginsStart.alerting.getRulesClientWithRequest(request)`
 - `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/suggestions/suggestions_tab.tsx` — "Generate suggestions" button with task polling, SuggestionsTable with flyout, accept/dismiss; `investigation` type label + icon
 - `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/topology/topology_tab.tsx` — new: Topology tab with persisted + LLM-generated Mermaid diagram, manual "Regenerate" button (no auto-generate), exported `MermaidDiagram` component reused by Overview tab, fullscreen modal
-- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/settings/settings_page.tsx` — functional connector dropdowns via EuiSuperSelect
-- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/streams_view/streams_view.tsx` — updated import for renamed hook
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/settings/settings_page.tsx` — functional connector dropdowns via EuiSuperSelect; added selectors for Feature Extraction, Sig Events Generation, and Topology Generation connectors
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/features_table/features_table.tsx` — added system features toggle (hidden by default) and multi-select stream filter via EuiComboBox
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/insights/tab.tsx` — recommendation descriptions rendered as markdown via EuiMarkdownFormat
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/overview/overview_tab.tsx` — recommendation descriptions rendered as markdown via EuiMarkdownFormat
+- `x-pack/platform/plugins/shared/streams_app/public/components/significant_events_discovery/components/streams_view/streams_view.tsx` — updated import for renamed hook; filters metrics/traces streams based on `enableMetricsTraces` setting
 - `x-pack/platform/plugins/shared/streams_app/public/hooks/use_queries_api.ts` — removed shared `AbortSignal` from mutation methods (`promote`, `promoteAll`, `upsertQuery`, `removeQuery`) to fix "signal is aborted without reason" error; signal retained only for read operations (`getUnbackedQueriesCount`)
 - `x-pack/platform/plugins/shared/streams_app/public/hooks/use_discovery_pipeline_api.ts` — (renamed from `use_insights_discovery_api.ts`) React hook for discovery pipeline API
 - `x-pack/platform/plugins/shared/streams_app/public/hooks/use_suggestion_pipeline_api.ts` — new: React hook for suggestion generation task API
 
+### Streams Plugin (Server) — Onboarding
+- `x-pack/platform/packages/shared/kbn-streams-schema/src/onboarding/index.ts` — added `DiscoveryGeneration` and `SuggestionGeneration` to `OnboardingStep` enum; extended `OnboardingResult` with `discoveryTaskResult` and `suggestionTaskResult`
+- `x-pack/platform/plugins/shared/streams/server/lib/tasks/task_definitions/onboarding.ts` — onboarding task runner extended with `DiscoveryGeneration` and `SuggestionGeneration` steps that schedule discovery pipeline and suggestion generation tasks
+- `x-pack/platform/plugins/shared/streams/server/routes/internal/streams/onboarding/route.ts` — default onboarding steps updated to include all four steps
+
+### Streams Plugin (Server) — Recommendations & Semantic Indexing
+- `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/schema.ts` — LLM tool schema changed from `recommendations: string[]` to structured `{ title, description, priority }` objects; strict parsing uses `z.union` for backward compat
+- `x-pack/platform/plugins/shared/streams/server/lib/significant_events/discovery/generate_discoveries.ts` — recommendation transformation updated for structured format with priority coercion
+- `x-pack/platform/plugins/shared/streams/server/lib/discoveries/fields.ts` — added `DISCOVERY_RECOMMENDATIONS_TITLE_SEMANTIC` and `DISCOVERY_RECOMMENDATIONS_DESCRIPTION_SEMANTIC` field constants
+- `x-pack/platform/plugins/shared/streams/server/lib/discoveries/storage_settings.ts` — added `recommendations_title_semantic` and `recommendations_description_semantic` as `semantic_text` fields
+- `x-pack/platform/plugins/shared/streams/server/lib/discoveries/discovery_client.ts` — indexes concatenated recommendation titles/descriptions into semantic fields on create and update
+
 ### Agent Builder
 - `x-pack/platform/packages/shared/agent-builder/agent-builder-common/base/namespaces.ts` — streams namespace
-- `x-pack/platform/packages/shared/agent-builder/agent-builder-server/allow_lists.ts` — 12 streams tools + agent in allow list
+- `x-pack/platform/packages/shared/agent-builder/agent-builder-server/allow_lists.ts` — ~17 streams tools + agent in allow list
 - `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/chat_message_text.tsx` — Mermaid rendering integration
 - `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/markdown_plugins/mermaid_plugin.tsx` — new: mermaid parsing + rendering (direct DOM render for getBBox, inline scaling, fullscreen modal)
 - `x-pack/platform/plugins/shared/agent_builder/public/application/components/conversations/conversation_rounds/round_response/markdown_plugins/index.ts` — export mermaid plugin

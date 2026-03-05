@@ -33,6 +33,9 @@ interface DiscoverySettings {
   queryGenerationConnectorId?: string;
   discoveryConnectorId?: string;
   suggestionConnectorId?: string;
+  onboardingFeatureExtractionConnectorId?: string;
+  onboardingSigEventsConnectorId?: string;
+  topologyConnectorId?: string;
   defaultConnectorId?: string;
   enableMetricsTraces?: boolean;
 }
@@ -66,6 +69,11 @@ export function SettingsPage() {
   const [queryGenerationConnectorId, setQueryGenerationConnectorId] =
     useState<string>(EMPTY_CONNECTOR_VALUE);
   const [suggestionConnectorId, setSuggestionConnectorId] = useState<string>(EMPTY_CONNECTOR_VALUE);
+  const [onboardingFeatureExtractionConnectorId, setOnboardingFeatureExtractionConnectorId] =
+    useState<string>(EMPTY_CONNECTOR_VALUE);
+  const [onboardingSigEventsConnectorId, setOnboardingSigEventsConnectorId] =
+    useState<string>(EMPTY_CONNECTOR_VALUE);
+  const [topologyConnectorId, setTopologyConnectorId] = useState<string>(EMPTY_CONNECTOR_VALUE);
   const [enableMetricsTraces, setEnableMetricsTraces] = useState<boolean>(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -78,6 +86,11 @@ export function SettingsPage() {
       setFeatureExtractionConnectorId(s.featureExtractionConnectorId ?? EMPTY_CONNECTOR_VALUE);
       setQueryGenerationConnectorId(s.queryGenerationConnectorId ?? EMPTY_CONNECTOR_VALUE);
       setSuggestionConnectorId(s.suggestionConnectorId ?? EMPTY_CONNECTOR_VALUE);
+      setOnboardingFeatureExtractionConnectorId(
+        s.onboardingFeatureExtractionConnectorId ?? EMPTY_CONNECTOR_VALUE
+      );
+      setOnboardingSigEventsConnectorId(s.onboardingSigEventsConnectorId ?? EMPTY_CONNECTOR_VALUE);
+      setTopologyConnectorId(s.topologyConnectorId ?? EMPTY_CONNECTOR_VALUE);
       setEnableMetricsTraces(s.enableMetricsTraces ?? false);
     }
   }, [settingsFetch.value]);
@@ -135,6 +148,9 @@ export function SettingsPage() {
             featureExtractionConnectorId: toSend(featureExtractionConnectorId),
             queryGenerationConnectorId: toSend(queryGenerationConnectorId),
             suggestionConnectorId: toSend(suggestionConnectorId),
+            onboardingFeatureExtractionConnectorId: toSend(onboardingFeatureExtractionConnectorId),
+            onboardingSigEventsConnectorId: toSend(onboardingSigEventsConnectorId),
+            topologyConnectorId: toSend(topologyConnectorId),
             enableMetricsTraces,
           },
         },
@@ -151,6 +167,9 @@ export function SettingsPage() {
     featureExtractionConnectorId,
     queryGenerationConnectorId,
     suggestionConnectorId,
+    onboardingFeatureExtractionConnectorId,
+    onboardingSigEventsConnectorId,
+    topologyConnectorId,
     enableMetricsTraces,
   ]);
 
@@ -313,6 +332,78 @@ export function SettingsPage() {
                   options={connectorOptions}
                   valueOfSelected={suggestionConnectorId}
                   onChange={setSuggestionConnectorId}
+                  fullWidth
+                />
+              </EuiFormRow>
+            </EuiFlexItem>
+
+            <EuiFlexItem>
+              <EuiFormRow
+                label={i18n.translate(
+                  'xpack.streams.sigDiscovery.settings.featureExtractionConnectorLabel',
+                  { defaultMessage: 'Feature Extraction' }
+                )}
+                helpText={i18n.translate(
+                  'xpack.streams.sigDiscovery.settings.featureExtractionConnectorHelp',
+                  {
+                    defaultMessage:
+                      'Connector used during stream onboarding to identify systems, services, and components in the data.',
+                  }
+                )}
+                fullWidth
+              >
+                <EuiSuperSelect
+                  options={connectorOptions}
+                  valueOfSelected={onboardingFeatureExtractionConnectorId}
+                  onChange={setOnboardingFeatureExtractionConnectorId}
+                  fullWidth
+                />
+              </EuiFormRow>
+            </EuiFlexItem>
+
+            <EuiFlexItem>
+              <EuiFormRow
+                label={i18n.translate(
+                  'xpack.streams.sigDiscovery.settings.sigEventsConnectorLabel',
+                  { defaultMessage: 'Sig Events Query Generation' }
+                )}
+                helpText={i18n.translate(
+                  'xpack.streams.sigDiscovery.settings.sigEventsConnectorHelp',
+                  {
+                    defaultMessage:
+                      'Connector used during stream onboarding to generate KQL/ES|QL queries for detecting significant events.',
+                  }
+                )}
+                fullWidth
+              >
+                <EuiSuperSelect
+                  options={connectorOptions}
+                  valueOfSelected={onboardingSigEventsConnectorId}
+                  onChange={setOnboardingSigEventsConnectorId}
+                  fullWidth
+                />
+              </EuiFormRow>
+            </EuiFlexItem>
+
+            <EuiFlexItem>
+              <EuiFormRow
+                label={i18n.translate(
+                  'xpack.streams.sigDiscovery.settings.topologyConnectorLabel',
+                  { defaultMessage: 'Topology Generation' }
+                )}
+                helpText={i18n.translate(
+                  'xpack.streams.sigDiscovery.settings.topologyConnectorHelp',
+                  {
+                    defaultMessage:
+                      'Connector used to generate the system topology diagram from stream features and discoveries.',
+                  }
+                )}
+                fullWidth
+              >
+                <EuiSuperSelect
+                  options={connectorOptions}
+                  valueOfSelected={topologyConnectorId}
+                  onChange={setTopologyConnectorId}
                   fullWidth
                 />
               </EuiFormRow>

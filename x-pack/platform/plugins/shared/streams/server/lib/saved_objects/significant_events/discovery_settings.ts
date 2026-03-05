@@ -23,7 +23,13 @@ export const discoverySettingsSOAttributesV2 = discoverySettingsSOAttributesV1.e
   enableMetricsTraces: schema.maybe(schema.boolean()),
 });
 
-export type DiscoverySettingsAttributes = TypeOf<typeof discoverySettingsSOAttributesV2>;
+export const discoverySettingsSOAttributesV3 = discoverySettingsSOAttributesV2.extends({
+  onboardingFeatureExtractionConnectorId: schema.maybe(schema.string()),
+  onboardingSigEventsConnectorId: schema.maybe(schema.string()),
+  topologyConnectorId: schema.maybe(schema.string()),
+});
+
+export type DiscoverySettingsAttributes = TypeOf<typeof discoverySettingsSOAttributesV3>;
 
 export const getDiscoverySettingsSavedObject = (): SavedObjectsType => {
   return {
@@ -55,6 +61,18 @@ export const getDiscoverySettingsSavedObject = (): SavedObjectsType => {
         schemas: {
           forwardCompatibility: discoverySettingsSOAttributesV2.extends({}, { unknowns: 'ignore' }),
           create: discoverySettingsSOAttributesV2,
+        },
+      },
+      '3': {
+        changes: [
+          {
+            type: 'mappings_addition',
+            addedMappings: {},
+          },
+        ],
+        schemas: {
+          forwardCompatibility: discoverySettingsSOAttributesV3.extends({}, { unknowns: 'ignore' }),
+          create: discoverySettingsSOAttributesV3,
         },
       },
     },

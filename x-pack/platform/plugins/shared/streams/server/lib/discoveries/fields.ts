@@ -16,6 +16,9 @@ export const DISCOVERY_RELEVANCE_SCORE = 'relevance_score';
 export const DISCOVERY_EVIDENCE = 'evidence';
 export const DISCOVERY_SAMPLE_EVENTS = 'sample_events';
 export const DISCOVERY_RECOMMENDATIONS = 'recommendations';
+export const DISCOVERY_RECOMMENDATIONS_TITLE_SEMANTIC = 'recommendations_title_semantic';
+export const DISCOVERY_RECOMMENDATIONS_DESCRIPTION_SEMANTIC =
+  'recommendations_description_semantic';
 export const DISCOVERY_FEATURE_REFS = 'feature_refs';
 export const DISCOVERY_QUERY_REFS = 'query_refs';
 export const DISCOVERY_STREAM_REFS = 'stream_refs';

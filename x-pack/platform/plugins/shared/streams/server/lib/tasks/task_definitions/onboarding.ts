@@ -37,6 +37,11 @@ import {
   getSignificantEventsQueriesGenerationTaskId,
   SIGNIFICANT_EVENTS_QUERIES_GENERATION_TASK_TYPE,
 } from './significant_events_queries_generation';
+import type { DiscoveryPipelineTaskParams } from './insights_discovery';
+import { STREAMS_DISCOVERY_PIPELINE_TASK_TYPE } from './insights_discovery';
+import type { SuggestionGenerationTaskParams } from './suggestion_generation';
+import { STREAMS_SUGGESTION_GENERATION_TASK_TYPE } from './suggestion_generation';
+import type { GenerateSuggestionsResult } from '../../significant_events/discovery/generate_suggestions';
 
 export interface OnboardingTaskParams {
   connectorId: string;
@@ -79,6 +84,10 @@ export function createStreamsOnboardingTask(taskContext: TaskContext) {
                 let queriesTaskResult:
                   | TaskResult<SignificantEventsQueriesGenerationResult>
                   | undefined;
+                let discoveryTaskResult:
+                  | TaskResult<import('@kbn/streams-schema').DiscoveryPipelineResult>
+                  | undefined;
+                let suggestionTaskResult: TaskResult<Record<string, unknown>> | undefined;
 
                 for (const step of steps) {
                   switch (step) {
@@ -133,6 +142,40 @@ export function createStreamsOnboardingTask(taskContext: TaskContext) {
                       }
                       break;
 
+                    case OnboardingStep.DiscoveryGeneration:
+                      const discoveryTaskId = await scheduleDiscoveryPipelineTask(
+                        { connectorId, streamNames: [streamName] },
+                        taskClient,
+                        runContext.fakeRequest
+                      );
+
+                      discoveryTaskResult = await waitForSubtask<
+                        DiscoveryPipelineTaskParams,
+                        import('@kbn/streams-schema').DiscoveryPipelineResult
+                      >(discoveryTaskId, runContext.taskInstance.id, taskClient);
+
+                      if (discoveryTaskResult.status !== TaskStatus.Completed) {
+                        return;
+                      }
+                      break;
+
+                    case OnboardingStep.SuggestionGeneration:
+                      const suggestionTaskId = await scheduleSuggestionGenerationTask(
+                        { connectorId },
+                        taskClient,
+                        runContext.fakeRequest
+                      );
+
+                      suggestionTaskResult = await waitForSubtask<
+                        SuggestionGenerationTaskParams,
+                        GenerateSuggestionsResult
+                      >(suggestionTaskId, runContext.taskInstance.id, taskClient);
+
+                      if (suggestionTaskResult.status !== TaskStatus.Completed) {
+                        return;
+                      }
+                      break;
+
                     default:
                       throw new Error(`No implementation for "${step}" onboarding step.`);
                   }
@@ -141,7 +184,12 @@ export function createStreamsOnboardingTask(taskContext: TaskContext) {
                 await taskClient.complete<OnboardingTaskParams, OnboardingResult>(
                   _task,
                   { connectorId, streamName, from, to, steps, saveQueries },
-                  { featuresTaskResult, queriesTaskResult }
+                  {
+                    featuresTaskResult,
+                    queriesTaskResult,
+                    discoveryTaskResult,
+                    suggestionTaskResult,
+                  }
                 );
               } catch (error) {
                 // Get connector info for error enrichment
@@ -247,6 +295,48 @@ async function scheduleQueriesGenerationTask(
   await taskClient.schedule<SignificantEventsQueriesGenerationTaskParams>({
     task: {
       type: SIGNIFICANT_EVENTS_QUERIES_GENERATION_TASK_TYPE,
+      id,
+      space: '*',
+    },
+    params,
+    request,
+  });
+
+  return id;
+}
+
+async function scheduleDiscoveryPipelineTask(
+  params: DiscoveryPipelineTaskParams,
+  taskClient: TaskClient<StreamsTaskType>,
+  request: KibanaRequest
+): Promise<string> {
+  const id = `${STREAMS_DISCOVERY_PIPELINE_TASK_TYPE}_${
+    (params.streamNames ?? []).join('_') || 'all'
+  }`;
+
+  await taskClient.schedule<DiscoveryPipelineTaskParams>({
+    task: {
+      type: STREAMS_DISCOVERY_PIPELINE_TASK_TYPE,
+      id,
+      space: '*',
+    },
+    params,
+    request,
+  });
+
+  return id;
+}
+
+async function scheduleSuggestionGenerationTask(
+  params: SuggestionGenerationTaskParams,
+  taskClient: TaskClient<StreamsTaskType>,
+  request: KibanaRequest
+): Promise<string> {
+  const id = `${STREAMS_SUGGESTION_GENERATION_TASK_TYPE}_onboarding`;
+
+  await taskClient.schedule<SuggestionGenerationTaskParams>({
+    task: {
+      type: STREAMS_SUGGESTION_GENERATION_TASK_TYPE,
       id,
       space: '*',
     },

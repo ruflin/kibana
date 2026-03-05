@@ -19,6 +19,8 @@ import {
   DISCOVERY_EVIDENCE,
   DISCOVERY_SAMPLE_EVENTS,
   DISCOVERY_RECOMMENDATIONS,
+  DISCOVERY_RECOMMENDATIONS_TITLE_SEMANTIC,
+  DISCOVERY_RECOMMENDATIONS_DESCRIPTION_SEMANTIC,
   DISCOVERY_FEATURE_REFS,
   DISCOVERY_QUERY_REFS,
   DISCOVERY_STREAM_REFS,
@@ -59,6 +61,12 @@ export const discoveryStorageSettings = {
       [DISCOVERY_EVIDENCE]: types.object({ enabled: false }),
       [DISCOVERY_SAMPLE_EVENTS]: types.object({ enabled: false }),
       [DISCOVERY_RECOMMENDATIONS]: types.object({ enabled: false }),
+      [DISCOVERY_RECOMMENDATIONS_TITLE_SEMANTIC]: types.semantic_text({
+        inference_id: SEMANTIC_TEXT_INFERENCE_ID,
+      }),
+      [DISCOVERY_RECOMMENDATIONS_DESCRIPTION_SEMANTIC]: types.semantic_text({
+        inference_id: SEMANTIC_TEXT_INFERENCE_ID,
+      }),
       [DISCOVERY_FEATURE_REFS]: types.keyword(),
       [DISCOVERY_QUERY_REFS]: types.keyword(),
       [DISCOVERY_STREAM_REFS]: types.keyword(),

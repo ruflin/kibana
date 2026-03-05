@@ -39,7 +39,10 @@ For each discovery:
 
 5. **evidence**: Reference discoveries from multiple streams that support this finding. Include change_point_type and change_point_p_value when available from the source discoveries.
 
-6. **recommendations**: System-level remediation steps
+6. **recommendations**: An array of system-level remediation recommendations. Each recommendation must have:
+   - **title**: A short, descriptive plain-text title (no markdown). Example: "Implement circuit breaker between API gateway and payment service"
+   - **description**: A detailed markdown description with investigation steps, commands, queries, or remediation actions. Use markdown formatting (code blocks, lists, bold) for clarity.
+   - **priority**: "critical", "high", "medium", or "low" based on urgency
 
 Focus on correlations and patterns that span multiple streams.
 If the stream discoveries are unrelated, you may return fewer or no system-level discoveries.

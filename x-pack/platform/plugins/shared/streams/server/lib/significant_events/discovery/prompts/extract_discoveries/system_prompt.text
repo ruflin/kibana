@@ -46,7 +46,10 @@ After your investigation, call `submit_discoveries` with your findings. For each
    - change_point_type: The type of change point detected (spike, dip, step_change, etc.)
    - change_point_p_value: Statistical significance (lower = more significant)
 
-6. **recommendations**: Actionable steps to investigate or resolve the issue
+6. **recommendations**: An array of actionable recommendations. Each recommendation must have:
+   - **title**: A short, descriptive plain-text title (no markdown). Example: "Scale up payment service replicas"
+   - **description**: A detailed markdown description with investigation steps, commands, queries, or remediation actions. Use markdown formatting (code blocks, lists, bold) for clarity.
+   - **priority**: "critical", "high", "medium", or "low" based on urgency
 
 7. **sample_events**: When available, include 1-3 sample event payloads that demonstrate the pattern
 

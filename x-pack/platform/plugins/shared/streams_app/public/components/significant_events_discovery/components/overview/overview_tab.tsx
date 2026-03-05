@@ -12,6 +12,7 @@ import {
   EuiCard,
   EuiCodeBlock,
   EuiEmptyPrompt,
+  EuiMarkdownFormat,
   EuiFlexGroup,
   EuiFlexItem,
   EuiIcon,
@@ -95,10 +96,18 @@ export function OverviewTab() {
     [streamsRepositoryClient]
   );
 
-  const { data: featuresData, isLoading: featuresLoading, refetch: refetchFeatures } = useFetchFeatures();
+  const {
+    data: featuresData,
+    isLoading: featuresLoading,
+    refetch: refetchFeatures,
+  } = useFetchFeatures();
   const featuresCount = featuresData?.features?.length ?? 0;
 
-  const { data: queriesData, isLoading: queriesLoading, refetch: refetchQueries } = useFetchDiscoveryQueries({
+  const {
+    data: queriesData,
+    isLoading: queriesLoading,
+    refetch: refetchQueries,
+  } = useFetchDiscoveryQueries({
     page: 1,
     perPage: 1,
   });
@@ -345,9 +354,7 @@ export function OverviewTab() {
               </EuiTitle>
             </EuiFlexItem>
             <EuiFlexItem grow={false}>
-              <EuiLink
-                href={router.link('/_discovery/{tab}', { path: { tab: 'discoveries' } })}
-              >
+              <EuiLink href={router.link('/_discovery/{tab}', { path: { tab: 'discoveries' } })}>
                 {i18n.translate('xpack.streams.overview.viewAllDiscoveries', {
                   defaultMessage: 'View all ({count})',
                   values: { count: discoveries.length },
@@ -449,13 +456,11 @@ export function OverviewTab() {
                   paddingSize="m"
                   hasBorder
                 >
-                  <EuiText size="xs" color="subdued">
-                    <p>
-                      {rec.description.length > 120
-                        ? `${rec.description.slice(0, 120)}...`
-                        : rec.description}
-                    </p>
-                  </EuiText>
+                  <EuiMarkdownFormat textSize="xs">
+                    {rec.description.length > 200
+                      ? `${rec.description.slice(0, 200)}...`
+                      : rec.description}
+                  </EuiMarkdownFormat>
                   <EuiSpacer size="xs" />
                   <EuiFlexGroup gutterSize="s" alignItems="center" responsive={false}>
                     <EuiFlexItem grow={false}>
@@ -502,9 +507,7 @@ export function OverviewTab() {
               </EuiTitle>
             </EuiFlexItem>
             <EuiFlexItem grow={false}>
-              <EuiLink
-                href={router.link('/_discovery/{tab}', { path: { tab: 'suggestions' } })}
-              >
+              <EuiLink href={router.link('/_discovery/{tab}', { path: { tab: 'suggestions' } })}>
                 {i18n.translate('xpack.streams.overview.viewAllSuggestions', {
                   defaultMessage: 'View all ({count})',
                   values: { count: suggestions.length },

@@ -99,8 +99,28 @@ export const discoveriesSchema: ToolSchema = {
           },
           recommendations: {
             type: 'array',
-            description: 'Actionable steps to investigate or resolve the issue',
-            items: { type: 'string' },
+            description: 'Actionable recommendations to investigate or resolve the issue',
+            items: {
+              type: 'object',
+              properties: {
+                title: {
+                  type: 'string',
+                  description:
+                    'Short, descriptive title for the recommendation (plain text, no markdown). Example: "Scale up payment service replicas"',
+                },
+                description: {
+                  type: 'string',
+                  description:
+                    'Detailed explanation with investigation steps, commands, or queries. Use markdown formatting for code blocks, lists, and emphasis.',
+                },
+                priority: {
+                  type: 'string',
+                  description:
+                    'Priority: "critical", "high", "medium", or "low"',
+                },
+              },
+              required: ['title', 'description'],
+            },
           },
         },
         required: ['title', 'description', 'severity', 'relevance_score'],
@@ -146,7 +166,24 @@ const discoveryStrictSchema = z.object({
   relevance_score: z.number().min(0).max(100).catch(50),
   evidence: z.array(discoveryEvidenceStrictSchema).default([]),
   sample_events: z.array(z.record(z.unknown())).optional(),
-  recommendations: z.array(z.string()).optional(),
+  recommendations: z
+    .array(
+      z.union([
+        z.object({
+          title: z.string(),
+          description: z.string(),
+          priority: z.string().optional(),
+          steps: z.array(z.string()).optional(),
+        }),
+        z.string().transform((s) => ({
+          title: s,
+          description: s,
+          priority: 'medium' as const,
+          steps: [] as string[],
+        })),
+      ])
+    )
+    .optional(),
 });
 
 const discoveriesStrictArgsSchema = z.object({

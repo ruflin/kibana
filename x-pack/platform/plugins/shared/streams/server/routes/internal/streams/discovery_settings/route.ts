@@ -57,6 +57,10 @@ const getDiscoverySettingsRoute = createServerRoute({
       queryGenerationConnectorId: settings.queryGenerationConnectorId ?? defaultConnectorId,
       discoveryConnectorId: settings.discoveryConnectorId ?? defaultConnectorId,
       suggestionConnectorId: settings.suggestionConnectorId ?? defaultConnectorId,
+      onboardingFeatureExtractionConnectorId:
+        settings.onboardingFeatureExtractionConnectorId ?? defaultConnectorId,
+      onboardingSigEventsConnectorId: settings.onboardingSigEventsConnectorId ?? defaultConnectorId,
+      topologyConnectorId: settings.topologyConnectorId ?? defaultConnectorId,
       enableMetricsTraces: settings.enableMetricsTraces ?? false,
       defaultConnectorId,
     };
@@ -80,6 +84,9 @@ const updateDiscoverySettingsRoute = createServerRoute({
       queryGenerationConnectorId: z.string().optional(),
       discoveryConnectorId: z.string().optional(),
       suggestionConnectorId: z.string().optional(),
+      onboardingFeatureExtractionConnectorId: z.string().optional(),
+      onboardingSigEventsConnectorId: z.string().optional(),
+      topologyConnectorId: z.string().optional(),
       enableMetricsTraces: z.boolean().optional(),
     }),
   }),

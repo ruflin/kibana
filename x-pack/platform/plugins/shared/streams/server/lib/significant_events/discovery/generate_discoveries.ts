@@ -145,11 +145,24 @@ export async function generateDiscoveries({
             relevance_score: d.relevance_score ?? 50,
             evidence: d.evidence ?? [],
             sample_events: d.sample_events,
-            recommendations: d.recommendations?.map((r) =>
-              typeof r === 'string'
-                ? { title: r, description: r, priority: 'medium' as const, steps: [r] }
-                : r
-            ),
+            recommendations: d.recommendations?.map((r) => {
+              if (typeof r === 'string') {
+                return { title: r, description: r, priority: 'medium' as const, steps: [] };
+              }
+              const priority =
+                r.priority &&
+                (['critical', 'high', 'medium', 'low'] as const).includes(
+                  r.priority as 'critical' | 'high' | 'medium' | 'low'
+                )
+                  ? (r.priority as 'critical' | 'high' | 'medium' | 'low')
+                  : ('medium' as const);
+              return {
+                title: r.title,
+                description: r.description ?? r.title,
+                priority,
+                steps: r.steps ?? [],
+              };
+            }),
             feature_refs: featureRefs[idx] ?? [],
             query_refs: queryRefs[idx] ?? [],
             stream_refs: streamNamesByDiscovery[idx] ?? [],

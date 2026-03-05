@@ -7,14 +7,19 @@
 
 import type { IdentifyFeaturesResult } from '../api/features';
 import type { SignificantEventsQueriesGenerationResult } from '../api/significant_events';
+import type { DiscoveryPipelineResult } from '../discovery';
 import type { TaskResult } from '../tasks/types';
 
 export interface OnboardingResult {
   featuresTaskResult?: TaskResult<IdentifyFeaturesResult>;
   queriesTaskResult?: TaskResult<SignificantEventsQueriesGenerationResult>;
+  discoveryTaskResult?: TaskResult<DiscoveryPipelineResult>;
+  suggestionTaskResult?: TaskResult<Record<string, unknown>>;
 }
 
 export enum OnboardingStep {
   FeaturesIdentification = 'features_identification',
   QueriesGeneration = 'queries_generation',
+  DiscoveryGeneration = 'discovery_generation',
+  SuggestionGeneration = 'suggestion_generation',
 }

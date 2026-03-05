@@ -56,7 +56,12 @@ export const onboardingTaskRoute = createServerRoute({
       steps: z
         .array(z.nativeEnum(OnboardingStep))
         .optional()
-        .default([OnboardingStep.FeaturesIdentification, OnboardingStep.QueriesGeneration])
+        .default([
+          OnboardingStep.FeaturesIdentification,
+          OnboardingStep.QueriesGeneration,
+          OnboardingStep.DiscoveryGeneration,
+          OnboardingStep.SuggestionGeneration,
+        ])
         .describe(
           'Optional list of steps to perform as part of stream onboarding in the specified sequence. By default it will execute all steps.'
         ),

@@ -20,6 +20,7 @@ import {
   EuiIcon,
   EuiListGroup,
   EuiListGroupItem,
+  EuiMarkdownFormat,
   EuiPanel,
   EuiSpacer,
   EuiText,
@@ -206,17 +207,20 @@ function DiscoveryDetailFlyout({
                               'xpack.streams.discoveryDetail.evidenceChangePoint',
                               { defaultMessage: 'Change point' }
                             ),
-                            description: `${ev.change_point_type}${ev.change_point_p_value != null ? ` (p=${ev.change_point_p_value})` : ''}`,
+                            description: `${ev.change_point_type}${
+                              ev.change_point_p_value != null
+                                ? ` (p=${ev.change_point_p_value})`
+                                : ''
+                            }`,
                           },
                         ]
                       : []),
                     ...(ev.feature_name
                       ? [
                           {
-                            title: i18n.translate(
-                              'xpack.streams.discoveryDetail.evidenceFeature',
-                              { defaultMessage: 'Feature' }
-                            ),
+                            title: i18n.translate('xpack.streams.discoveryDetail.evidenceFeature', {
+                              defaultMessage: 'Feature',
+                            }),
                             description: ev.feature_name,
                           },
                         ]
@@ -255,9 +259,7 @@ function DiscoveryDetailFlyout({
                   </EuiFlexItem>
                 </EuiFlexGroup>
                 <EuiSpacer size="xs" />
-                <EuiText size="xs" color="subdued">
-                  {rec.description}
-                </EuiText>
+                <EuiMarkdownFormat textSize="xs">{rec.description}</EuiMarkdownFormat>
                 {rec.steps.length > 0 && (
                   <>
                     <EuiSpacer size="xs" />
@@ -413,7 +415,8 @@ export function DiscoveriesTab() {
       if (count > 0) {
         notifications.toasts.addSuccess({
           title: i18n.translate('xpack.streams.discoveries.generatedTitle', {
-            defaultMessage: '{count} {count, plural, one {discovery} other {discoveries}} generated',
+            defaultMessage:
+              '{count} {count, plural, one {discovery} other {discoveries}} generated',
             values: { count },
           }),
         });

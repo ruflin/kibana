@@ -9,20 +9,23 @@ import {
   EuiBadge,
   EuiButton,
   EuiButtonIcon,
+  EuiComboBox,
   EuiFlexGroup,
   EuiFlexItem,
   EuiHealth,
   EuiInMemoryTable,
   EuiLink,
+  EuiSwitch,
   EuiText,
   type EuiBasicTableColumn,
+  type EuiComboBoxOptionOption,
 } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
 import type { Feature } from '@kbn/streams-schema';
-import { OnboardingStep } from '@kbn/streams-schema';
+import { isComputedFeature, OnboardingStep } from '@kbn/streams-schema';
 import { upperFirst } from 'lodash';
 import pMap from 'p-map';
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useFetchFeatures } from '../../../../hooks/use_fetch_features';
 import { useAIFeatures } from '../../../../hooks/use_ai_features';
 import { useKibana } from '../../../../hooks/use_kibana';
@@ -36,6 +39,8 @@ export function FeaturesTable() {
   const { data, isLoading: loading, refetch } = useFetchFeatures();
   const [selectedFeature, setSelectedFeature] = useState<Feature | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [showSystemFeatures, setShowSystemFeatures] = useState(false);
+  const [selectedStreams, setSelectedStreams] = useState<EuiComboBoxOptionOption[]>([]);
   const aiFeatures = useAIFeatures();
   const {
     core: {
@@ -47,6 +52,24 @@ export function FeaturesTable() {
       },
     },
   } = useKibana();
+
+  const allFeatures = useMemo(() => data?.features ?? [], [data?.features]);
+
+  const streamOptions = useMemo<EuiComboBoxOptionOption[]>(() => {
+    const names = [...new Set(allFeatures.map((f) => f.stream_name).filter(Boolean))].sort();
+    return names.map((name) => ({ label: name }));
+  }, [allFeatures]);
+
+  const selectedStreamNames = useMemo(
+    () => new Set(selectedStreams.map((o) => o.label)),
+    [selectedStreams]
+  );
+
+  const filteredFeatures = useMemo(() => {
+    return allFeatures
+      .filter((f) => showSystemFeatures || !isComputedFeature(f))
+      .filter((f) => selectedStreamNames.size === 0 || selectedStreamNames.has(f.stream_name));
+  }, [allFeatures, showSystemFeatures, selectedStreamNames]);
 
   const handleSelectFeature = useCallback((feature: Feature | null) => {
     setSelectedFeature(feature);
@@ -206,17 +229,30 @@ export function FeaturesTable() {
   return (
     <EuiFlexGroup direction="column" gutterSize="m">
       <EuiFlexItem grow={false}>
-        <EuiFlexGroup alignItems="center" gutterSize="s">
+        <EuiFlexGroup alignItems="center" gutterSize="s" wrap>
           <EuiFlexItem grow={false}>
             <EuiText size="s">
               {i18n.translate(
                 'xpack.streams.significantEventsDiscovery.featuresTable.featuresCount',
                 {
-                  defaultMessage: '{count} Features',
-                  values: { count: data?.features.length ?? 0 },
+                  defaultMessage: '{filtered} / {total} Features',
+                  values: { filtered: filteredFeatures.length, total: allFeatures.length },
                 }
               )}
             </EuiText>
+          </EuiFlexItem>
+          <EuiFlexItem grow={false} style={{ minWidth: 240 }}>
+            <EuiComboBox
+              placeholder={i18n.translate(
+                'xpack.streams.significantEventsDiscovery.featuresTable.streamFilterPlaceholder',
+                { defaultMessage: 'Filter by stream' }
+              )}
+              options={streamOptions}
+              selectedOptions={selectedStreams}
+              onChange={setSelectedStreams}
+              isClearable
+              compressed
+            />
           </EuiFlexItem>
           <EuiFlexItem grow={false}>
             <EuiButton
@@ -226,7 +262,7 @@ export function FeaturesTable() {
               disabled={
                 isRegenerating ||
                 !aiFeatures?.genAiConnectors?.selectedConnector ||
-                (data?.features.length ?? 0) === 0
+                allFeatures.length === 0
               }
               onClick={handleRegenerateFeatures}
             >
@@ -235,6 +271,17 @@ export function FeaturesTable() {
                 { defaultMessage: 'Regenerate features' }
               )}
             </EuiButton>
+          </EuiFlexItem>
+          <EuiFlexItem grow={false}>
+            <EuiSwitch
+              label={i18n.translate(
+                'xpack.streams.significantEventsDiscovery.featuresTable.showSystemFeaturesLabel',
+                { defaultMessage: 'Show system features' }
+              )}
+              checked={showSystemFeatures}
+              onChange={(e) => setShowSystemFeatures(e.target.checked)}
+              compressed
+            />
           </EuiFlexItem>
         </EuiFlexGroup>
       </EuiFlexItem>
@@ -246,7 +293,7 @@ export function FeaturesTable() {
           )}
           columns={columns}
           itemId="id"
-          items={data?.features ?? []}
+          items={filteredFeatures}
           loading={loading}
           search={{
             box: {

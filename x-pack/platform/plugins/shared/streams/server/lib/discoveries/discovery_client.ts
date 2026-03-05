@@ -21,6 +21,8 @@ import {
   DISCOVERY_EVIDENCE,
   DISCOVERY_SAMPLE_EVENTS,
   DISCOVERY_RECOMMENDATIONS,
+  DISCOVERY_RECOMMENDATIONS_TITLE_SEMANTIC,
+  DISCOVERY_RECOMMENDATIONS_DESCRIPTION_SEMANTIC,
   DISCOVERY_FEATURE_REFS,
   DISCOVERY_QUERY_REFS,
   DISCOVERY_STREAM_REFS,
@@ -41,6 +43,18 @@ import {
 } from './fields';
 
 type StoredDocument = Record<string, unknown>;
+
+const buildRecommendationsSemanticText = (
+  recommendations?: Discovery['recommendations']
+): { titles: string; descriptions: string } => {
+  if (!recommendations || recommendations.length === 0) {
+    return { titles: '', descriptions: '' };
+  }
+  return {
+    titles: recommendations.map((r) => r.title).join('\n'),
+    descriptions: recommendations.map((r) => r.description).join('\n'),
+  };
+};
 
 export class DiscoveryClient {
   constructor(
@@ -71,6 +85,12 @@ export class DiscoveryClient {
         [DISCOVERY_EVIDENCE]: discovery.evidence,
         [DISCOVERY_SAMPLE_EVENTS]: discovery.sample_events,
         [DISCOVERY_RECOMMENDATIONS]: discovery.recommendations,
+        [DISCOVERY_RECOMMENDATIONS_TITLE_SEMANTIC]: buildRecommendationsSemanticText(
+          discovery.recommendations
+        ).titles,
+        [DISCOVERY_RECOMMENDATIONS_DESCRIPTION_SEMANTIC]: buildRecommendationsSemanticText(
+          discovery.recommendations
+        ).descriptions,
         [DISCOVERY_FEATURE_REFS]: discovery.feature_refs,
         [DISCOVERY_QUERY_REFS]: discovery.query_refs,
         [DISCOVERY_STREAM_REFS]: discovery.stream_refs,
@@ -191,8 +211,12 @@ export class DiscoveryClient {
     if (updates.severity !== undefined) merged[DISCOVERY_SEVERITY] = updates.severity;
     if (updates.relevance_score !== undefined)
       merged[DISCOVERY_RELEVANCE_SCORE] = updates.relevance_score;
-    if (updates.recommendations !== undefined)
+    if (updates.recommendations !== undefined) {
       merged[DISCOVERY_RECOMMENDATIONS] = updates.recommendations;
+      const semanticText = buildRecommendationsSemanticText(updates.recommendations);
+      merged[DISCOVERY_RECOMMENDATIONS_TITLE_SEMANTIC] = semanticText.titles;
+      merged[DISCOVERY_RECOMMENDATIONS_DESCRIPTION_SEMANTIC] = semanticText.descriptions;
+    }
     if (updates.tags !== undefined) merged[DISCOVERY_TAGS] = updates.tags;
     if (updates.feedback !== undefined) merged[DISCOVERY_FEEDBACK] = updates.feedback;
 
