@@ -5,27 +5,36 @@
  * 2.0.
  */
 
+import { v4 as uuidv4 } from 'uuid';
 import type { TaskDefinitionRegistry } from '@kbn/task-manager-plugin/server';
+import type { ChatCompletionTokenCount } from '@kbn/inference-common';
 import { isInferenceProviderError } from '@kbn/inference-common';
-import type { DiscoveryPipelineResult } from '@kbn/streams-schema';
+import type { Insight } from '@kbn/streams-schema';
+import { getImpactLevel } from '@kbn/streams-schema';
 import { getDeleteTaskRunResult } from '@kbn/task-manager-plugin/server/task';
 import type { TaskContext } from '.';
 import { cancellableTask } from '../cancellable_task';
 import type { TaskParams } from '../types';
-import { generateDiscoveries } from '../../significant_events/discovery/generate_discoveries';
+import { generateInsights } from '../../significant_events/insights/generate_insights';
 import { getErrorMessage } from '../../streams/errors/parse_error';
 import { formatInferenceProviderError } from '../../../routes/utils/create_connector_sse_error';
 
-export interface DiscoveryPipelineTaskParams {
+export interface InsightsDiscoveryTaskResult {
+  insights: Insight[];
+  tokensUsed: ChatCompletionTokenCount;
+}
+
+export interface InsightsDiscoveryTaskParams {
   connectorId: string;
+  /** When provided, only generate insights for these stream names. Otherwise all streams are used. */
   streamNames?: string[];
 }
 
-export const STREAMS_DISCOVERY_PIPELINE_TASK_TYPE = 'streams_discovery_pipeline';
+export const STREAMS_INSIGHTS_DISCOVERY_TASK_TYPE = 'streams_insights_discovery';
 
-export function createStreamsDiscoveryPipelineTask(taskContext: TaskContext) {
+export function createStreamsInsightsDiscoveryTask(taskContext: TaskContext) {
   return {
-    [STREAMS_DISCOVERY_PIPELINE_TASK_TYPE]: {
+    [STREAMS_INSIGHTS_DISCOVERY_TASK_TYPE]: {
       createTaskRunner: (runContext) => {
         return {
           run: cancellableTask(
@@ -35,7 +44,7 @@ export function createStreamsDiscoveryPipelineTask(taskContext: TaskContext) {
               }
 
               const { connectorId, streamNames, _task } = runContext.taskInstance
-                .params as TaskParams<DiscoveryPipelineTaskParams>;
+                .params as TaskParams<InsightsDiscoveryTaskParams>;
 
               const {
                 taskClient,
@@ -43,8 +52,7 @@ export function createStreamsDiscoveryPipelineTask(taskContext: TaskContext) {
                 streamsClient,
                 inferenceClient,
                 queryClient,
-                discoveryClient,
-                featureClient,
+                insightClient,
               } = await taskContext.getScopedClients({
                 request: runContext.fakeRequest,
               });
@@ -52,32 +60,55 @@ export function createStreamsDiscoveryPipelineTask(taskContext: TaskContext) {
               const boundInferenceClient = inferenceClient.bindTo({ connectorId });
 
               try {
-                const result = await generateDiscoveries({
+                const result = await generateInsights({
                   streamsClient,
                   queryClient,
                   esClient: scopedClusterClient.asCurrentUser,
-                  scopedClusterClient,
                   inferenceClient: boundInferenceClient,
                   signal: runContext.abortController.signal,
-                  logger: taskContext.logger.get('discovery_pipeline'),
+                  logger: taskContext.logger.get('insights_discovery'),
                   streamNames,
-                  discoveryClient,
-                  featureClient,
-                  connectorId,
                 });
 
-                taskContext.telemetry.trackDiscoveriesGenerated({
-                  input_tokens_used: result.tokensUsed?.prompt ?? 0,
-                  output_tokens_used: result.tokensUsed?.completion ?? 0,
-                  cached_tokens_used: result.tokensUsed?.cached ?? 0,
+                taskContext.telemetry.trackInsightsGenerated({
+                  input_tokens_used: result.tokens_used?.prompt ?? 0,
+                  output_tokens_used: result.tokens_used?.completion ?? 0,
+                  cached_tokens_used: result.tokens_used?.cached ?? 0,
                 });
 
-                await taskClient.complete<DiscoveryPipelineTaskParams, DiscoveryPipelineResult>(
+                const insights = result.insights.map(
+                  (insight) =>
+                    ({
+                      ...insight,
+                      id: uuidv4(),
+                      generated_at: new Date().toISOString(),
+                      impact_level: getImpactLevel(insight.impact),
+                    } satisfies Insight)
+                );
+
+                if (result.insights.length > 0) {
+                  try {
+                    await insightClient.bulk(
+                      insights.map((insight) => ({
+                        index: insight,
+                      }))
+                    );
+                  } catch (persistError) {
+                    taskContext.logger.error(
+                      `Failed to persist ${result.insights.length} insights: ${getErrorMessage(
+                        persistError
+                      )}`
+                    );
+                  }
+                }
+
+                await taskClient.complete<InsightsDiscoveryTaskParams, InsightsDiscoveryTaskResult>(
                   _task,
                   { connectorId, streamNames },
-                  result
+                  { insights, tokensUsed: result.tokens_used }
                 );
               } catch (error) {
+                // Get connector info for error enrichment
                 const connector = await inferenceClient.getConnectorById(connectorId);
 
                 const errorMessage = isInferenceProviderError(error)
@@ -95,7 +126,7 @@ export function createStreamsDiscoveryPipelineTask(taskContext: TaskContext) {
                   `Task ${runContext.taskInstance.id} failed: ${errorMessage}`
                 );
 
-                await taskClient.fail<DiscoveryPipelineTaskParams>(
+                await taskClient.fail<InsightsDiscoveryTaskParams>(
                   _task,
                   { connectorId, streamNames },
                   errorMessage

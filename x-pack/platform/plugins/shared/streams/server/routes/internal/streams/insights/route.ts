@@ -5,26 +5,37 @@
  * 2.0.
  */
 
-import type { DiscoveryPipelineResult } from '@kbn/streams-schema';
-import { z } from '@kbn/zod';
-import type { TaskResult } from '@kbn/streams-schema';
+import { z } from '@kbn/zod/v4';
+import type { InsightImpactLevel, TaskResult } from '@kbn/streams-schema';
+import {
+  insightCoreSchema,
+  insightImpactLevelSchema,
+  insightMetaSchema,
+  insightSchema,
+  type Insight,
+} from '@kbn/streams-schema';
 import { STREAMS_API_PRIVILEGES } from '../../../../../common/constants';
-import type { DiscoveryPipelineTaskParams } from '../../../../lib/tasks/task_definitions/insights_discovery';
-import { STREAMS_DISCOVERY_PIPELINE_TASK_TYPE } from '../../../../lib/tasks/task_definitions/insights_discovery';
+import type {
+  InsightsDiscoveryTaskParams,
+  InsightsDiscoveryTaskResult,
+} from '../../../../lib/tasks/task_definitions/insights_discovery';
+import { STREAMS_INSIGHTS_DISCOVERY_TASK_TYPE } from '../../../../lib/tasks/task_definitions/insights_discovery';
 import { taskActionSchema } from '../../../../lib/tasks/task_action_schema';
 import { createServerRoute } from '../../../create_server_route';
 import { assertSignificantEventsAccess } from '../../../utils/assert_significant_events_access';
 import { resolveConnectorId } from '../../../utils/resolve_connector_id';
 import { handleTaskAction } from '../../../utils/task_helpers';
 
-export type DiscoveryTaskResult = TaskResult<DiscoveryPipelineResult>;
+/* Insights Discovery Task */
 
-const discoveryTaskRoute = createServerRoute({
-  endpoint: 'POST /internal/streams/_discovery/_task',
+export type InsightsTaskResult = TaskResult<InsightsDiscoveryTaskResult>;
+
+const insightsTaskRoute = createServerRoute({
+  endpoint: 'POST /internal/streams/_insights/_task',
   options: {
     access: 'internal',
-    summary: 'Management of the discovery pipeline task',
-    description: 'schedules/cancels/acknowledges the discovery pipeline task',
+    summary: 'Management of the insights discovery task',
+    description: 'schedules/cancels/acknowledges the insights discovery task',
   },
   security: {
     authz: {
@@ -41,7 +52,7 @@ const discoveryTaskRoute = createServerRoute({
         ),
       streamNames: z
         .array(z.string())
-        .describe('List of stream names to generate discoveries for.')
+        .describe('List of stream names to generate insights for.')
         .optional(),
     }),
   }),
@@ -51,7 +62,7 @@ const discoveryTaskRoute = createServerRoute({
     getScopedClients,
     server,
     logger,
-  }): Promise<DiscoveryTaskResult> => {
+  }): Promise<InsightsTaskResult> => {
     const { licensing, uiSettingsClient, taskClient } = await getScopedClients({
       request,
     });
@@ -65,9 +76,9 @@ const discoveryTaskRoute = createServerRoute({
         ? ({
             action: body.action,
             scheduleConfig: {
-              taskType: STREAMS_DISCOVERY_PIPELINE_TASK_TYPE,
-              taskId: STREAMS_DISCOVERY_PIPELINE_TASK_TYPE,
-              params: await (async (): Promise<DiscoveryPipelineTaskParams> => {
+              taskType: STREAMS_INSIGHTS_DISCOVERY_TASK_TYPE,
+              taskId: STREAMS_INSIGHTS_DISCOVERY_TASK_TYPE,
+              params: await (async (): Promise<InsightsDiscoveryTaskParams> => {
                 const connectorId = await resolveConnectorId({
                   connectorId: body.connectorId,
                   uiSettingsClient,
@@ -84,39 +95,207 @@ const discoveryTaskRoute = createServerRoute({
           } as const)
         : ({ action: body.action } as const);
 
-    return handleTaskAction<DiscoveryPipelineTaskParams, DiscoveryPipelineResult>({
+    return handleTaskAction<InsightsDiscoveryTaskParams, InsightsDiscoveryTaskResult>({
       taskClient,
-      taskId: STREAMS_DISCOVERY_PIPELINE_TASK_TYPE,
+      taskId: STREAMS_INSIGHTS_DISCOVERY_TASK_TYPE,
       ...actionParams,
     });
   },
 });
 
-const discoveryStatusRoute = createServerRoute({
-  endpoint: 'POST /internal/streams/_discovery/_status',
+const insightsStatusRoute = createServerRoute({
+  endpoint: 'POST /internal/streams/_insights/_status',
   options: {
     access: 'internal',
-    summary: 'Check the status of discovery pipeline',
-    description: 'Check the status of discovery pipeline',
+    summary: 'Check the status of insights discovery',
+    description: 'Check the status of insights discovery',
   },
   security: {
     authz: {
       requiredPrivileges: [STREAMS_API_PRIVILEGES.read],
     },
   },
-  handler: async ({ request, getScopedClients, server }): Promise<DiscoveryTaskResult> => {
+  handler: async ({ request, getScopedClients, server }): Promise<InsightsTaskResult> => {
     const { licensing, uiSettingsClient, taskClient } = await getScopedClients({
       request,
     });
     await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
 
-    return taskClient.getStatus<DiscoveryPipelineTaskParams, DiscoveryPipelineResult>(
-      STREAMS_DISCOVERY_PIPELINE_TASK_TYPE
+    return taskClient.getStatus<InsightsDiscoveryTaskParams, InsightsDiscoveryTaskResult>(
+      STREAMS_INSIGHTS_DISCOVERY_TASK_TYPE
     );
   },
 });
 
-export const internalDiscoveryRoutes = {
-  ...discoveryTaskRoute,
-  ...discoveryStatusRoute,
+const listInsightsRoute = createServerRoute({
+  endpoint: 'GET /internal/streams/_insights',
+  options: {
+    access: 'internal',
+    summary: 'List all insights',
+    description: 'Fetches all persisted insights with optional filters',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.read],
+    },
+  },
+  params: z.object({
+    query: z.object({
+      impact: z
+        .union([insightImpactLevelSchema, z.array(insightImpactLevelSchema)])
+        .optional()
+        .describe('Filter by impact level(s). Can be a single value or comma-separated values.'),
+    }),
+  }),
+  handler: async ({
+    params,
+    request,
+    getScopedClients,
+    server,
+  }): Promise<{ insights: Insight[]; total: number }> => {
+    const { insightClient, licensing, uiSettingsClient } = await getScopedClients({ request });
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+
+    const filters: { impact?: InsightImpactLevel[] } = {};
+    if (params.query.impact) {
+      // Support both array and comma-separated string
+      filters.impact = Array.isArray(params.query.impact)
+        ? params.query.impact
+        : (params.query.impact.split(',') as InsightImpactLevel[]);
+    }
+
+    return insightClient.list(filters);
+  },
+});
+
+const getInsightRoute = createServerRoute({
+  endpoint: 'GET /internal/streams/_insights/{id}',
+  options: {
+    access: 'internal',
+    summary: 'Get a single insight',
+    description: 'Fetches a single insight by ID',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.read],
+    },
+  },
+  params: z.object({
+    path: z.object({ id: z.string() }),
+  }),
+  handler: async ({ params, request, getScopedClients, server }): Promise<{ insight: Insight }> => {
+    const { insightClient, licensing, uiSettingsClient } = await getScopedClients({ request });
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+
+    const insight = await insightClient.get(params.path.id);
+    return { insight };
+  },
+});
+
+/** Save body: insight without id (id comes from path). */
+const saveInsightBodySchema = insightCoreSchema.and(insightMetaSchema.omit({ id: true }));
+
+const saveInsightRoute = createServerRoute({
+  endpoint: 'PUT /internal/streams/_insights/{id}',
+  options: {
+    access: 'internal',
+    summary: 'Save an insight',
+    description: 'Creates or updates a persisted insight by ID',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.manage],
+    },
+  },
+  params: z.object({
+    path: z.object({ id: z.string() }),
+    body: saveInsightBodySchema,
+  }),
+  handler: async ({ params, request, getScopedClients, server }): Promise<{ insight: Insight }> => {
+    const { insightClient, licensing, uiSettingsClient } = await getScopedClients({ request });
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+
+    const insight = await insightClient.upsert({
+      ...params.body,
+      id: params.path.id,
+    });
+    return { insight };
+  },
+});
+
+const deleteInsightRoute = createServerRoute({
+  endpoint: 'DELETE /internal/streams/_insights/{id}',
+  options: {
+    access: 'internal',
+    summary: 'Delete an insight',
+    description: 'Deletes an existing insight by ID',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.manage],
+    },
+  },
+  params: z.object({
+    path: z.object({ id: z.string() }),
+  }),
+  handler: async ({
+    params,
+    request,
+    getScopedClients,
+    server,
+  }): Promise<{ acknowledged: boolean }> => {
+    const { insightClient, licensing, uiSettingsClient } = await getScopedClients({ request });
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+
+    return await insightClient.delete(params.path.id);
+  },
+});
+
+const bulkInsightsRoute = createServerRoute({
+  endpoint: 'POST /internal/streams/_insights/_bulk',
+  options: {
+    access: 'internal',
+    summary: 'Bulk operations on insights',
+    description: 'Perform bulk save or delete operations on insights',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.manage],
+    },
+  },
+  params: z.object({
+    body: z.object({
+      operations: z.array(
+        z.union([
+          z.object({
+            index: insightSchema,
+          }),
+          z.object({
+            delete: z.object({ id: z.string() }),
+          }),
+        ])
+      ),
+    }),
+  }),
+  handler: async ({
+    params,
+    request,
+    getScopedClients,
+    server,
+  }): Promise<{ acknowledged: boolean }> => {
+    const { insightClient, licensing, uiSettingsClient } = await getScopedClients({ request });
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+
+    return await insightClient.bulk(params.body.operations);
+  },
+});
+
+export const internalInsightsRoutes = {
+  ...insightsTaskRoute,
+  ...insightsStatusRoute,
+  ...listInsightsRoute,
+  ...getInsightRoute,
+  ...saveInsightRoute,
+  ...deleteInsightRoute,
+  ...bulkInsightsRoute,
 };

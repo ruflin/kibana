@@ -8,10 +8,9 @@
 import type { RootSchema } from '@elastic/ebt/client';
 import type {
   StreamEndpointLatencyProps,
-  StreamsSystemIdentificationIdentifiedProps,
   StreamsDescriptionGeneratedProps,
   StreamsSignificantEventsQueriesGeneratedProps,
-  StreamsDiscoveriesGeneratedProps,
+  StreamsInsightsGeneratedProps,
   StreamsStateErrorProps,
   StreamsProcessingPipelineSuggestedProps,
   StreamsFeaturesIdentifiedProps,
@@ -70,40 +69,6 @@ const streamsStateErrorSchema: RootSchema<StreamsStateErrorProps> = {
   },
 };
 
-const streamsSystemIdentificationIdentifiedSchema: RootSchema<StreamsSystemIdentificationIdentifiedProps> =
-  {
-    count: {
-      type: 'long',
-      _meta: {
-        description: 'The number of systems identified',
-      },
-    },
-    input_tokens_used: {
-      type: 'long',
-      _meta: {
-        description: 'The number of input tokens used for the generation request',
-      },
-    },
-    output_tokens_used: {
-      type: 'long',
-      _meta: {
-        description: 'The number of output tokens used for the generation request',
-      },
-    },
-    stream_type: {
-      type: 'keyword',
-      _meta: {
-        description: 'The type of the stream: wired or classic',
-      },
-    },
-    stream_name: {
-      type: 'keyword',
-      _meta: {
-        description: 'The name of the Stream',
-      },
-    },
-  };
-
 const streamsDescriptionGeneratedSchema: RootSchema<StreamsDescriptionGeneratedProps> = {
   input_tokens_used: {
     type: 'long',
@@ -137,12 +102,6 @@ const streamsSignificantEventsQueriesGeneratedSchema: RootSchema<StreamsSignific
       type: 'long',
       _meta: {
         description: 'The number of significant events queries generated',
-      },
-    },
-    systems_count: {
-      type: 'long',
-      _meta: {
-        description: 'The number of systems used to generate the queries',
       },
     },
     input_tokens_used: {
@@ -219,7 +178,7 @@ const streamsSignificantEventsQueriesGeneratedSchema: RootSchema<StreamsSignific
     },
   };
 
-const streamsDiscoveriesGeneratedSchema: RootSchema<StreamsDiscoveriesGeneratedProps> = {
+const streamsInsightsGeneratedSchema: RootSchema<StreamsInsightsGeneratedProps> = {
   input_tokens_used: {
     type: 'long',
     _meta: {
@@ -236,20 +195,6 @@ const streamsDiscoveriesGeneratedSchema: RootSchema<StreamsDiscoveriesGeneratedP
     type: 'long',
     _meta: {
       description: 'The number of cached tokens used for the generation request',
-      optional: true,
-    },
-  },
-  discovery_count: {
-    type: 'long',
-    _meta: {
-      description: 'The number of discoveries generated',
-      optional: true,
-    },
-  },
-  suggestion_count: {
-    type: 'long',
-    _meta: {
-      description: 'The number of suggestions generated',
       optional: true,
     },
   },
@@ -355,10 +300,9 @@ const streamsFeaturesIdentifiedSchema: RootSchema<StreamsFeaturesIdentifiedProps
 export {
   streamsEndpointLatencySchema,
   streamsStateErrorSchema,
-  streamsSystemIdentificationIdentifiedSchema,
   streamsDescriptionGeneratedSchema,
   streamsSignificantEventsQueriesGeneratedSchema,
-  streamsDiscoveriesGeneratedSchema,
+  streamsInsightsGeneratedSchema,
   streamsProcessingPipelineSuggestedSchema,
   streamsFeaturesIdentifiedSchema,
 };

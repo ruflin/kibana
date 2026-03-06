@@ -23,14 +23,6 @@ interface StreamsStateErrorProps {
   status_code: number;
 }
 
-interface StreamsSystemIdentificationIdentifiedProps {
-  count: number;
-  input_tokens_used: number;
-  output_tokens_used: number;
-  stream_name: string;
-  stream_type: StreamType;
-}
-
 interface StreamsDescriptionGeneratedProps {
   input_tokens_used: number;
   output_tokens_used: number;
@@ -39,7 +31,6 @@ interface StreamsDescriptionGeneratedProps {
 }
 interface StreamsSignificantEventsQueriesGeneratedProps {
   count: number;
-  systems_count: number;
   input_tokens_used: number;
   output_tokens_used: number;
   stream_name: string;
@@ -47,12 +38,10 @@ interface StreamsSignificantEventsQueriesGeneratedProps {
   tool_usage: SignificantEventsToolUsage;
 }
 
-interface StreamsDiscoveriesGeneratedProps {
+interface StreamsInsightsGeneratedProps {
   input_tokens_used: number;
   output_tokens_used: number;
   cached_tokens_used?: number;
-  discovery_count?: number;
-  suggestion_count?: number;
 }
 
 interface StreamsProcessingPipelineSuggestedProps {
@@ -79,10 +68,9 @@ interface StreamsFeaturesIdentifiedProps {
 export {
   type StreamEndpointLatencyProps,
   type StreamsStateErrorProps,
-  type StreamsSystemIdentificationIdentifiedProps,
   type StreamsDescriptionGeneratedProps,
   type StreamsSignificantEventsQueriesGeneratedProps,
-  type StreamsDiscoveriesGeneratedProps,
+  type StreamsInsightsGeneratedProps,
   type StreamsProcessingPipelineSuggestedProps,
   type StreamsFeaturesIdentifiedProps,
 };
