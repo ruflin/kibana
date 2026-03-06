@@ -52,12 +52,15 @@ export async function generateDiscoveries({
   discoveryClient?: DiscoveryClient;
   featureClient?: FeatureClient;
   connectorId?: string;
+  enableMetricsTraces?: boolean;
 }): Promise<DiscoveryPipelineResult> {
   const allStreams = await streamsClient.listStreams();
   let streams = allStreams;
   if (streamNames !== undefined && streamNames.length > 0) {
     const streamNamesSet = new Set(streamNames);
     streams = allStreams.filter((s) => streamNamesSet.has(s.name));
+  } else if (!enableMetricsTraces) {
+    streams = allStreams.filter((s) => s.name.startsWith('logs'));
   }
 
   const toolDeps: PipelineToolDependencies | undefined =

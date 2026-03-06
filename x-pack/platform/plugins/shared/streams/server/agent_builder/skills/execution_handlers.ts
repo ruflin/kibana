@@ -9,7 +9,7 @@ import type { KibanaRequest } from '@kbn/core/server';
 import type { Logger } from '@kbn/logging';
 import { OnboardingStep } from '@kbn/streams-schema';
 import type { GetScopedClients } from '../../routes/types';
-import { STREAMS_DISCOVERY_PIPELINE_TASK_TYPE } from '../../lib/tasks/task_definitions/insights_discovery';
+import { STREAMS_DISCOVERY_TASK_TYPE } from '../../lib/tasks/task_definitions/discovery';
 import {
   getOnboardingTaskId,
   STREAMS_ONBOARDING_TASK_TYPE,
@@ -54,11 +54,11 @@ export const createSkillExecutionHandlers = (
 
     const result = await handleTaskAction({
       taskClient,
-      taskId: STREAMS_DISCOVERY_PIPELINE_TASK_TYPE,
+      taskId: STREAMS_DISCOVERY_TASK_TYPE,
       action: 'schedule',
       scheduleConfig: {
-        taskType: STREAMS_DISCOVERY_PIPELINE_TASK_TYPE,
-        taskId: STREAMS_DISCOVERY_PIPELINE_TASK_TYPE,
+        taskType: STREAMS_DISCOVERY_TASK_TYPE,
+        taskId: STREAMS_DISCOVERY_TASK_TYPE,
         params: {
           connectorId,
           ...(streamNames.length > 0 ? { streamNames } : {}),

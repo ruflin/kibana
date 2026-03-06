@@ -21,7 +21,7 @@ globalSetupHook('Setup environment for Streams API tests', async ({ kbnClient, e
     log.debug(`[setup] Streams may already be enabled: ${error}`);
   }
 
-  // Enable significant events feature (required for insights API)
+  // Enable significant events feature (required for discoveries API)
   log.debug('[setup] Enabling significant events feature...');
   try {
     await kbnClient.uiSettings.update({

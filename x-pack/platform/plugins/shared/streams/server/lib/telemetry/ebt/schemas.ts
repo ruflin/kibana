@@ -10,7 +10,7 @@ import type {
   StreamEndpointLatencyProps,
   StreamsDescriptionGeneratedProps,
   StreamsSignificantEventsQueriesGeneratedProps,
-  StreamsInsightsGeneratedProps,
+  StreamsDiscoveriesGeneratedProps,
   StreamsStateErrorProps,
   StreamsProcessingPipelineSuggestedProps,
   StreamsFeaturesIdentifiedProps,
@@ -178,7 +178,7 @@ const streamsSignificantEventsQueriesGeneratedSchema: RootSchema<StreamsSignific
     },
   };
 
-const streamsInsightsGeneratedSchema: RootSchema<StreamsInsightsGeneratedProps> = {
+const streamsDiscoveriesGeneratedSchema: RootSchema<StreamsDiscoveriesGeneratedProps> = {
   input_tokens_used: {
     type: 'long',
     _meta: {
@@ -302,7 +302,7 @@ export {
   streamsStateErrorSchema,
   streamsDescriptionGeneratedSchema,
   streamsSignificantEventsQueriesGeneratedSchema,
-  streamsInsightsGeneratedSchema,
+  streamsDiscoveriesGeneratedSchema,
   streamsProcessingPipelineSuggestedSchema,
   streamsFeaturesIdentifiedSchema,
 };

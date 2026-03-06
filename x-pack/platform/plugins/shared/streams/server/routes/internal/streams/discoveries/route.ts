@@ -5,9 +5,16 @@
  * 2.0.
  */
 
-import { z } from '@kbn/zod';
-import type { TaskResult } from '@kbn/streams-schema';
+import { z } from '@kbn/zod/v4';
+import type { TaskResult, DiscoveryPipelineResult } from '@kbn/streams-schema';
 import { STREAMS_API_PRIVILEGES } from '../../../../../common/constants';
+import type { DiscoveryTaskParams } from '../../../../lib/tasks/task_definitions/discovery';
+import { STREAMS_DISCOVERY_TASK_TYPE } from '../../../../lib/tasks/task_definitions/discovery';
+import {
+  discoverySettingsSOType,
+  DISCOVERY_SETTINGS_SO_ID,
+  type DiscoverySettingsAttributes,
+} from '../../../../lib/saved_objects/significant_events/discovery_settings';
 import type { SuggestionGenerationTaskParams } from '../../../../lib/tasks/task_definitions/suggestion_generation';
 import { STREAMS_SUGGESTION_GENERATION_TASK_TYPE } from '../../../../lib/tasks/task_definitions/suggestion_generation';
 import type { GenerateSuggestionsResult } from '../../../../lib/significant_events/discovery/generate_suggestions';
@@ -268,6 +275,117 @@ const suggestionStatusRoute = createServerRoute({
   },
 });
 
+export type DiscoveryTaskResult = TaskResult<DiscoveryPipelineResult>;
+
+const discoveryTaskRoute = createServerRoute({
+  endpoint: 'POST /internal/streams/_discoveries/_task',
+  options: {
+    access: 'internal',
+    summary: 'Management of the discovery pipeline task',
+    description: 'schedules/cancels/acknowledges the discovery pipeline task',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.manage],
+    },
+  },
+  params: z.object({
+    body: taskActionSchema({
+      connectorId: z
+        .string()
+        .optional()
+        .describe(
+          'Optional connector ID. If not provided, the default AI connector from settings will be used.'
+        ),
+      streamNames: z
+        .array(z.string())
+        .describe('List of stream names to generate discoveries for.')
+        .optional(),
+    }),
+  }),
+  handler: async ({
+    params,
+    request,
+    getScopedClients,
+    server,
+    logger,
+  }): Promise<DiscoveryTaskResult> => {
+    const { licensing, uiSettingsClient, taskClient, soClient } = await getScopedClients({
+      request,
+    });
+
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+
+    const { body } = params;
+
+    const actionParams =
+      body.action === 'schedule'
+        ? ({
+            action: body.action,
+            scheduleConfig: {
+              taskType: STREAMS_DISCOVERY_TASK_TYPE,
+              taskId: STREAMS_DISCOVERY_TASK_TYPE,
+              params: await (async (): Promise<DiscoveryTaskParams> => {
+                const connectorId = await resolveConnectorId({
+                  connectorId: body.connectorId,
+                  uiSettingsClient,
+                  logger,
+                });
+
+                let enableMetricsTraces = false;
+                try {
+                  const so = await soClient.get<DiscoverySettingsAttributes>(
+                    discoverySettingsSOType,
+                    DISCOVERY_SETTINGS_SO_ID
+                  );
+                  enableMetricsTraces = so.attributes.enableMetricsTraces ?? false;
+                } catch {
+                  // Settings not found — use default (false)
+                }
+
+                return {
+                  connectorId,
+                  streamNames: body.streamNames,
+                  enableMetricsTraces,
+                };
+              })(),
+              request,
+            },
+          } as const)
+        : ({ action: body.action } as const);
+
+    return handleTaskAction<DiscoveryTaskParams, DiscoveryPipelineResult>({
+      taskClient,
+      taskId: STREAMS_DISCOVERY_TASK_TYPE,
+      ...actionParams,
+    });
+  },
+});
+
+const discoveryStatusRoute = createServerRoute({
+  endpoint: 'POST /internal/streams/_discoveries/_status',
+  options: {
+    access: 'internal',
+    summary: 'Check the status of discovery generation',
+    description: 'Check the status of discovery generation',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.read],
+    },
+  },
+  handler: async ({ request, getScopedClients, server }): Promise<DiscoveryTaskResult> => {
+    const { licensing, uiSettingsClient, taskClient } = await getScopedClients({
+      request,
+    });
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+
+    return taskClient.getStatus<DiscoveryTaskParams, DiscoveryPipelineResult>(
+      STREAMS_DISCOVERY_TASK_TYPE
+    );
+  },
+});
+
 export const internalDiscoveryCrudRoutes = {
   ...listDiscoveriesRoute,
   ...getDiscoveryRoute,
@@ -277,4 +395,6 @@ export const internalDiscoveryCrudRoutes = {
   ...updateSuggestionStatusRoute,
   ...suggestionTaskRoute,
   ...suggestionStatusRoute,
+  ...discoveryTaskRoute,
+  ...discoveryStatusRoute,
 };

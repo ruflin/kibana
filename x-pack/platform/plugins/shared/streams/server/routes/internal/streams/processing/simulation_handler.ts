@@ -196,7 +196,7 @@ export const simulateProcessing = async ({
     fieldsMetadataClient
   );
 
-  /* 6. Derive general insights and process final response body */
+  /* 6. Derive general discoveries and process final response body */
   return prepareSimulationResponse(docReports, processorsMetrics, detectedFields);
 };
 
@@ -495,7 +495,7 @@ const executeIngestSimulation = async (
 };
 
 /**
- * Computing simulation insights for each document and processor takes a few steps:
+ * Computing simulation discoveries for each document and processor takes a few steps:
  * 1. Extract the last document source and the status of the simulation.
  * 2. Compute the diff between the sample document and the simulation document to detect fields changes.
  * 3. Track the detected fields and errors for each processor.

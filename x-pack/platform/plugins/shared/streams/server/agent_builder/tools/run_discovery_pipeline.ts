@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import { z } from '@kbn/zod';
+import { z } from '@kbn/zod/v4';
 import { ToolType } from '@kbn/agent-builder-common';
 import { ToolResultType } from '@kbn/agent-builder-common/tools/tool_result';
 import type { BuiltinToolDefinition, StaticToolRegistration } from '@kbn/agent-builder-server';
@@ -70,19 +70,16 @@ When to use:
         const { AttachmentService } = await import(
           '../../lib/streams/attachments/attachment_service'
         );
-        const { SystemService } = await import('../../lib/streams/system/system_service');
         const { FeatureService } = await import('../../lib/streams/feature/feature_service');
 
         const streamsService = new StreamsService(deps.core, deps.logger, false);
         const queryService = new QueryService(deps.core, deps.logger);
         const attachmentService = new AttachmentService(deps.core, deps.logger);
-        const systemService = new SystemService(deps.core, deps.logger);
         const featureService = new FeatureService(deps.core, deps.logger);
 
-        const [attachmentClient, queryClient, systemClient, featureClient] = await Promise.all([
+        const [attachmentClient, queryClient, featureClient] = await Promise.all([
           attachmentService.getClientWithRequest({ request }),
           queryService.getClientWithRequest({ request }),
-          systemService.getClientWithRequest({ request }),
           featureService.getClientWithRequest({ request }),
         ]);
 
@@ -90,7 +87,6 @@ When to use:
           request,
           attachmentClient,
           queryClient,
-          systemClient,
           featureClient,
         });
 

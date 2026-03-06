@@ -9,7 +9,7 @@ import type { KibanaRequest } from '@kbn/core/server';
 import type { ToolType } from '@kbn/agent-builder-common';
 import { ToolResultType } from '@kbn/agent-builder-common';
 import type { ToolHandlerContext, ToolHandlerReturn } from '@kbn/agent-builder-server';
-import { z } from '@kbn/zod';
+import { z } from '@kbn/zod/v4';
 import type { BuiltinSkillBoundedTool } from '@kbn/agent-builder-server/skills/tools';
 
 export interface SkillExecutionContext {
@@ -22,7 +22,7 @@ export type SkillExecutionHandler = (
 ) => Promise<Record<string, unknown>>;
 
 const executeToolSchema = z.object({
-  params: z.record(z.unknown()).optional().default({}),
+  params: z.record(z.string(), z.unknown()).optional().default({}),
   connectorId: z.string().optional(),
 });
 

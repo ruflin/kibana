@@ -192,7 +192,7 @@ streams/
 │   │           ├── features/      # Feature identification
 │   │           ├── systems/       # System identification
 │   │           ├── queries/       # Query management
-│   │           ├── insights/      # Insights discovery
+│   │           ├── discoveries/    # Discovery CRUD and pipeline tasks
 │   │           ├── significant_events/  # Significant events
 │   │           ├── prompts/       # AI prompt configuration
 │   │           ├── failure_store/  # Failure store access
@@ -222,7 +222,7 @@ streams/
 │       ├── content/           # Content pack import/export
 │       ├── rules/             # ES|QL alerting rule type
 │       ├── tasks/             # Background task definitions
-│       │   └── task_definitions/  # Description gen, system ID, features, insights
+│       │   └── task_definitions/  # Description gen, system ID, features, AI discoveries
 │       ├── significant_events/  # Significant event generation
 │       └── telemetry/         # EBT and usage collection
 └── test/scout/                # Scout API tests
@@ -338,7 +338,7 @@ streams_app/
 | Path | Component | Description |
 |------|-----------|-------------|
 | `/` | `StreamListView` | Stream list with tree table |
-| `/_discovery/{tab}` | `SignificantEventsDiscoveryPage` | Discovery: streams, features, queries, insights |
+| `/_discovery/{tab}` | `SignificantEventsDiscoveryPage` | Discovery: streams, features, queries, AI discoveries |
 | `/{key}/management/{tab}` | `StreamDetailManagement` | Tabbed management (differs by stream type) |
 
 Management tabs for **wired streams**: partitioning, processing, schema, retention, advanced, significant events, data quality, attachments.

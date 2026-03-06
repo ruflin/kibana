@@ -19,16 +19,16 @@ import {
 } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
 import useToggle from 'react-use/lib/useToggle';
-import type { Insight, InsightImpactLevel } from '@kbn/streams-schema';
+import type { AiDiscovery, AiDiscoveryImpactLevel } from '@kbn/streams-schema';
 
-const impactColors: Record<InsightImpactLevel, 'danger' | 'warning' | 'primary' | 'hollow'> = {
+const impactColors: Record<AiDiscoveryImpactLevel, 'danger' | 'warning' | 'primary' | 'hollow'> = {
   critical: 'danger',
   high: 'warning',
   medium: 'primary',
   low: 'hollow',
 };
 
-const impactLabels: Record<InsightImpactLevel, string> = {
+const impactLabels: Record<AiDiscoveryImpactLevel, string> = {
   critical: i18n.translate('xpack.streams.discoveries.severity.critical', {
     defaultMessage: 'Critical',
   }),
@@ -44,11 +44,11 @@ const impactLabels: Record<InsightImpactLevel, string> = {
 };
 
 interface DiscoveryCardProps {
-  insight: Insight;
+  discovery: AiDiscovery;
   index: number;
 }
 
-export function DiscoveryCard({ insight, index }: DiscoveryCardProps) {
+export function DiscoveryCard({ discovery, index }: DiscoveryCardProps) {
   const [isOpen, toggleIsOpen] = useToggle(index === 0);
   const accordionId = useGeneratedHtmlId({ prefix: 'discoveryAccordion' });
 
@@ -62,13 +62,13 @@ export function DiscoveryCard({ insight, index }: DiscoveryCardProps) {
         buttonContent={
           <EuiFlexGroup alignItems="center" gutterSize="m" responsive={false}>
             <EuiFlexItem grow={false}>
-              <EuiBadge color={impactColors[insight.impact]}>
-                {impactLabels[insight.impact]}
+              <EuiBadge color={impactColors[discovery.impact]}>
+                {impactLabels[discovery.impact]}
               </EuiBadge>
             </EuiFlexItem>
             <EuiFlexItem>
               <EuiTitle size="xs">
-                <h3>{insight.title}</h3>
+                <h3>{discovery.title}</h3>
               </EuiTitle>
             </EuiFlexItem>
           </EuiFlexGroup>
@@ -78,10 +78,10 @@ export function DiscoveryCard({ insight, index }: DiscoveryCardProps) {
         <EuiSpacer size="s" />
 
         <EuiText size="s">
-          <p>{insight.description}</p>
+          <p>{discovery.description}</p>
         </EuiText>
 
-        {insight.evidence.length > 0 && (
+        {discovery.evidence.length > 0 && (
           <>
             <EuiSpacer size="m" />
             <EuiText size="xs">
@@ -93,7 +93,7 @@ export function DiscoveryCard({ insight, index }: DiscoveryCardProps) {
             </EuiText>
             <EuiSpacer size="xs" />
             <EuiFlexGroup direction="column" gutterSize="xs">
-              {insight.evidence.map((ev, idx) => (
+              {discovery.evidence.map((ev, idx) => (
                 <EuiFlexItem key={idx}>
                   <EuiPanel color="subdued" paddingSize="s" hasShadow={false}>
                     <EuiFlexGroup gutterSize="s" alignItems="center" responsive={false}>
@@ -116,7 +116,7 @@ export function DiscoveryCard({ insight, index }: DiscoveryCardProps) {
           </>
         )}
 
-        {insight.recommendations.length > 0 && (
+        {discovery.recommendations.length > 0 && (
           <>
             <EuiSpacer size="m" />
             <EuiText size="xs">
@@ -129,7 +129,7 @@ export function DiscoveryCard({ insight, index }: DiscoveryCardProps) {
             <EuiSpacer size="xs" />
             <EuiText size="s">
               <ul>
-                {insight.recommendations.map((rec, idx) => (
+                {discovery.recommendations.map((rec, idx) => (
                   <li key={idx}>{rec}</li>
                 ))}
               </ul>

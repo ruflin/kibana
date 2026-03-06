@@ -18,26 +18,28 @@ import { i18n } from '@kbn/i18n';
 import { TaskStatus } from '@kbn/streams-schema';
 import React, { useEffect, useRef, useState } from 'react';
 import useAsyncFn from 'react-use/lib/useAsyncFn';
-import type { Discovery, Insight } from '@kbn/streams-schema';
+import { getAiDiscoveryImpactLevel, type AiDiscovery, type Discovery } from '@kbn/streams-schema';
 import { useAIFeatures } from '../../../../hooks/use_ai_features';
-import { useDiscoveryPipelineApi } from '../../../../hooks/use_insights_discovery_api';
+import { useDiscoveryPipelineApi } from '../../../../hooks/use_discovery_pipeline_api';
 import { useKibana } from '../../../../hooks/use_kibana';
 import { useTaskPolling } from '../../../../hooks/use_task_polling';
 import { getFormattedError } from '../../../../util/errors';
 import { ConnectorListButton } from '../../../connector_list_button/connector_list_button';
 import { FeedbackButtons } from './feedback_buttons';
-import { DiscoveryCard } from './insight_card';
+import { DiscoveryCard } from './discovery_card';
 
-function mapDiscoveryToInsight(d: Discovery): Insight {
+function mapDiscoveryToAiDiscovery(d: Discovery): AiDiscovery {
   return {
+    id: d.uuid,
+    generated_at: d.created_at,
+    impact_level: getAiDiscoveryImpactLevel(d.severity),
     title: d.title,
     description: d.description,
     impact: d.severity,
     evidence: d.evidence.map((e) => ({
-      streamName: e.stream_name,
-      queryTitle: e.query_title,
-      featureName: e.feature_name,
-      eventCount: e.event_count,
+      stream_name: e.stream_name,
+      query_title: e.query_title,
+      event_count: e.event_count,
     })),
     recommendations: (d.recommendations ?? []).flatMap((r) => [r.title, ...r.steps]),
   };
@@ -104,7 +106,7 @@ export function Summary({
           }),
         });
       }
-      setDiscoveries(discoveries.map(mapDiscoveryToInsight));
+      setDiscoveries(discoveries.map(mapDiscoveryToAiDiscovery));
       onDiscoveriesGenerated?.();
     }
   }, [task, notifications.toasts, onDiscoveriesGenerated]);
@@ -116,7 +118,7 @@ export function Summary({
     onCancel: cancelDiscoveryPipelineTask,
   });
 
-  const [discoveries, setDiscoveries] = useState<Insight[] | null>(null);
+  const [discoveries, setDiscoveries] = useState<AiDiscovery[] | null>(null);
 
   const onGenerateDiscoveriesClick = async () => {
     await scheduleTask();
@@ -160,9 +162,9 @@ export function Summary({
             </EuiPanel>
             <EuiPanel hasShadow={false}>
               <EuiFlexGroup direction="column" gutterSize="m">
-                {discoveries.map((insight, idx) => (
+                {discoveries.map((discovery, idx) => (
                   <EuiFlexItem key={idx}>
-                    <DiscoveryCard insight={insight} index={idx} />
+                    <DiscoveryCard discovery={discovery} index={idx} />
                   </EuiFlexItem>
                 ))}
               </EuiFlexGroup>

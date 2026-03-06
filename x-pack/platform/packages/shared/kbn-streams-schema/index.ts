@@ -181,6 +181,8 @@ export {
   LOG_SAMPLES_FEATURE_TYPE,
   LOG_PATTERNS_FEATURE_TYPE,
   ERROR_LOGS_FEATURE_TYPE,
+  METRIC_SAMPLES_FEATURE_TYPE,
+  TRACE_SAMPLES_FEATURE_TYPE,
   COMPUTED_FEATURE_TYPES,
   isFeature,
   isComputedFeature,
@@ -210,25 +212,5 @@ export { TaskStatus, type TaskResult } from './src/tasks/types';
 export type { GenerateDescriptionResult } from './src/api/description_generation';
 export type { IdentifyFeaturesResult } from './src/api/features';
 
-export {
-  type GenerateInsightsResult,
-  type Insight,
-  type InsightCore,
-  type InsightEvidence,
-  type InsightImpactLevel,
-  type InsightImpactLevelNumeric,
-  type InsightUserEvaluation,
-  type InsightMeta,
-  type SaveInsightBody,
-  insightSchema,
-  insightCoreSchema,
-  insightMetaSchema,
-  insightEvidenceSchema,
-  insightImpactLevelSchema,
-  insightImpactLevelNumericSchema,
-  insightUserEvaluationSchema,
-  INSIGHT_IMPACT_LEVEL_MAP,
-  getImpactLevel,
-} from './src/insights';
 export type { OnboardingResult } from './src/onboarding';
 export { OnboardingStep } from './src/onboarding';

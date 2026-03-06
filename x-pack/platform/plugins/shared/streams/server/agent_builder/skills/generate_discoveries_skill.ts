@@ -19,7 +19,7 @@ export const generateDiscoveriesSkill = defineSkillType({
 ## Overview
 
 Use this skill to help users analyze significant event data and generate actionable discoveries.
-Follow the steps below to provide structured, valuable insights for SRE teams.
+Follow the steps below to provide structured, valuable discoveries for SRE teams.
 
 ## Process
 

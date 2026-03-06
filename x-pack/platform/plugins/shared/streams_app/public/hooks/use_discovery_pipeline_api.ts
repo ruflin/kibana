@@ -23,7 +23,7 @@ export function useDiscoveryPipelineApi(connectorId?: string) {
   return useMemo(
     () => ({
       scheduleDiscoveryPipelineTask: async (streamNames?: string[]) => {
-        await streamsRepositoryClient.fetch('POST /internal/streams/_discovery/_task', {
+        await streamsRepositoryClient.fetch('POST /internal/streams/_discoveries/_task', {
           signal,
           params: {
             body: {
@@ -35,12 +35,12 @@ export function useDiscoveryPipelineApi(connectorId?: string) {
         });
       },
       getDiscoveryPipelineTaskStatus: async () => {
-        return streamsRepositoryClient.fetch('POST /internal/streams/_discovery/_status', {
+        return streamsRepositoryClient.fetch('POST /internal/streams/_discoveries/_status', {
           signal,
         });
       },
       cancelDiscoveryPipelineTask: async () => {
-        return streamsRepositoryClient.fetch('POST /internal/streams/_discovery/_task', {
+        return streamsRepositoryClient.fetch('POST /internal/streams/_discoveries/_task', {
           signal,
           params: {
             body: {
@@ -50,7 +50,7 @@ export function useDiscoveryPipelineApi(connectorId?: string) {
         });
       },
       acknowledgeDiscoveryPipelineTask: async () => {
-        return streamsRepositoryClient.fetch('POST /internal/streams/_discovery/_task', {
+        return streamsRepositoryClient.fetch('POST /internal/streams/_discoveries/_task', {
           signal,
           params: {
             body: {

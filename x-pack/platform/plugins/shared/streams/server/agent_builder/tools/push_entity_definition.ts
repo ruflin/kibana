@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import { z } from '@kbn/zod';
+import { z } from '@kbn/zod/v4';
 import { ToolType } from '@kbn/agent-builder-common';
 import { ToolResultType } from '@kbn/agent-builder-common/tools/tool_result';
 import type { BuiltinToolDefinition, StaticToolRegistration } from '@kbn/agent-builder-server';
@@ -22,7 +22,7 @@ const pushEntityDefinitionSchema = z.object({
           .describe('Entity type. Use generic for anything that does not fit host/user/service.'),
         name: z.string().describe('Entity name (e.g., hostname, username, service name)'),
         metadata: z
-          .record(z.unknown())
+          .record(z.string(), z.unknown())
           .optional()
           .describe('Additional metadata to store with the entity'),
       })

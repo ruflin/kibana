@@ -186,10 +186,11 @@ export function StreamsTreeTable({
     },
   };
 
+  const streamsLength = streams.length;
   // Reset pagination if streams change (e.g., after search/filter)
   React.useEffect(() => {
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
-  }, [streams, searchQuery, sortField, sortDirection]);
+  }, [streamsLength, searchQuery, sortField, sortDirection]);
 
   // Expand/Collapse all button for the name column header
   const expandCollapseAllButton = (

@@ -667,7 +667,7 @@ export function DiscoveriesTab() {
                 <p>
                   {i18n.translate('xpack.streams.discoveries.emptyDescription', {
                     defaultMessage:
-                      'Click "Generate discoveries" to analyze significant events and extract insights using AI.',
+                      'Click "Generate discoveries" to analyze significant events and extract discoveries using AI.',
                   })}
                 </p>
               }

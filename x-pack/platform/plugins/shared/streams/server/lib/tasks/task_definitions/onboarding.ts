@@ -37,8 +37,8 @@ import {
   getSignificantEventsQueriesGenerationTaskId,
   SIGNIFICANT_EVENTS_QUERIES_GENERATION_TASK_TYPE,
 } from './significant_events_queries_generation';
-import type { DiscoveryPipelineTaskParams } from './insights_discovery';
-import { STREAMS_DISCOVERY_PIPELINE_TASK_TYPE } from './insights_discovery';
+import type { DiscoveryTaskParams } from './discovery';
+import { STREAMS_DISCOVERY_TASK_TYPE } from './discovery';
 import type { SuggestionGenerationTaskParams } from './suggestion_generation';
 import { STREAMS_SUGGESTION_GENERATION_TASK_TYPE } from './suggestion_generation';
 import type { GenerateSuggestionsResult } from '../../significant_events/discovery/generate_suggestions';
@@ -150,7 +150,7 @@ export function createStreamsOnboardingTask(taskContext: TaskContext) {
                       );
 
                       discoveryTaskResult = await waitForSubtask<
-                        DiscoveryPipelineTaskParams,
+                        DiscoveryTaskParams,
                         import('@kbn/streams-schema').DiscoveryPipelineResult
                       >(discoveryTaskId, runContext.taskInstance.id, taskClient);
 
@@ -306,17 +306,15 @@ async function scheduleQueriesGenerationTask(
 }
 
 async function scheduleDiscoveryPipelineTask(
-  params: DiscoveryPipelineTaskParams,
+  params: DiscoveryTaskParams,
   taskClient: TaskClient<StreamsTaskType>,
   request: KibanaRequest
 ): Promise<string> {
-  const id = `${STREAMS_DISCOVERY_PIPELINE_TASK_TYPE}_${
-    (params.streamNames ?? []).join('_') || 'all'
-  }`;
+  const id = `${STREAMS_DISCOVERY_TASK_TYPE}_${(params.streamNames ?? []).join('_') || 'all'}`;
 
-  await taskClient.schedule<DiscoveryPipelineTaskParams>({
+  await taskClient.schedule<DiscoveryTaskParams>({
     task: {
-      type: STREAMS_DISCOVERY_PIPELINE_TASK_TYPE,
+      type: STREAMS_DISCOVERY_TASK_TYPE,
       id,
       space: '*',
     },

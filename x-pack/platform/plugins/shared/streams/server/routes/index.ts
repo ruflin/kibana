@@ -28,7 +28,6 @@ import { attachmentRoutes } from './attachments/route';
 import { internalAttachmentRoutes } from './internal/attachments/route';
 import { internalDescriptionGenerationRoutes } from './internal/streams/description_generation/route';
 import { featureRoutes as internalFeatureRoutes } from './internal/streams/features/route';
-import { internalDiscoveryRoutes } from './internal/streams/insights/route';
 import { internalDiscoveryCrudRoutes } from './internal/streams/discoveries/route';
 import { internalDiscoverySettingsRoutes } from './internal/streams/discovery_settings/route';
 import { internalEntityStoreRoutes } from './internal/streams/entity_store/route';
@@ -54,7 +53,6 @@ export const streamsRouteRepository = {
   ...internalAttachmentRoutes,
   ...internalDescriptionGenerationRoutes,
   ...internalFeatureRoutes,
-  ...internalDiscoveryRoutes,
   ...internalDiscoveryCrudRoutes,
   ...internalDiscoverySettingsRoutes,
   ...internalEntityStoreRoutes,

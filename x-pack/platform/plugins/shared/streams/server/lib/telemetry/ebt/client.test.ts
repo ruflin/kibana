@@ -12,7 +12,7 @@ import {
   STREAMS_STATE_ERROR_EVENT,
   STREAMS_DESCRIPTION_GENERATED_EVENT_TYPE,
   STREAMS_SIGNIFICANT_EVENTS_QUERIES_GENERATED_EVENT_TYPE,
-  STREAMS_INSIGHTS_GENERATED_EVENT_TYPE,
+  STREAMS_DISCOVERIES_GENERATED_EVENT_TYPE,
   STREAMS_PROCESSING_PIPELINE_SUGGESTED_EVENT_TYPE,
 } from './constants';
 
@@ -152,16 +152,16 @@ describe('EbtTelemetryClient', () => {
     });
   });
 
-  describe('trackInsightsGenerated', () => {
-    it('tracks insights generated events', () => {
-      client.trackInsightsGenerated({
+  describe('trackDiscoveriesGenerated', () => {
+    it('tracks discoveries generated events', () => {
+      client.trackDiscoveriesGenerated({
         input_tokens_used: 400,
         output_tokens_used: 200,
         cached_tokens_used: 50,
       });
 
       expect(analyticsService.reportEvent).toHaveBeenCalledWith(
-        STREAMS_INSIGHTS_GENERATED_EVENT_TYPE,
+        STREAMS_DISCOVERIES_GENERATED_EVENT_TYPE,
         {
           input_tokens_used: 400,
           output_tokens_used: 200,
@@ -170,14 +170,14 @@ describe('EbtTelemetryClient', () => {
       );
     });
 
-    it('tracks insights generated events without cached tokens', () => {
-      client.trackInsightsGenerated({
+    it('tracks discoveries generated events without cached tokens', () => {
+      client.trackDiscoveriesGenerated({
         input_tokens_used: 400,
         output_tokens_used: 200,
       });
 
       expect(analyticsService.reportEvent).toHaveBeenCalledWith(
-        STREAMS_INSIGHTS_GENERATED_EVENT_TYPE,
+        STREAMS_DISCOVERIES_GENERATED_EVENT_TYPE,
         {
           input_tokens_used: 400,
           output_tokens_used: 200,

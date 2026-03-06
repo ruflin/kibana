@@ -32,7 +32,7 @@ import type { Discovery, DiscoveryEvidence, Recommendation } from '@kbn/streams-
 import { TaskStatus } from '@kbn/streams-schema';
 import useAsyncFn from 'react-use/lib/useAsyncFn';
 import { useAIFeatures } from '../../../../hooks/use_ai_features';
-import { useDiscoveryPipelineApi } from '../../../../hooks/use_insights_discovery_api';
+import { useDiscoveryPipelineApi } from '../../../../hooks/use_discovery_pipeline_api';
 import { useKibana } from '../../../../hooks/use_kibana';
 import { useStreamsAppFetch } from '../../../../hooks/use_streams_app_fetch';
 import { useTaskPolling } from '../../../../hooks/use_task_polling';
@@ -569,7 +569,7 @@ export function DiscoveriesTab() {
                 <p>
                   {i18n.translate('xpack.streams.discoveries.emptyDescription', {
                     defaultMessage:
-                      'Click "Generate discoveries" to analyze significant events and extract insights using AI.',
+                      'Click "Generate discoveries" to analyze significant events and extract discoveries using AI.',
                   })}
                 </p>
               }
