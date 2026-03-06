@@ -82,21 +82,28 @@ Examples:
 
 For keyword fields (e.g. `log.level`, `http.response.status_code`, `service.name`), use `==` as usual.
 
+### Important: Timestamp Field
+
+**Do NOT assume `@timestamp` exists.** Different schemas use different timestamp fields:
+- **ECS**: `@timestamp`
+- **OTel**: `@timestamp` may not be mapped. Use the `search_events` tool or `get_stream_features` to discover the actual timestamp field before writing time-bucketed queries. Common OTel alternatives: `observed_timestamp`, `Timestamp`.
+- If unsure, **omit time bucketing** from stats queries rather than risk an unknown column error. Queries without `BUCKET(...)` are still valuable.
+
 ### Key Stats Patterns:
 
 **Error rate over time** — detects when error ratio spikes:
 ```
-FROM <stream> | STATS error_rate = COUNT_IF(http.response.status_code >= 500) / COUNT(*) BY BUCKET(@timestamp, 5m)
+FROM <stream> | STATS error_rate = COUNT_IF(http.response.status_code >= 500) / COUNT(*)
 ```
 
 **Throughput by service** — detects traffic spikes or drops:
 ```
-FROM <stream> | STATS request_count = COUNT(*) BY BUCKET(@timestamp, 1m), service.name
+FROM <stream> | STATS request_count = COUNT(*) BY service.name
 ```
 
 **Latency percentiles** — detects latency degradation:
 ```
-FROM <stream> | STATS p50 = PERCENTILE(event.duration, 50), p99 = PERCENTILE(event.duration, 99) BY BUCKET(@timestamp, 5m)
+FROM <stream> | STATS p50 = PERCENTILE(event.duration, 50), p99 = PERCENTILE(event.duration, 99)
 ```
 
 **Status code distribution** — detects shifts in response patterns:
@@ -111,13 +118,15 @@ FROM <stream> | WHERE MATCH(message, "error") | STATS error_count = COUNT(*) BY 
 
 **Cardinality anomalies** — detects sudden changes in unique value counts:
 ```
-FROM <stream> | STATS unique_users = COUNT_DISTINCT(user.id) BY BUCKET(@timestamp, 5m)
+FROM <stream> | STATS unique_users = COUNT_DISTINCT(user.id)
 ```
 
 **Queue depth or lag** — detects backlog buildup:
 ```
-FROM <stream> | STATS avg_lag = AVG(consumer.lag), max_lag = MAX(consumer.lag) BY BUCKET(@timestamp, 1m), topic
+FROM <stream> | STATS avg_lag = AVG(consumer.lag), max_lag = MAX(consumer.lag) BY topic
 ```
+
+Note: To add time bucketing, first confirm the timestamp field exists (e.g. `@timestamp`), then add `BY BUCKET(@timestamp, 5m)` to the query.
 
 ---
 
