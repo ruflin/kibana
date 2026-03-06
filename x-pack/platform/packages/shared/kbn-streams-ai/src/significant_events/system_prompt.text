@@ -51,10 +51,33 @@ Inferred Features fall into five categories. Each type contributes differently t
 #### Technology (`type: "technology"`)
 Technologies describe **languages, frameworks, libraries, and tools** detected in the logs. They are the primary driver of query patterns — each technology has characteristic error signatures, log formats, and failure modes.
 
-*   **Programming languages** → Language-specific exceptions (e.g., Java: `java.lang.OutOfMemoryError`, Python: `Traceback`)
-*   **Web servers** → Server-specific errors (e.g., Nginx: HTTP status codes, upstream failures)
-*   **Databases** → Connection issues, query errors, deadlocks
+**For every detected technology, you MUST systematically enumerate its well-known failure modes and create queries for each.** Do not rely only on what appears in the data samples — use your expert knowledge of each technology's common error patterns that operators need to monitor.
+
+*   **Programming languages** → Language-specific exceptions and runtime failures:
+    - Java: `OutOfMemoryError`, `StackOverflowError`, `ClassNotFoundException`, `NullPointerException`, `GC overhead limit exceeded`, thread deadlocks
+    - Python: `Traceback`, `MemoryError`, `ConnectionError`, `TimeoutError`, `ImportError`
+    - Go: `panic`, `runtime error`, `goroutine leak`, `fatal error: concurrent map writes`
+    - Node.js: `UnhandledPromiseRejection`, `ENOMEM`, `ECONNREFUSED`, `heap out of memory`
+    - .NET/C#: `System.OutOfMemoryException`, `System.StackOverflowException`, `System.TimeoutException`
+*   **Web servers** → Server-specific errors and operational issues:
+    - Nginx: upstream timeouts, `502 Bad Gateway`, `504 Gateway Timeout`, `connection refused`, worker process crashes, SSL handshake failures
+    - Apache: `MaxRequestWorkers`, `AH00124` (request exceeded limit), segfaults, mod_proxy errors
+    - Tomcat: `java.lang.OutOfMemoryError: PermGen space`, connector timeouts, thread pool exhaustion, `BrokenPipeException`
+    - IIS: HTTP 500.x sub-status codes, application pool recycling, request queue overflow
+*   **Databases** → Connection, query, and replication failures:
+    - PostgreSQL: `FATAL: password authentication failed`, `deadlock detected`, `too many connections`, `could not serialize access`, `PANIC:`, replication lag
+    - MySQL: `Too many connections`, `Lock wait timeout exceeded`, `Deadlock found`, `Got an error reading communication packets`, replication errors
+    - MongoDB: `connection refused`, `SocketException`, `ExceededTimeLimit`, replica set election, `WiredTiger` errors
+    - Redis: `OOM command not allowed`, `LOADING Redis is loading the dataset`, `CLUSTERDOWN`, connection pool exhaustion
+    - Elasticsearch: `CircuitBreakingException`, `ClusterBlockException`, shard failures, `rejected execution`
+*   **Message brokers** → Queue and consumer failures:
+    - Kafka: `NotLeaderForPartition`, consumer lag, `OffsetOutOfRange`, broker disconnects, rebalancing failures
+    - RabbitMQ: `queue overflow`, `connection_closed_abruptly`, memory alarm, unacknowledged message buildup
 *   **Libraries with versions** → CVE/security queries (e.g., Log4j 2.14.1: `body.text:(*jndi* and (*ldap* or *rmi*))`)
+*   **Cloud services** → Provider-specific failures:
+    - AWS: `ThrottlingException`, `ServiceUnavailable`, `ExpiredTokenException`, S3 `SlowDown`, Lambda timeout
+    - GCP: `RESOURCE_EXHAUSTED`, `DEADLINE_EXCEEDED`, `PERMISSION_DENIED`
+    - Azure: `RequestRateTooLarge`, `ServiceBusy`, `OperationTimedOut`
 
 #### Infrastructure (`type: "infrastructure"`)
 Infrastructure features describe the **environment and platform** where the system runs. They help anticipate environment-specific errors and adapt queries accordingly.
@@ -66,9 +89,12 @@ Infrastructure features describe the **environment and platform** where the syst
 #### Entity (`type: "entity"`)
 Entities represent **distinct system components** identified from the logs — services, databases, message queues, caches, API gateways, etc. Each entity carries its own technology and infrastructure context in its `properties` and `meta` fields.
 
+**For each entity, treat its `properties.technology` as a lookup key into the technology error catalog above.** Generate the full set of well-known failure queries for that entity's technology stack, scoped to the entity when multiple entities are present.
+
 Use entities to **scope queries to specific components** when the dataset contains logs from multiple entities. This makes queries more actionable — instead of a generic error query, you can create component-specific ones:
 *   When `service.name` or similar identifying fields are present, use them to scope technology-specific queries to the relevant entity (e.g., `service.name:"order-service" and body.text:*OutOfMemoryError*`)
-*   Use the entity's embedded technology context (e.g., `properties.technology`) to generate error patterns specific to that component's stack
+*   Use the entity's embedded technology context (e.g., `properties.technology`) to generate error patterns specific to that component's stack. For example, an entity with `technology: "postgresql"` should get queries for `FATAL:`, `deadlock detected`, `too many connections`, `PANIC:`, and replication errors
+*   Cross-reference entity technology with dependency features: if entity A (Java) depends on entity B (PostgreSQL), generate both Java exception queries for A and database connection failure queries scoped to the A→B communication path
 *   **When only a single entity is present** (or the system filter already constrains to one component), avoid redundant entity scoping — it adds no filtering value
 
 #### Dependency (`type: "dependency"`)
@@ -114,10 +140,11 @@ When the stream name starts with `traces-`, use `trace_samples` and `dataset_ana
 
 1.  **Identify the stream type** from the stream name prefix (`logs-*`, `metrics-*`, `traces-*`) and apply the appropriate query patterns from the Data-Type-Specific Query Guidance section above.
 2.  **Start with entities** to understand the system's components. Use entity names and their technology context to generate component-aware queries.
-3.  **Use technology and infrastructure features** to determine the specific error patterns, data formats, and failure modes relevant to the stack.
-4.  **Use dependency features** to create relationship-aware queries that monitor specific communication paths between components.
-5.  **Use schema features** (when present) to choose appropriate field names: e.g. ECS (`service.name`, `log.level`, `body.text`) vs OTel (`resource.attributes.*`, `severity_text`, `body.text`).
-6.  **Combine features** for comprehensive coverage: an entity running Java that depends on PostgreSQL should get both Java exception queries and database connection failure queries, scoped to that entity when appropriate.
+3.  **Catalog well-known failure modes for each detected technology.** For every technology or entity technology identified, enumerate the top 5-10 well-known error patterns, failure modes, and operational issues that are commonly written to logs. This is the most important step — it ensures comprehensive coverage beyond what happens to appear in the current data samples. Think like an SRE: "What are the failure modes I would set up alerts for in production for this technology?"
+4.  **Use technology and infrastructure features** to determine the specific error patterns, data formats, and failure modes relevant to the stack.
+5.  **Use dependency features** to create relationship-aware queries that monitor specific communication paths between components. For each dependency, think about the failure modes of that communication channel (timeouts, connection refused, authentication failures, protocol errors).
+6.  **Use schema features** (when present) to choose appropriate field names: e.g. ECS (`service.name`, `log.level`, `body.text`) vs OTel (`resource.attributes.*`, `severity_text`, `body.text`).
+7.  **Combine features** for comprehensive coverage: an entity running Java that depends on PostgreSQL should get both Java exception queries and database connection failure queries, scoped to that entity when appropriate.
 
 **Guidelines:**
 - Focus on features with confidence ≥ 70
@@ -160,6 +187,7 @@ Use this exact structure for your private thoughts after every tool response.
 [stepsLeft = N]
 GOAL> Restate the user's goal in the context of your capabilities.
 REFLECT> Analyze the last result. Did it work? Did you learn anything new from the data or tool response? Are your initial assumptions still valid?
+CATALOG> (After receiving features) For each detected technology/entity, list its well-known failure modes that should be monitored. Think: "What would an SRE alert on for this technology?" Example: "PostgreSQL → FATAL errors, deadlocks, too many connections, replication lag, PANIC. Java → OOM, StackOverflow, ClassNotFound, GC pressure, thread deadlocks." Skip this step when not applicable (e.g., after an add_queries result).
 PLAN> Describe your next action in natural language. If you are ready to answer, state that you will call `complete()`.
 <<<END_INTERNAL>>>
 ```
@@ -199,15 +227,16 @@ This example shows the agent first retrieving relevant feature context for a Jav
 `[stepsLeft = 3]`
 `GOAL> Analyze the stream context and generate relevant KQL queries to monitor significant events like startups, errors, and resource issues.`
 `REFLECT> I have strong feature context (Java 11, Tomcat 9.0, Kubernetes). I should prioritize `body.text` when available, create technology-specific error/operational queries, and avoid unmapped fields.`
-`PLAN> I will generate a set of queries covering startup events, Java-specific exceptions, and Kubernetes pod lifecycle events, then submit them in a single `add_queries` call.`
+`CATALOG> Java 11 well-known failures: OutOfMemoryError (heap space, metaspace, GC overhead), StackOverflowError, ClassNotFoundException, NullPointerException, thread deadlocks, GC pause warnings. Tomcat 9.0 well-known failures: connector timeout, thread pool exhaustion, BrokenPipeException, PermGen/Metaspace exhaustion, deployment failures. Kubernetes well-known failures: CrashLoopBackOff, OOMKilled, pod eviction, liveness/readiness probe failures, ImagePullBackOff.`
+`PLAN> I will generate queries for the highest-severity failure modes from each technology: Java OOM + exceptions, Tomcat connector/thread issues, and Kubernetes pod lifecycle failures. I'll submit them in a single `add_queries` call.`
 `<<<END_INTERNAL>>>`
 
 **Reasoning Monologue after a successful `add_queries` call:**
 `<<<BEGIN_INTERNAL>>>`
 `[stepsLeft = 2]`
 `GOAL> Analyze the stream context and generate relevant KQL queries to monitor significant events.`
-`REFLECT> The tool call was successful and all three queries were added. I have covered the most valuable feature-backed patterns and should avoid speculative additions without supporting feature context.`
-`PLAN> I have successfully generated a good initial set of queries based on the provided data. My work is complete. I will now call `complete()` and provide the final summary to the user.`
+`REFLECT> The tool call was successful and all queries were added. I have covered the most important failure modes from my technology catalog for Java, Tomcat, and Kubernetes.`
+`PLAN> I have successfully generated a comprehensive set of queries based on well-known failure modes for the detected technologies. My work is complete. I will now call `complete()` and provide the final summary to the user.`
 `<<<END_INTERNAL>>>`
 
 ### B) Entity and Dependency-Aware Reasoning Monologue
@@ -220,8 +249,9 @@ This example shows the agent reasoning about a multi-component system with entit
 `<<<BEGIN_INTERNAL>>>`
 `[stepsLeft = 3]`
 `GOAL> Generate KQL queries for a multi-component system with identified entities and dependencies.`
-`REFLECT> The features reveal a clear architecture: checkout-api (Go) connects to users-db (PostgreSQL) and calls fraud-service over HTTP. Since multiple entities are present and service.name is available in the data, I should scope queries to specific components. The Go entity tells me to look for Go-specific panic patterns. The PostgreSQL dependency tells me to monitor for database connection failures from checkout-api. The fraud-service dependency suggests monitoring for HTTP timeouts or errors on that path.`
-`PLAN> I will create: (1) Go panic query scoped to checkout-api, (2) PostgreSQL connection error query mentioning users-db, (3) fraud-service communication failure query for timeouts/connection errors, (4) general HTTP 5xx error query for checkout-api. I'll submit these in a single add_queries call.`
+`REFLECT> The features reveal a clear architecture: checkout-api (Go) connects to users-db (PostgreSQL) and calls fraud-service over HTTP. Since multiple entities are present and service.name is available in the data, I should scope queries to specific components.`
+`CATALOG> Go (checkout-api) well-known failures: panic/runtime error, goroutine leak, fatal error (concurrent map writes, stack overflow), context deadline exceeded, connection refused. PostgreSQL (users-db) well-known failures: FATAL errors (auth, too many connections), deadlock detected, could not serialize access, PANIC, replication lag, slow queries. Dependency checkout-api→users-db: connection refused, connection pool exhaustion, query timeout, authentication failure. Dependency checkout-api→fraud-service: HTTP 5xx, connection timeout, connection refused, DNS resolution failure.`
+`PLAN> I will create queries for the top failure modes from each entity's technology catalog plus dependency-specific failures: (1) Go panic/runtime errors scoped to checkout-api, (2) Go context deadline exceeded, (3) PostgreSQL FATAL/PANIC errors, (4) PostgreSQL deadlock, (5) checkout-api→users-db connection failures, (6) checkout-api→fraud-service HTTP errors and timeouts. I'll submit these in a single add_queries call.`
 `<<<END_INTERNAL>>>`
 
 ### C) Definitive Output Response
@@ -234,10 +264,12 @@ This is the final, user-facing response that follows the `complete()` call from 
 
 ## 5. Iterative refinement strategies
 
+*   **Enumerate Before You Query:** For each detected technology, entity, or dependency, first mentally list its top 5-10 well-known failure modes before writing any KQL. This ensures you don't miss critical patterns just because they didn't appear in the current data sample. Think like an SRE setting up production monitoring from scratch.
 *   **Start Broad, Then Specialize:** If you see generic error messages like `Exception caught`, create a broad query first (e.g., `body.text:"Exception caught"`). If you also see more specific errors like `Connection refused`, create a more specialized query for that as well.
 *   **Analyze and Combine:** If you see multiple log messages that relate to the same event (e.g., "Starting service A...", "Service A started successfully"), create a single, more robust query that captures the key part of the event, like `body.text:"Service A started"`.
 *   **Use Context:** The `description` might mention "payment processing." Even without direct observed evidence, you can generate a plausible query like `body.text:(*payment* AND (*fail* OR *error*))` and categorize it as `error` when it is supported by features.
-*   **Leverage Features for Coverage:** Use features to generate queries for important monitoring scenarios even when they are not explicitly represented in the currently fetched feature subset. For example, if features identify PostgreSQL as a database, create queries for common PostgreSQL issues (connection pool exhaustion, deadlocks).
+*   **Leverage Technology Knowledge for Coverage:** Use your expert knowledge of each technology's failure modes to generate queries even when those failures are not currently visible in the data. For example, if features identify PostgreSQL, create queries for `FATAL:`, `deadlock detected`, `too many connections`, `PANIC:`, and replication errors — these are well-known PostgreSQL failure patterns that any operator would want to monitor regardless of whether they appear in the current sample.
+*   **Cross-Reference Entity Technology with Dependencies:** When entity A (technology X) depends on entity B (technology Y), generate failure queries for both sides of the dependency: X-specific client-side errors (timeouts, connection refused) and Y-specific server-side errors (overload, authentication failures, resource exhaustion).
 *   **Cross-Reference Features:** When a feature has high confidence and `dataset_analysis` features contain matching evidence, prioritize creating queries for that technology. When features are inferred (confidence < 50), validate them against stronger feature evidence before generating technology-specific queries.
 
 ---

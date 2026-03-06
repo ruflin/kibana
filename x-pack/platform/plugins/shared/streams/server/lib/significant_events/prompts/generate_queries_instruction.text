@@ -38,6 +38,7 @@ Generate KQL queries that identify **operationally significant patterns** — ev
 - **Use specific field targeting**: `message:"exact phrase"` rather than broad searches
 - **Keep queries focused**: Each query should target one specific pattern type
 - **Consider log levels**: Target ERROR, WARN, FATAL levels when appropriate
+- Detection queries use KQL which is wrapped in `KQL()` when converted to ES|QL — this is handled automatically
 
 ---
 
@@ -66,6 +67,21 @@ of the significant events view. These are NOT used for alerting — they suppres
 Generate ES|QL aggregation queries that provide **metrics indicating something important happened**.
 These must include a full ES|QL query in `esql_query`.
 
+### Text Matching in ES|QL — Use MATCH()
+
+When filtering on text fields (e.g. `message`) inside ES|QL queries, **always use the `MATCH` function**
+instead of `==`. The `==` operator does not work on `text` fields. `MATCH` performs a full-text search
+and is the correct way to match text content in ES|QL.
+
+**Syntax**: `MATCH(field, "search terms")`
+
+Examples:
+- `WHERE MATCH(message, "connection refused")` — matches documents where `message` contains "connection refused"
+- `WHERE MATCH(message, "timeout error")` — matches documents containing "timeout" and "error"
+- `WHERE MATCH(message, "OutOfMemoryError", {"operator": "AND"})` — all terms must be present
+
+For keyword fields (e.g. `log.level`, `http.response.status_code`, `service.name`), use `==` as usual.
+
 ### Key Stats Patterns:
 
 **Error rate over time** — detects when error ratio spikes:
@@ -90,7 +106,7 @@ FROM <stream> | STATS count = COUNT(*) BY http.response.status_code | SORT count
 
 **Top errors by service** — surfaces which services are most affected:
 ```
-FROM <stream> | WHERE log.level == "error" | STATS error_count = COUNT(*) BY service.name | SORT error_count DESC
+FROM <stream> | WHERE MATCH(message, "error") | STATS error_count = COUNT(*) BY service.name | SORT error_count DESC
 ```
 
 **Cardinality anomalies** — detects sudden changes in unique value counts:
@@ -156,35 +172,74 @@ FROM <stream> | WHERE log.level == "error" | STATS affected_users = COUNT_DISTIN
 ## Analysis Process
 
 1. **Examine the log patterns** provided in the dataset
-2. **Identify technology-specific signatures** (stack traces, error codes, component names)
-3. **Generate detection queries** for the most important error/failure patterns
-4. **Generate exclusion queries** for the top noisy/routine patterns (health checks, heartbeats, debug logs)
-5. **Generate stats queries** for error rate, throughput, and latency over time
-6. **Generate baseline queries** for normal operating ranges
-7. **Generate correlation queries** for cross-field co-occurrence patterns
-8. **Prioritize high-value, low-noise patterns** that provide actionable insights
+2. **Identify technologies and entities** (languages, frameworks, databases, services, infrastructure)
+3. **Catalog well-known failure modes for each detected technology.** For every technology identified, enumerate its top 5-10 well-known error patterns, failure modes, and operational issues that are commonly written to logs. Think like an SRE: "What are the failure modes I would set up alerts for in production for this technology?" Use the Technology Error Reference below as a starting point, then add technology-specific patterns based on your expert knowledge.
+4. **Generate detection queries** for the most important error/failure patterns from the catalog — not just what appears in the current data sample
+5. **Generate exclusion queries** for the top noisy/routine patterns (health checks, heartbeats, debug logs)
+6. **Generate stats queries** for error rate, throughput, and latency over time
+7. **Generate baseline queries** for normal operating ranges
+8. **Generate correlation queries** for cross-field co-occurrence patterns
+9. **Prioritize high-value, low-noise patterns** that provide actionable insights
 
-## Common Pattern Categories to Consider:
+## Important: Text Field Matching Rules
 
-### Application Framework Patterns:
-- **Java/Spring**: `message:"Exception in thread" or message:"OutOfMemoryError"`
-- **Database**: `message:"connection timeout" or message:"deadlock detected"`
-- **Message Queue**: `message:"queue full" or message:"consumer lag"`
-- **Cache**: `message:"cache miss ratio" or message:"eviction"`
+- **In KQL** (detection/exclusion queries): Use `message:"search text"` — this is standard KQL syntax.
+- **In ES|QL** (stats/baseline/correlation queries): Use `MATCH(message, "search text")` for text fields.
+  Never use `message == "search text"` — the `==` operator does not work on `text` fields in ES|QL.
+- **Keyword fields** (`log.level`, `service.name`, `http.response.status_code`, etc.) use `==` in ES|QL as normal.
+
+## Technology Error Reference
+
+For each detected technology, systematically generate queries for its well-known failure modes. Do not rely only on what appears in the current data — use your expert knowledge of each technology's common error patterns that operators need to monitor.
+
+### Programming Languages:
+- **Java**: `OutOfMemoryError` (heap space, metaspace, GC overhead), `StackOverflowError`, `ClassNotFoundException`, `NullPointerException`, thread deadlocks, `GC overhead limit exceeded`, `BrokenPipeException`
+- **Python**: `Traceback`, `MemoryError`, `ConnectionError`, `TimeoutError`, `ImportError`, `RecursionError`
+- **Go**: `panic`, `runtime error`, `goroutine leak`, `fatal error: concurrent map writes`, `context deadline exceeded`
+- **Node.js**: `UnhandledPromiseRejection`, `ENOMEM`, `ECONNREFUSED`, `heap out of memory`, `ETIMEDOUT`
+- **.NET/C#**: `System.OutOfMemoryException`, `System.StackOverflowException`, `System.TimeoutException`, `SqlException`
+
+### Web Servers:
+- **Nginx**: upstream timeouts, `502 Bad Gateway`, `504 Gateway Timeout`, `connection refused`, worker process crashes, SSL handshake failures
+- **Apache**: `MaxRequestWorkers`, `AH00124`, segfaults, mod_proxy errors
+- **Tomcat**: `OutOfMemoryError: PermGen space`, connector timeouts, thread pool exhaustion, deployment failures
+- **IIS**: HTTP 500.x sub-status codes, application pool recycling, request queue overflow
+
+### Databases:
+- **PostgreSQL**: `FATAL:` errors (auth failures, too many connections), `deadlock detected`, `could not serialize access`, `PANIC:`, replication lag, slow queries
+- **MySQL**: `Too many connections`, `Lock wait timeout exceeded`, `Deadlock found`, `Got an error reading communication packets`, replication errors
+- **MongoDB**: `connection refused`, `SocketException`, `ExceededTimeLimit`, replica set election, `WiredTiger` errors
+- **Redis**: `OOM command not allowed`, `LOADING Redis is loading the dataset`, `CLUSTERDOWN`, connection pool exhaustion
+- **Elasticsearch**: `CircuitBreakingException`, `ClusterBlockException`, shard failures, `rejected execution`
+
+### Message Brokers:
+- **Kafka**: `NotLeaderForPartition`, consumer lag, `OffsetOutOfRange`, broker disconnects, rebalancing failures
+- **RabbitMQ**: `queue overflow`, `connection_closed_abruptly`, memory alarm, unacknowledged message buildup
+
+### Cloud Services:
+- **AWS**: `ThrottlingException`, `ServiceUnavailable`, `ExpiredTokenException`, S3 `SlowDown`, Lambda timeout
+- **GCP**: `RESOURCE_EXHAUSTED`, `DEADLINE_EXCEEDED`, `PERMISSION_DENIED`
+- **Azure**: `RequestRateTooLarge`, `ServiceBusy`, `OperationTimedOut`
+
+### Infrastructure:
+- **Kubernetes**: `CrashLoopBackOff`, `OOMKilled`, pod eviction, liveness/readiness probe failures, `ImagePullBackOff`
+- **Docker**: container OOM kills, health check failures, network connectivity issues
+- **Linux**: OOM killer (`Killed process`), filesystem errors, kernel panics, `segfault`
 
 ### System-Level Patterns:
 - **Resource exhaustion**: `message:"disk full" or message:"memory allocation failed"`
-- **Network issues**: `message:"connection refused" or message:"host unreachable"`
-- **Security events**: `message:"authentication failed" or message:"access denied"`
+- **Network issues**: `message:"connection refused" or message:"host unreachable"` or `message:"DNS resolution failed"`
+- **Security events**: `message:"authentication failed" or message:"access denied" or message:"permission denied"`
 
 ### Operational Patterns:
 - **Service lifecycle**: `message:"started" or message:"stopped" or message:"shutdown"`
 - **Configuration**: `message:"config reload" or message:"property changed"`
 - **Deployment**: `message:"deployment" or message:"migration"`
 
-## Technology-Specific Considerations:
+### Cross-Cutting Considerations:
 - **Web Applications**: Focus on HTTP errors, session issues, authentication; stats on 5xx rate, p99 latency
 - **Databases**: Target connection pools, query performance, replication; stats on query duration percentiles
 - **Message Brokers**: Monitor queue depths, consumer lag, partition issues; stats on lag over time
 - **Caches**: Track hit ratios, evictions, memory usage; stats on hit rate over time
 - **Microservices**: Circuit breaker states, service discovery, timeouts; correlation across service boundaries
+- **Dependencies**: For each dependency between components, monitor both sides — client-side errors (timeouts, connection refused) and server-side errors (overload, auth failures, resource exhaustion)
