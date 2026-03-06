@@ -37,7 +37,7 @@ const upsertSigEventsQueriesSchema = z.object({
           .string()
           .optional()
           .describe(
-            'Raw ES|QL query string. Required for stats queries (query_type: stats). Must include a FROM clause targeting the stream. Example: "FROM logs | STATS error_rate = COUNT_IF(http.response.status_code >= 500) / COUNT(*) BY BUCKET(@timestamp, 5m)"'
+            'Raw ES|QL query string. Required for stats queries (query_type: stats). Must include a FROM clause targeting the stream. When filtering on text fields (e.g. message), use MATCH(field, "text") instead of ==. Example: "FROM logs | WHERE MATCH(message, "error") | STATS error_count = COUNT(*) BY service.name | SORT error_count DESC"'
           ),
       })
     )

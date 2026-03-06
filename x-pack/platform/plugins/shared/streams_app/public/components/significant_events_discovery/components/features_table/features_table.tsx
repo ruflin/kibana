@@ -26,6 +26,7 @@ import { isComputedFeature, OnboardingStep } from '@kbn/streams-schema';
 import { upperFirst } from 'lodash';
 import pMap from 'p-map';
 import React, { useState, useCallback, useMemo } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { useFetchFeatures } from '../../../../hooks/use_fetch_features';
 import { useAIFeatures } from '../../../../hooks/use_ai_features';
 import { useKibana } from '../../../../hooks/use_kibana';
@@ -78,6 +79,29 @@ export function FeaturesTable() {
   const handleCloseFlyout = useCallback(() => {
     setSelectedFeature(null);
   }, []);
+
+  const deleteFeatureMutation = useMutation<
+    void,
+    Error,
+    { streamName: string; uuid: string }
+  >({
+    mutationFn: async ({ streamName, uuid }) => {
+      await streamsRepositoryClient.fetch('DELETE /internal/streams/{name}/features/{uuid}', {
+        params: { path: { name: streamName, uuid } },
+      });
+    },
+    onSuccess: async () => {
+      await refetch();
+    },
+    onError: (error) => {
+      toasts.addError(error, {
+        title: i18n.translate(
+          'xpack.streams.significantEventsDiscovery.featuresTable.deleteFeatureError',
+          { defaultMessage: 'Failed to delete feature' }
+        ),
+      });
+    },
+  });
 
   const handleRegenerateFeatures = useCallback(async () => {
     const features = data?.features ?? [];
@@ -223,6 +247,35 @@ export function FeaturesTable() {
       render: (_streamName: string, feature: Feature) => (
         <EuiBadge color="hollow">{feature.stream_name || '--'}</EuiBadge>
       ),
+    },
+    {
+      name: i18n.translate(
+        'xpack.streams.significantEventsDiscovery.featuresTable.actionsColumn',
+        { defaultMessage: 'Actions' }
+      ),
+      width: '60px',
+      actions: [
+        {
+          name: i18n.translate(
+            'xpack.streams.significantEventsDiscovery.featuresTable.deleteActionTitle',
+            { defaultMessage: 'Delete' }
+          ),
+          type: 'icon',
+          icon: 'trash',
+          color: 'danger',
+          description: i18n.translate(
+            'xpack.streams.significantEventsDiscovery.featuresTable.deleteActionDescription',
+            { defaultMessage: 'Delete this feature' }
+          ),
+          onClick: (feature: Feature) => {
+            deleteFeatureMutation.mutate({
+              streamName: feature.stream_name,
+              uuid: feature.uuid,
+            });
+          },
+          'data-test-subj': 'featuresDiscoveryDeleteAction',
+        },
+      ],
     },
   ];
 

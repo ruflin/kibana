@@ -205,6 +205,16 @@ export const SAVE_QUERY_ERROR_TOAST_TITLE = i18n.translate(
   { defaultMessage: 'Failed to save query' }
 );
 
+export const DELETE_QUERY_ACTION_TITLE = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.deleteQueryActionTitle',
+  { defaultMessage: 'Delete' }
+);
+
+export const DELETE_QUERY_ACTION_DESCRIPTION = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.deleteQueryActionDescription',
+  { defaultMessage: 'Delete this query' }
+);
+
 export const DELETE_QUERY_ERROR_TOAST_TITLE = i18n.translate(
   'xpack.streams.significantEventsDiscovery.queriesTable.deleteQueryErrorToastTitle',
   { defaultMessage: 'Failed to delete query' }
@@ -215,9 +225,14 @@ export const REGENERATE_QUERIES_BUTTON = i18n.translate(
   { defaultMessage: 'Regenerate queries' }
 );
 
+export const GENERATE_QUERIES_BUTTON = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.generateQueriesButton',
+  { defaultMessage: 'Generate queries' }
+);
+
 export const REGENERATE_QUERIES_NO_STREAMS_TOAST_TITLE = i18n.translate(
   'xpack.streams.significantEventsDiscovery.queriesTable.regenerateQueriesNoStreamsToastTitle',
-  { defaultMessage: 'No streams with queries to regenerate' }
+  { defaultMessage: 'No log streams found' }
 );
 
 export const REGENERATE_QUERIES_SUCCESS_TOAST_TITLE = (count: number) =>
@@ -315,4 +330,46 @@ export const PROMOTE_ALL_MEDIUM_CALLOUT_DESCRIPTION = i18n.translate(
     defaultMessage:
       'Enable scheduled runs for medium and higher impact queries so their results are saved as Significant events, powering Discovery generation.',
   }
+);
+
+export const DELETE_ALL_BUTTON = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.deleteAllButton',
+  { defaultMessage: 'Delete all' }
+);
+
+export const DELETE_ALL_CONFIRM_TITLE = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.deleteAllConfirmTitle',
+  { defaultMessage: 'Delete all queries' }
+);
+
+export const DELETE_ALL_CONFIRM_BODY = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.deleteAllConfirmBody',
+  {
+    defaultMessage:
+      'This will permanently delete all queries. This action cannot be undone.',
+  }
+);
+
+export const DELETE_ALL_CONFIRM_BUTTON = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.deleteAllConfirmButton',
+  { defaultMessage: 'Delete all' }
+);
+
+export const DELETE_ALL_CANCEL_BUTTON = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.deleteAllCancelButton',
+  { defaultMessage: 'Cancel' }
+);
+
+export const DELETE_ALL_SUCCESS_TOAST_TITLE = (count: number) =>
+  i18n.translate(
+    'xpack.streams.significantEventsDiscovery.queriesTable.deleteAllSuccessToastTitle',
+    {
+      defaultMessage: 'Deleted {count} {count, plural, one {query} other {queries}}',
+      values: { count },
+    }
+  );
+
+export const DELETE_ALL_ERROR_TOAST_TITLE = i18n.translate(
+  'xpack.streams.significantEventsDiscovery.queriesTable.deleteAllErrorToastTitle',
+  { defaultMessage: 'Failed to delete all queries' }
 );

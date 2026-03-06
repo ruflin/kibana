@@ -8,12 +8,8 @@
 import { z } from '@kbn/zod';
 import type { TaskResult } from '@kbn/streams-schema';
 import { STREAMS_API_PRIVILEGES } from '../../../../../common/constants';
-import type {
-  SuggestionGenerationTaskParams,
-} from '../../../../lib/tasks/task_definitions/suggestion_generation';
-import {
-  STREAMS_SUGGESTION_GENERATION_TASK_TYPE,
-} from '../../../../lib/tasks/task_definitions/suggestion_generation';
+import type { SuggestionGenerationTaskParams } from '../../../../lib/tasks/task_definitions/suggestion_generation';
+import { STREAMS_SUGGESTION_GENERATION_TASK_TYPE } from '../../../../lib/tasks/task_definitions/suggestion_generation';
 import type { GenerateSuggestionsResult } from '../../../../lib/significant_events/discovery/generate_suggestions';
 import { taskActionSchema } from '../../../../lib/tasks/task_action_schema';
 import { createServerRoute } from '../../../create_server_route';
@@ -74,6 +70,31 @@ const getDiscoveryRoute = createServerRoute({
       throw new Error(`Discovery ${params.path.uuid} not found`);
     }
     return discovery;
+  },
+});
+
+const deleteDiscoveryRoute = createServerRoute({
+  endpoint: 'DELETE /internal/streams/_discoveries/{uuid}',
+  options: {
+    access: 'internal',
+    summary: 'Delete a discovery by UUID',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.manage],
+    },
+  },
+  params: z.object({
+    path: z.object({
+      uuid: z.string(),
+    }),
+  }),
+  handler: async ({ params, request, getScopedClients, server }) => {
+    const { licensing, uiSettingsClient, discoveryClient } = await getScopedClients({ request });
+    await assertSignificantEventsAccess({ server, licensing, uiSettingsClient });
+
+    await discoveryClient.deleteDiscovery(params.path.uuid);
+    return { acknowledged: true };
   },
 });
 
@@ -250,6 +271,7 @@ const suggestionStatusRoute = createServerRoute({
 export const internalDiscoveryCrudRoutes = {
   ...listDiscoveriesRoute,
   ...getDiscoveryRoute,
+  ...deleteDiscoveryRoute,
   ...updateDiscoveryFeedbackRoute,
   ...listSuggestionsRoute,
   ...updateSuggestionStatusRoute,

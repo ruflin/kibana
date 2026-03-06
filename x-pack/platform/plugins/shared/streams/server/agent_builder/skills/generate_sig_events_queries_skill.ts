@@ -69,22 +69,27 @@ Use \`${internalNamespaces.streams}.upsert_sig_events_queries\` to persist new q
 ### Stats queries (\`query_purpose: 'stats'\`, \`query_type: 'stats'\`)
 - Provide aggregation-based metrics that indicate something important happened.
 - Must include a full ES|QL query in \`esql_query\` (the \`kql\` field can be \`"*"\`).
+- **Text field matching**: When filtering on text fields (e.g. \`message\`) in ES|QL, always use the
+  \`MATCH\` function: \`WHERE MATCH(message, "search terms")\`. Never use \`==\` on text fields — it
+  does not work. For keyword fields (\`log.level\`, \`service.name\`, etc.), use \`==\` as normal.
 - Common stats patterns:
   - **Error rate**: \`FROM <stream> | STATS error_rate = COUNT_IF(http.response.status_code >= 500) / COUNT(*) BY BUCKET(@timestamp, 5m)\`
   - **Throughput**: \`FROM <stream> | STATS request_count = COUNT(*) BY BUCKET(@timestamp, 1m), service.name\`
   - **Latency percentiles**: \`FROM <stream> | STATS p50 = PERCENTILE(event.duration, 50), p99 = PERCENTILE(event.duration, 99) BY BUCKET(@timestamp, 5m)\`
   - **Status code distribution**: \`FROM <stream> | STATS count = COUNT(*) BY http.response.status_code | SORT count DESC\`
-  - **Top errors by service**: \`FROM <stream> | WHERE log.level == "error" | STATS error_count = COUNT(*) BY service.name | SORT error_count DESC\`
+  - **Top errors by service**: \`FROM <stream> | WHERE MATCH(message, "error") | STATS error_count = COUNT(*) BY service.name | SORT error_count DESC\`
   - **Cardinality (unique values)**: \`FROM <stream> | STATS unique_users = COUNT_DISTINCT(user.id) BY BUCKET(@timestamp, 5m)\`
 
 ### Baseline queries (\`query_purpose: 'baseline'\`, \`query_type: 'stats'\`)
 - Capture normal operating ranges as reference anchors.
 - Must include a full ES|QL query in \`esql_query\`.
+- Use \`MATCH(field, "text")\` for text field filtering, \`==\` for keyword fields.
 - Example: \`FROM <stream> | STATS avg_rate = AVG(event.duration), stddev_rate = STDDEV(event.duration) BY service.name\`
 
 ### Correlation queries (\`query_purpose: 'correlation'\`, \`query_type: 'stats'\`)
 - Surface co-occurring patterns across fields or streams.
 - Must include a full ES|QL query in \`esql_query\`.
+- Use \`MATCH(field, "text")\` for text field filtering, \`==\` for keyword fields.
 - Example: \`FROM <stream> | WHERE log.level == "error" | STATS count = COUNT(*) BY error.type, service.name | SORT count DESC\`
 
 ## Coverage Checklist

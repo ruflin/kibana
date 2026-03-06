@@ -10,12 +10,16 @@ import {
   EuiBadge,
   EuiBasicTable,
   EuiButton,
+  EuiButtonEmpty,
+  EuiButtonIcon,
+  EuiConfirmModal,
   EuiDescriptionList,
   EuiEmptyPrompt,
   EuiFlexGroup,
   EuiFlexItem,
   EuiFlyout,
   EuiFlyoutBody,
+  EuiFlyoutFooter,
   EuiFlyoutHeader,
   EuiIcon,
   EuiListGroup,
@@ -56,299 +60,349 @@ const formatDate = (date: string): string => {
 function DiscoveryDetailFlyout({
   discovery,
   onClose,
+  onDelete,
+  isDeleting,
 }: {
   discovery: Discovery;
   onClose: () => void;
+  onDelete: (uuid: string) => void;
+  isDeleting: boolean;
 }) {
+  const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+
   return (
-    <EuiFlyout onClose={onClose} size="m">
-      <EuiFlyoutHeader hasBorder>
-        <EuiFlexGroup alignItems="center" gutterSize="m">
-          <EuiFlexItem grow={false}>
-            <EuiBadge color={severityColors[discovery.severity] ?? 'hollow'}>
-              {discovery.severity}
-            </EuiBadge>
-          </EuiFlexItem>
-          <EuiFlexItem>
-            <EuiTitle size="m">
-              <h2>{discovery.title}</h2>
-            </EuiTitle>
-          </EuiFlexItem>
-        </EuiFlexGroup>
-      </EuiFlyoutHeader>
-      <EuiFlyoutBody>
-        <EuiDescriptionList
-          type="column"
-          compressed
-          listItems={[
-            {
-              title: i18n.translate('xpack.streams.discoveryDetail.relevance', {
-                defaultMessage: 'Relevance',
-              }),
-              description: `${discovery.relevance_score}/100`,
-            },
-            {
-              title: i18n.translate('xpack.streams.discoveryDetail.level', {
-                defaultMessage: 'Level',
-              }),
-              description: String(discovery.level),
-            },
-            {
-              title: i18n.translate('xpack.streams.discoveryDetail.created', {
-                defaultMessage: 'Created',
-              }),
-              description: formatDate(discovery.created_at),
-            },
-            {
-              title: i18n.translate('xpack.streams.discoveryDetail.updated', {
-                defaultMessage: 'Updated',
-              }),
-              description: formatDate(discovery.updated_at),
-            },
-          ]}
-        />
+    <>
+      <EuiFlyout onClose={onClose} size="m">
+        <EuiFlyoutHeader hasBorder>
+          <EuiFlexGroup alignItems="center" gutterSize="m">
+            <EuiFlexItem grow={false}>
+              <EuiBadge color={severityColors[discovery.severity] ?? 'hollow'}>
+                {discovery.severity}
+              </EuiBadge>
+            </EuiFlexItem>
+            <EuiFlexItem>
+              <EuiTitle size="m">
+                <h2>{discovery.title}</h2>
+              </EuiTitle>
+            </EuiFlexItem>
+          </EuiFlexGroup>
+        </EuiFlyoutHeader>
+        <EuiFlyoutBody>
+          <EuiDescriptionList
+            type="column"
+            compressed
+            listItems={[
+              {
+                title: i18n.translate('xpack.streams.discoveryDetail.relevance', {
+                  defaultMessage: 'Relevance',
+                }),
+                description: `${discovery.relevance_score}/100`,
+              },
+              {
+                title: i18n.translate('xpack.streams.discoveryDetail.level', {
+                  defaultMessage: 'Level',
+                }),
+                description: String(discovery.level),
+              },
+              {
+                title: i18n.translate('xpack.streams.discoveryDetail.created', {
+                  defaultMessage: 'Created',
+                }),
+                description: formatDate(discovery.created_at),
+              },
+              {
+                title: i18n.translate('xpack.streams.discoveryDetail.updated', {
+                  defaultMessage: 'Updated',
+                }),
+                description: formatDate(discovery.updated_at),
+              },
+            ]}
+          />
 
-        <EuiSpacer size="l" />
+          <EuiSpacer size="l" />
 
-        <EuiTitle size="xs">
-          <h3>
-            {i18n.translate('xpack.streams.discoveryDetail.description', {
-              defaultMessage: 'Description',
-            })}
-          </h3>
-        </EuiTitle>
-        <EuiSpacer size="s" />
-        <EuiMarkdownFormat textSize="s">{discovery.description}</EuiMarkdownFormat>
+          <EuiTitle size="xs">
+            <h3>
+              {i18n.translate('xpack.streams.discoveryDetail.description', {
+                defaultMessage: 'Description',
+              })}
+            </h3>
+          </EuiTitle>
+          <EuiSpacer size="s" />
+          <EuiMarkdownFormat textSize="s">{discovery.description}</EuiMarkdownFormat>
 
-        {discovery.stream_refs.length > 0 && (
-          <>
-            <EuiSpacer size="l" />
-            <EuiTitle size="xs">
-              <h3>
-                {i18n.translate('xpack.streams.discoveryDetail.streams', {
-                  defaultMessage: 'Streams',
-                })}
-              </h3>
-            </EuiTitle>
-            <EuiSpacer size="s" />
-            <EuiFlexGroup gutterSize="xs" wrap>
-              {discovery.stream_refs.map((ref) => (
-                <EuiFlexItem grow={false} key={ref}>
-                  <EuiBadge>{ref}</EuiBadge>
-                </EuiFlexItem>
-              ))}
-            </EuiFlexGroup>
-          </>
-        )}
+          {discovery.stream_refs.length > 0 && (
+            <>
+              <EuiSpacer size="l" />
+              <EuiTitle size="xs">
+                <h3>
+                  {i18n.translate('xpack.streams.discoveryDetail.streams', {
+                    defaultMessage: 'Streams',
+                  })}
+                </h3>
+              </EuiTitle>
+              <EuiSpacer size="s" />
+              <EuiFlexGroup gutterSize="xs" wrap>
+                {discovery.stream_refs.map((ref) => (
+                  <EuiFlexItem grow={false} key={ref}>
+                    <EuiBadge>{ref}</EuiBadge>
+                  </EuiFlexItem>
+                ))}
+              </EuiFlexGroup>
+            </>
+          )}
 
-        {discovery.tags && discovery.tags.length > 0 && (
-          <>
-            <EuiSpacer size="l" />
-            <EuiTitle size="xs">
-              <h3>
-                {i18n.translate('xpack.streams.discoveryDetail.tags', {
-                  defaultMessage: 'Tags',
-                })}
-              </h3>
-            </EuiTitle>
-            <EuiSpacer size="s" />
-            <EuiFlexGroup gutterSize="xs" wrap>
-              {discovery.tags.map((tag) => (
-                <EuiFlexItem grow={false} key={tag}>
-                  <EuiBadge color="hollow">{tag}</EuiBadge>
-                </EuiFlexItem>
-              ))}
-            </EuiFlexGroup>
-          </>
-        )}
+          {discovery.tags && discovery.tags.length > 0 && (
+            <>
+              <EuiSpacer size="l" />
+              <EuiTitle size="xs">
+                <h3>
+                  {i18n.translate('xpack.streams.discoveryDetail.tags', {
+                    defaultMessage: 'Tags',
+                  })}
+                </h3>
+              </EuiTitle>
+              <EuiSpacer size="s" />
+              <EuiFlexGroup gutterSize="xs" wrap>
+                {discovery.tags.map((tag) => (
+                  <EuiFlexItem grow={false} key={tag}>
+                    <EuiBadge color="hollow">{tag}</EuiBadge>
+                  </EuiFlexItem>
+                ))}
+              </EuiFlexGroup>
+            </>
+          )}
 
-        {discovery.evidence.length > 0 && (
-          <>
-            <EuiSpacer size="l" />
-            <EuiTitle size="xs">
-              <h3>
-                {i18n.translate('xpack.streams.discoveryDetail.evidence', {
-                  defaultMessage: 'Evidence ({count})',
-                  values: { count: discovery.evidence.length },
-                })}
-              </h3>
-            </EuiTitle>
-            <EuiSpacer size="s" />
-            {discovery.evidence.map((ev: DiscoveryEvidence, idx: number) => (
-              <EuiPanel key={idx} paddingSize="s" hasBorder css={{ marginBottom: 4 }}>
-                <EuiText size="xs">
-                  <strong>{ev.query_title}</strong>
-                  {' — '}
-                  {ev.stream_name}
-                  {' · '}
-                  {ev.event_count} events
-                  {ev.change_point_type && (
-                    <>
-                      {' · '}
-                      {ev.change_point_type}
-                      {ev.change_point_p_value != null && ` (p=${ev.change_point_p_value})`}
-                    </>
-                  )}
-                  {ev.feature_name && (
-                    <>
-                      {' · '}
-                      {ev.feature_name}
-                    </>
-                  )}
-                </EuiText>
-              </EuiPanel>
-            ))}
-          </>
-        )}
-
-        {discovery.recommendations && discovery.recommendations.length > 0 && (
-          <>
-            <EuiSpacer size="l" />
-            <EuiTitle size="xs">
-              <h3>
-                {i18n.translate('xpack.streams.discoveryDetail.recommendations', {
-                  defaultMessage: 'Recommendations ({count})',
-                  values: { count: discovery.recommendations.length },
-                })}
-              </h3>
-            </EuiTitle>
-            <EuiSpacer size="s" />
-            {discovery.recommendations.map((rec: Recommendation, idx: number) => {
-              const hasUniqueDescription =
-                rec.description && rec.description !== rec.title;
-              const hasUniqueSteps =
-                rec.steps.length > 0 &&
-                !(rec.steps.length === 1 && rec.steps[0] === rec.title);
-
-              return (
-                <EuiPanel key={idx} paddingSize="s" hasBorder css={{ marginBottom: 8 }}>
-                  <EuiFlexGroup alignItems="center" gutterSize="s">
-                    <EuiFlexItem grow={false}>
-                      <EuiBadge color={severityColors[rec.priority] ?? 'hollow'}>
-                        {rec.priority}
-                      </EuiBadge>
-                    </EuiFlexItem>
-                    <EuiFlexItem>
-                      <EuiText size="s">{rec.title}</EuiText>
-                    </EuiFlexItem>
-                  </EuiFlexGroup>
-                  {hasUniqueDescription && (
-                    <>
-                      <EuiSpacer size="xs" />
-                      <EuiMarkdownFormat textSize="xs">
-                        {rec.description}
-                      </EuiMarkdownFormat>
-                    </>
-                  )}
-                  {hasUniqueSteps && (
-                    <>
-                      <EuiSpacer size="xs" />
-                      <EuiListGroup flush maxWidth={false}>
-                        {rec.steps.map((step, stepIdx) => (
-                          <EuiListGroupItem
-                            key={stepIdx}
-                            label={`${stepIdx + 1}. ${step}`}
-                            size="xs"
-                          />
-                        ))}
-                      </EuiListGroup>
-                    </>
-                  )}
+          {discovery.evidence.length > 0 && (
+            <>
+              <EuiSpacer size="l" />
+              <EuiTitle size="xs">
+                <h3>
+                  {i18n.translate('xpack.streams.discoveryDetail.evidence', {
+                    defaultMessage: 'Evidence ({count})',
+                    values: { count: discovery.evidence.length },
+                  })}
+                </h3>
+              </EuiTitle>
+              <EuiSpacer size="s" />
+              {discovery.evidence.map((ev: DiscoveryEvidence, idx: number) => (
+                <EuiPanel key={idx} paddingSize="s" hasBorder css={{ marginBottom: 4 }}>
+                  <EuiText size="xs">
+                    <strong>{ev.query_title}</strong>
+                    {' — '}
+                    {ev.stream_name}
+                    {' · '}
+                    {ev.event_count} events
+                    {ev.change_point_type && (
+                      <>
+                        {' · '}
+                        {ev.change_point_type}
+                        {ev.change_point_p_value != null && ` (p=${ev.change_point_p_value})`}
+                      </>
+                    )}
+                    {ev.feature_name && (
+                      <>
+                        {' · '}
+                        {ev.feature_name}
+                      </>
+                    )}
+                  </EuiText>
                 </EuiPanel>
-              );
-            })}
-          </>
-        )}
+              ))}
+            </>
+          )}
 
-        {(discovery.query_refs?.length ||
-          discovery.feature_refs?.length ||
-          discovery.discovery_refs?.length) && (
-          <>
-            <EuiSpacer size="l" />
-            <EuiTitle size="xs">
-              <h3>
-                {i18n.translate('xpack.streams.discoveryDetail.references', {
-                  defaultMessage: 'References',
+          {discovery.recommendations && discovery.recommendations.length > 0 && (
+            <>
+              <EuiSpacer size="l" />
+              <EuiTitle size="xs">
+                <h3>
+                  {i18n.translate('xpack.streams.discoveryDetail.recommendations', {
+                    defaultMessage: 'Recommendations ({count})',
+                    values: { count: discovery.recommendations.length },
+                  })}
+                </h3>
+              </EuiTitle>
+              <EuiSpacer size="s" />
+              {discovery.recommendations.map((rec: Recommendation, idx: number) => {
+                const hasUniqueDescription = rec.description && rec.description !== rec.title;
+                const hasUniqueSteps =
+                  rec.steps.length > 0 && !(rec.steps.length === 1 && rec.steps[0] === rec.title);
+
+                return (
+                  <EuiPanel key={idx} paddingSize="s" hasBorder css={{ marginBottom: 8 }}>
+                    <EuiFlexGroup alignItems="center" gutterSize="s">
+                      <EuiFlexItem grow={false}>
+                        <EuiBadge color={severityColors[rec.priority] ?? 'hollow'}>
+                          {rec.priority}
+                        </EuiBadge>
+                      </EuiFlexItem>
+                      <EuiFlexItem>
+                        <EuiText size="s">{rec.title}</EuiText>
+                      </EuiFlexItem>
+                    </EuiFlexGroup>
+                    {hasUniqueDescription && (
+                      <>
+                        <EuiSpacer size="xs" />
+                        <EuiMarkdownFormat textSize="xs">{rec.description}</EuiMarkdownFormat>
+                      </>
+                    )}
+                    {hasUniqueSteps && (
+                      <>
+                        <EuiSpacer size="xs" />
+                        <EuiListGroup flush maxWidth={false}>
+                          {rec.steps.map((step, stepIdx) => (
+                            <EuiListGroupItem
+                              key={stepIdx}
+                              label={`${stepIdx + 1}. ${step}`}
+                              size="xs"
+                            />
+                          ))}
+                        </EuiListGroup>
+                      </>
+                    )}
+                  </EuiPanel>
+                );
+              })}
+            </>
+          )}
+
+          {(discovery.query_refs?.length ||
+            discovery.feature_refs?.length ||
+            discovery.discovery_refs?.length) && (
+            <>
+              <EuiSpacer size="l" />
+              <EuiTitle size="xs">
+                <h3>
+                  {i18n.translate('xpack.streams.discoveryDetail.references', {
+                    defaultMessage: 'References',
+                  })}
+                </h3>
+              </EuiTitle>
+              <EuiSpacer size="s" />
+              {discovery.query_refs && discovery.query_refs.length > 0 && (
+                <>
+                  <EuiText size="xs">
+                    <strong>
+                      {i18n.translate('xpack.streams.discoveryDetail.queryRefs', {
+                        defaultMessage: 'Queries',
+                      })}
+                    </strong>
+                  </EuiText>
+                  <EuiListGroup flush maxWidth={false} gutterSize="none">
+                    {discovery.query_refs.map((ref) => (
+                      <EuiListGroupItem key={ref} label={ref} size="xs" />
+                    ))}
+                  </EuiListGroup>
+                </>
+              )}
+              {discovery.feature_refs && discovery.feature_refs.length > 0 && (
+                <>
+                  <EuiSpacer size="s" />
+                  <EuiText size="xs">
+                    <strong>
+                      {i18n.translate('xpack.streams.discoveryDetail.featureRefs', {
+                        defaultMessage: 'Features',
+                      })}
+                    </strong>
+                  </EuiText>
+                  <EuiListGroup flush maxWidth={false} gutterSize="none">
+                    {discovery.feature_refs.map((ref) => (
+                      <EuiListGroupItem key={ref} label={ref} size="xs" />
+                    ))}
+                  </EuiListGroup>
+                </>
+              )}
+              {discovery.discovery_refs && discovery.discovery_refs.length > 0 && (
+                <>
+                  <EuiSpacer size="s" />
+                  <EuiText size="xs">
+                    <strong>
+                      {i18n.translate('xpack.streams.discoveryDetail.discoveryRefs', {
+                        defaultMessage: 'Related discoveries',
+                      })}
+                    </strong>
+                  </EuiText>
+                  <EuiListGroup flush maxWidth={false} gutterSize="none">
+                    {discovery.discovery_refs.map((ref) => (
+                      <EuiListGroupItem key={ref} label={ref} size="xs" />
+                    ))}
+                  </EuiListGroup>
+                </>
+              )}
+            </>
+          )}
+
+          {discovery.feedback && (
+            <>
+              <EuiSpacer size="l" />
+              <EuiDescriptionList
+                type="column"
+                compressed
+                listItems={[
+                  {
+                    title: i18n.translate('xpack.streams.discoveryDetail.feedback', {
+                      defaultMessage: 'Feedback',
+                    }),
+                    description: (
+                      <EuiBadge color={discovery.feedback === 'useful' ? 'success' : 'danger'}>
+                        {discovery.feedback}
+                      </EuiBadge>
+                    ),
+                  },
+                ]}
+              />
+            </>
+          )}
+        </EuiFlyoutBody>
+        <EuiFlyoutFooter>
+          <EuiFlexGroup justifyContent="flexEnd">
+            <EuiFlexItem grow={false}>
+              <EuiButtonEmpty
+                color="danger"
+                iconType="trash"
+                isLoading={isDeleting}
+                onClick={() => setIsDeleteModalVisible(true)}
+                data-test-subj="discoveryDetailDeleteButton"
+              >
+                {i18n.translate('xpack.streams.discoveryDetail.deleteButton', {
+                  defaultMessage: 'Delete discovery',
                 })}
-              </h3>
-            </EuiTitle>
-            <EuiSpacer size="s" />
-            {discovery.query_refs && discovery.query_refs.length > 0 && (
-              <>
-                <EuiText size="xs">
-                  <strong>
-                    {i18n.translate('xpack.streams.discoveryDetail.queryRefs', {
-                      defaultMessage: 'Queries',
-                    })}
-                  </strong>
-                </EuiText>
-                <EuiListGroup flush maxWidth={false} gutterSize="none">
-                  {discovery.query_refs.map((ref) => (
-                    <EuiListGroupItem key={ref} label={ref} size="xs" />
-                  ))}
-                </EuiListGroup>
-              </>
-            )}
-            {discovery.feature_refs && discovery.feature_refs.length > 0 && (
-              <>
-                <EuiSpacer size="s" />
-                <EuiText size="xs">
-                  <strong>
-                    {i18n.translate('xpack.streams.discoveryDetail.featureRefs', {
-                      defaultMessage: 'Features',
-                    })}
-                  </strong>
-                </EuiText>
-                <EuiListGroup flush maxWidth={false} gutterSize="none">
-                  {discovery.feature_refs.map((ref) => (
-                    <EuiListGroupItem key={ref} label={ref} size="xs" />
-                  ))}
-                </EuiListGroup>
-              </>
-            )}
-            {discovery.discovery_refs && discovery.discovery_refs.length > 0 && (
-              <>
-                <EuiSpacer size="s" />
-                <EuiText size="xs">
-                  <strong>
-                    {i18n.translate('xpack.streams.discoveryDetail.discoveryRefs', {
-                      defaultMessage: 'Related discoveries',
-                    })}
-                  </strong>
-                </EuiText>
-                <EuiListGroup flush maxWidth={false} gutterSize="none">
-                  {discovery.discovery_refs.map((ref) => (
-                    <EuiListGroupItem key={ref} label={ref} size="xs" />
-                  ))}
-                </EuiListGroup>
-              </>
-            )}
-          </>
-        )}
-
-        {discovery.feedback && (
-          <>
-            <EuiSpacer size="l" />
-            <EuiDescriptionList
-              type="column"
-              compressed
-              listItems={[
-                {
-                  title: i18n.translate('xpack.streams.discoveryDetail.feedback', {
-                    defaultMessage: 'Feedback',
-                  }),
-                  description: (
-                    <EuiBadge color={discovery.feedback === 'useful' ? 'success' : 'danger'}>
-                      {discovery.feedback}
-                    </EuiBadge>
-                  ),
-                },
-              ]}
-            />
-          </>
-        )}
-      </EuiFlyoutBody>
-    </EuiFlyout>
+              </EuiButtonEmpty>
+            </EuiFlexItem>
+          </EuiFlexGroup>
+        </EuiFlyoutFooter>
+      </EuiFlyout>
+      {isDeleteModalVisible && (
+        <EuiConfirmModal
+          data-test-subj="discoveryDetailDeleteConfirmModal"
+          title={i18n.translate('xpack.streams.discoveryDetail.deleteModalTitle', {
+            defaultMessage: 'Delete discovery',
+          })}
+          onCancel={() => setIsDeleteModalVisible(false)}
+          onConfirm={() => {
+            onDelete(discovery.uuid);
+            setIsDeleteModalVisible(false);
+          }}
+          cancelButtonText={i18n.translate('xpack.streams.discoveryDetail.deleteModalCancel', {
+            defaultMessage: 'Cancel',
+          })}
+          confirmButtonText={i18n.translate('xpack.streams.discoveryDetail.deleteModalConfirm', {
+            defaultMessage: 'Delete',
+          })}
+          isLoading={isDeleting}
+          buttonColor="danger"
+          defaultFocusedButton="confirm"
+        >
+          <p>
+            {i18n.translate('xpack.streams.discoveryDetail.deleteModalBody', {
+              defaultMessage:
+                'Are you sure you want to delete this discovery? This action cannot be undone.',
+            })}
+          </p>
+        </EuiConfirmModal>
+      )}
+    </>
   );
 }
 
@@ -364,6 +418,7 @@ export function DiscoveriesTab() {
   } = useKibana();
 
   const [selectedDiscovery, setSelectedDiscovery] = useState<Discovery | null>(null);
+  const [isDeletingDiscovery, setIsDeletingDiscovery] = useState(false);
 
   const discoveriesFetch = useStreamsAppFetch(
     async ({ signal }) =>
@@ -372,6 +427,33 @@ export function DiscoveriesTab() {
         signal,
       }),
     [streamsRepositoryClient]
+  );
+
+  const handleDeleteDiscovery = useCallback(
+    async (uuid: string) => {
+      setIsDeletingDiscovery(true);
+      try {
+        await streamsRepositoryClient.fetch('DELETE /internal/streams/_discoveries/{uuid}', {
+          params: { path: { uuid } },
+        });
+        notifications.toasts.addSuccess({
+          title: i18n.translate('xpack.streams.discoveries.deleteSuccessTitle', {
+            defaultMessage: 'Discovery deleted',
+          }),
+        });
+        setSelectedDiscovery(null);
+        discoveriesFetch.refresh();
+      } catch (error) {
+        notifications.toasts.addError(getFormattedError(error as Error), {
+          title: i18n.translate('xpack.streams.discoveries.deleteErrorTitle', {
+            defaultMessage: 'Failed to delete discovery',
+          }),
+        });
+      } finally {
+        setIsDeletingDiscovery(false);
+      }
+    },
+    [streamsRepositoryClient, notifications.toasts, discoveriesFetch]
   );
 
   const {
@@ -410,7 +492,8 @@ export function DiscoveriesTab() {
       if (count > 0) {
         notifications.toasts.addSuccess({
           title: i18n.translate('xpack.streams.discoveries.generatedTitle', {
-            defaultMessage: '{count} {count, plural, one {discovery} other {discoveries}} generated',
+            defaultMessage:
+              '{count} {count, plural, one {discovery} other {discoveries}} generated',
             values: { count },
           }),
         });
@@ -489,8 +572,29 @@ export function DiscoveriesTab() {
         width: '180px',
         render: (date: string) => formatDate(date),
       },
+      {
+        name: i18n.translate('xpack.streams.discoveries.actionsColumn', {
+          defaultMessage: 'Actions',
+        }),
+        width: '60px',
+        render: (item: Discovery) => (
+          <EuiButtonIcon
+            iconType="trash"
+            color="danger"
+            aria-label={i18n.translate('xpack.streams.discoveries.deleteActionAriaLabel', {
+              defaultMessage: 'Delete discovery',
+            })}
+            isLoading={isDeletingDiscovery}
+            onClick={(e: React.MouseEvent) => {
+              e.stopPropagation();
+              handleDeleteDiscovery(item.uuid);
+            }}
+            data-test-subj="discoveryDeleteButton"
+          />
+        ),
+      },
     ],
-    []
+    [handleDeleteDiscovery, isDeletingDiscovery]
   );
 
   return (
@@ -585,6 +689,8 @@ export function DiscoveriesTab() {
         <DiscoveryDetailFlyout
           discovery={selectedDiscovery}
           onClose={() => setSelectedDiscovery(null)}
+          onDelete={handleDeleteDiscovery}
+          isDeleting={isDeletingDiscovery}
         />
       )}
     </>

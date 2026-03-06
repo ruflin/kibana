@@ -12,6 +12,7 @@ import {
   EuiButtonGroup,
   EuiButtonIcon,
   EuiCallOut,
+  EuiConfirmModal,
   EuiEmptyPrompt,
   EuiFlexGroup,
   EuiFlexItem,
@@ -89,7 +90,7 @@ import {
   getEventsCount,
   getPromoteAllCalloutTitle,
   getPromoteAllSuccessToast,
-  REGENERATE_QUERIES_BUTTON,
+  GENERATE_QUERIES_BUTTON,
   REGENERATE_QUERIES_ERROR_TOAST_TITLE,
   REGENERATE_QUERIES_NO_STREAMS_TOAST_TITLE,
   REGENERATE_QUERIES_SUCCESS_TOAST_TITLE,
@@ -103,6 +104,15 @@ import {
   PURPOSE_FILTER_LABEL,
   QUERY_TYPE_COLUMN,
   QUERY_TYPE_LABELS,
+  DELETE_QUERY_ACTION_TITLE,
+  DELETE_QUERY_ACTION_DESCRIPTION,
+  DELETE_ALL_BUTTON,
+  DELETE_ALL_CONFIRM_TITLE,
+  DELETE_ALL_CONFIRM_BODY,
+  DELETE_ALL_CONFIRM_BUTTON,
+  DELETE_ALL_CANCEL_BUTTON,
+  DELETE_ALL_SUCCESS_TOAST_TITLE,
+  DELETE_ALL_ERROR_TOAST_TITLE,
 } from './translations';
 import { PromoteAction } from './promote_action';
 import { QueryDetailsFlyout } from './query_details_flyout';
@@ -166,11 +176,12 @@ export function QueriesTable() {
     [queryClient]
   );
 
-  const handleRegenerateQueries = useCallback(async () => {
-    const queries = queriesData?.queries ?? [];
-    const uniqueStreamNames = [...new Set(queries.map((q) => q.stream_name).filter(Boolean))];
+  const handleGenerateQueries = useCallback(async () => {
+    const logStreamNames = (streamsData?.streams ?? [])
+      .filter((s) => s.stream.name.startsWith('logs'))
+      .map((s) => s.stream.name);
 
-    if (uniqueStreamNames.length === 0) {
+    if (logStreamNames.length === 0) {
       toasts.addInfo({
         title: REGENERATE_QUERIES_NO_STREAMS_TOAST_TITLE,
       });
@@ -185,7 +196,7 @@ export function QueriesTable() {
 
     try {
       await pMap(
-        uniqueStreamNames,
+        logStreamNames,
         async (streamName) => {
           await streamsRepositoryClient.fetch(
             'POST /internal/streams/{streamName}/onboarding/_task',
@@ -207,7 +218,7 @@ export function QueriesTable() {
         { concurrency: 5 }
       );
       toasts.addSuccess({
-        title: REGENERATE_QUERIES_SUCCESS_TOAST_TITLE(uniqueStreamNames.length),
+        title: REGENERATE_QUERIES_SUCCESS_TOAST_TITLE(logStreamNames.length),
       });
       setTimeout(() => invalidateQueriesData(), 10000);
     } catch (error) {
@@ -218,7 +229,7 @@ export function QueriesTable() {
       setIsRegenerating(false);
     }
   }, [
-    queriesData?.queries,
+    streamsData?.streams,
     aiFeatures?.genAiConnectors?.selectedConnector,
     toasts,
     streamsRepositoryClient,
@@ -301,6 +312,31 @@ export function QueriesTable() {
     onError: (error) => {
       toasts.addError(error, {
         title: DELETE_QUERY_ERROR_TOAST_TITLE,
+      });
+    },
+  });
+
+  const [isDeleteAllModalVisible, setIsDeleteAllModalVisible] = useState(false);
+
+  const deleteAllMutation = useMutation<number, Error>({
+    mutationFn: async () => {
+      const queries = queriesData?.queries ?? [];
+      await pMap(
+        queries,
+        async (q) => removeQuery({ queryId: q.query.id, streamName: q.stream_name }),
+        { concurrency: 1 }
+      );
+      return queries.length;
+    },
+    onSuccess: async (count) => {
+      setIsDeleteAllModalVisible(false);
+      toasts.addSuccess(DELETE_ALL_SUCCESS_TOAST_TITLE(count));
+      await invalidateQueriesData();
+    },
+    onError: (error) => {
+      setIsDeleteAllModalVisible(false);
+      toasts.addError(getFormattedError(error), {
+        title: DELETE_ALL_ERROR_TOAST_TITLE,
       });
     },
   });
@@ -482,10 +518,24 @@ export function QueriesTable() {
               return <PromoteAction item={item} />;
             },
           },
+          {
+            name: DELETE_QUERY_ACTION_TITLE,
+            type: 'icon',
+            icon: 'trash',
+            color: 'danger',
+            description: DELETE_QUERY_ACTION_DESCRIPTION,
+            onClick: (item) => {
+              deleteQueryMutation.mutate({
+                queryId: item.query.id,
+                streamName: item.stream_name,
+              });
+            },
+            'data-test-subj': 'significant_events_table_delete_query_action',
+          },
         ],
       },
     ];
-  }, [share.url.locators, streamsData, timeState]);
+  }, [share.url.locators, streamsData, timeState, deleteQueryMutation]);
 
   const isLoading = queriesLoading || streamsLoading;
   if (isLoading) {
@@ -606,18 +656,14 @@ export function QueriesTable() {
           </EuiFlexItem>
           <EuiFlexItem grow={false}>
             <EuiButton
-              iconType="refresh"
+              iconType="sparkles"
               size="s"
               isLoading={isRegenerating}
-              disabled={
-                isRegenerating ||
-                !aiFeatures?.genAiConnectors?.selectedConnector ||
-                (queriesData?.queries?.length ?? 0) === 0
-              }
-              onClick={handleRegenerateQueries}
-              data-test-subj="queriesRegenerateQueriesButton"
+              disabled={isRegenerating || !aiFeatures?.genAiConnectors?.selectedConnector}
+              onClick={handleGenerateQueries}
+              data-test-subj="queriesGenerateQueriesButton"
             >
-              {REGENERATE_QUERIES_BUTTON}
+              {GENERATE_QUERIES_BUTTON}
             </EuiButton>
           </EuiFlexItem>
           <EuiFlexItem grow={false}>
@@ -630,6 +676,19 @@ export function QueriesTable() {
               data-test-subj="queriesBackfillButton"
             >
               {BACKFILL_BUTTON}
+            </EuiButton>
+          </EuiFlexItem>
+          <EuiFlexItem grow={false}>
+            <EuiButton
+              iconType="trash"
+              size="s"
+              color="danger"
+              isLoading={deleteAllMutation.isLoading}
+              disabled={deleteAllMutation.isLoading || (queriesData?.queries?.length ?? 0) === 0}
+              onClick={() => setIsDeleteAllModalVisible(true)}
+              data-test-subj="queriesDeleteAllButton"
+            >
+              {DELETE_ALL_BUTTON}
             </EuiButton>
           </EuiFlexItem>
         </EuiFlexGroup>
@@ -669,6 +728,21 @@ export function QueriesTable() {
           isSaving={saveQueryMutation.isLoading}
           isDeleting={deleteQueryMutation.isLoading}
         />
+      )}
+      {isDeleteAllModalVisible && (
+        <EuiConfirmModal
+          data-test-subj="queriesDeleteAllConfirmModal"
+          title={DELETE_ALL_CONFIRM_TITLE}
+          onCancel={() => setIsDeleteAllModalVisible(false)}
+          onConfirm={() => deleteAllMutation.mutate()}
+          cancelButtonText={DELETE_ALL_CANCEL_BUTTON}
+          confirmButtonText={DELETE_ALL_CONFIRM_BUTTON}
+          buttonColor="danger"
+          defaultFocusedButton="confirm"
+          isLoading={deleteAllMutation.isLoading}
+        >
+          <p>{DELETE_ALL_CONFIRM_BODY}</p>
+        </EuiConfirmModal>
       )}
     </EuiFlexGroup>
   );
