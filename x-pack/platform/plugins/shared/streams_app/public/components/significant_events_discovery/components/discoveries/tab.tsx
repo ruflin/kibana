@@ -470,8 +470,13 @@ export function DiscoveriesTab() {
   }, [scheduleDiscoveryPipelineTask, getTaskStatus]);
 
   useEffect(() => {
-    getTaskStatus();
-  }, [getTaskStatus]);
+    getTaskStatus().then((taskResult) => {
+      if (taskResult?.status === TaskStatus.Failed || taskResult?.status === TaskStatus.Completed) {
+        acknowledgeDiscoveryPipelineTask().catch(() => {});
+      }
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const previousTaskStatusRef = useRef<TaskStatus | undefined>(undefined);
 
@@ -479,8 +484,8 @@ export function DiscoveriesTab() {
     const previousStatus = previousTaskStatusRef.current;
     previousTaskStatusRef.current = task?.status;
 
-    if (task?.status === TaskStatus.Failed) {
-      notifications.toasts.addError(getFormattedError(new Error(task.error)), {
+    if (task?.status === TaskStatus.Failed && previousStatus === TaskStatus.InProgress) {
+      notifications.toasts.addError(getFormattedError(new Error(task.error ?? 'Unknown error')), {
         title: i18n.translate('xpack.streams.discoveries.errorTitle', {
           defaultMessage: 'Error generating discoveries',
         }),
@@ -523,11 +528,13 @@ export function DiscoveriesTab() {
     task?.status === TaskStatus.InProgress || isCancellingTask || isSchedulingTask;
 
   const handleGenerate = useCallback(async () => {
-    if (task?.status === TaskStatus.Completed || task?.status === TaskStatus.Failed) {
+    try {
       await acknowledgeDiscoveryPipelineTask();
+    } catch {
+      // Task may already be acknowledged or in a non-terminal state — safe to ignore
     }
     await scheduleTask();
-  }, [task, acknowledgeDiscoveryPipelineTask, scheduleTask]);
+  }, [acknowledgeDiscoveryPipelineTask, scheduleTask]);
 
   const discoveries = (discoveriesFetch.value ?? []) as Discovery[];
 

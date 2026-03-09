@@ -99,45 +99,57 @@ export function SuggestionsTab() {
   }, [scheduleSuggestionTask, getTaskStatus]);
 
   useEffect(() => {
-    getTaskStatus();
-  }, [getTaskStatus]);
+    getTaskStatus().then((taskResult) => {
+      if (taskResult?.status === TaskStatus.Failed || taskResult?.status === TaskStatus.Completed) {
+        acknowledgeSuggestionTask().catch(() => {});
+      }
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const previousTaskStatusRef = useRef<TaskStatus | undefined>(undefined);
 
   useEffect(() => {
-    const previousStatus = previousTaskStatusRef.current;
-    previousTaskStatusRef.current = task?.status;
+    try {
+      const previousStatus = previousTaskStatusRef.current;
+      previousTaskStatusRef.current = task?.status;
 
-    if (task?.status === TaskStatus.Failed) {
-      notifications.toasts.addError(getFormattedError(new Error(task.error)), {
-        title: i18n.translate('xpack.streams.suggestions.errorTitle', {
-          defaultMessage: 'Error generating suggestions',
-        }),
-      });
-    }
-
-    if (task?.status === TaskStatus.Completed && previousStatus === TaskStatus.InProgress) {
-      const count = task.suggestions?.length ?? 0;
-      if (count > 0) {
-        notifications.toasts.addSuccess({
-          title: i18n.translate('xpack.streams.suggestions.generatedTitle', {
-            defaultMessage:
-              '{count} {count, plural, one {suggestion} other {suggestions}} generated',
-            values: { count },
-          }),
-        });
-      } else {
-        notifications.toasts.addInfo({
-          title: i18n.translate('xpack.streams.suggestions.noSuggestionsGeneratedTitle', {
-            defaultMessage: 'No suggestions generated',
-          }),
-          text: i18n.translate('xpack.streams.suggestions.noSuggestionsGeneratedDescription', {
-            defaultMessage:
-              'The AI could not generate suggestions from the current discoveries. Make sure discoveries exist first.',
-          }),
-        });
+      if (task?.status === TaskStatus.Failed && previousStatus === TaskStatus.InProgress) {
+        notifications.toasts.addError(
+          getFormattedError(new Error(task.error ?? 'Unknown error')),
+          {
+            title: i18n.translate('xpack.streams.suggestions.errorTitle', {
+              defaultMessage: 'Error generating suggestions',
+            }),
+          }
+        );
       }
-      suggestionsFetch.refresh();
+
+      if (task?.status === TaskStatus.Completed && previousStatus === TaskStatus.InProgress) {
+        const count = task.suggestions?.length ?? 0;
+        if (count > 0) {
+          notifications.toasts.addSuccess({
+            title: i18n.translate('xpack.streams.suggestions.generatedTitle', {
+              defaultMessage:
+                '{count} {count, plural, one {suggestion} other {suggestions}} generated',
+              values: { count },
+            }),
+          });
+        } else {
+          notifications.toasts.addInfo({
+            title: i18n.translate('xpack.streams.suggestions.noSuggestionsGeneratedTitle', {
+              defaultMessage: 'No suggestions generated',
+            }),
+            text: i18n.translate('xpack.streams.suggestions.noSuggestionsGeneratedDescription', {
+              defaultMessage:
+                'The AI could not generate suggestions from the current discoveries. Make sure discoveries exist first.',
+            }),
+          });
+        }
+        suggestionsFetch.refresh();
+      }
+    } catch {
+      // Guard against stale task data or unexpected shapes
     }
   }, [task, notifications.toasts, suggestionsFetch]);
 
@@ -152,11 +164,13 @@ export function SuggestionsTab() {
     task?.status === TaskStatus.InProgress || isCancellingTask || isSchedulingTask;
 
   const handleGenerate = useCallback(async () => {
-    if (task?.status === TaskStatus.Completed || task?.status === TaskStatus.Failed) {
+    try {
       await acknowledgeSuggestionTask();
+    } catch {
+      // Ignore 409 conflicts — task may already be acknowledged or not exist
     }
     await scheduleTask();
-  }, [task, acknowledgeSuggestionTask, scheduleTask]);
+  }, [acknowledgeSuggestionTask, scheduleTask]);
 
   const handleStatusUpdate = useCallback(
     async (uuid: string, status: 'accepted' | 'dismissed') => {

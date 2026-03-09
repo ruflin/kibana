@@ -55,10 +55,16 @@ Your primary goal is to build a topology from the **entity** and **dependency** 
 ## Active issue annotations
 
 When active issues (discoveries) are provided, annotate affected entities:
-- **Critical** issues: thick red dashed border — \`style NodeId stroke:#d63d2f,stroke-width:3px,stroke-dasharray: 5 5\`
-- **High** issues: orange dashed border — \`style NodeId stroke:#e8790c,stroke-width:2px,stroke-dasharray: 5 5\`
-- **Medium/low** issues: yellow dashed border — \`style NodeId stroke:#d4a017,stroke-width:2px,stroke-dasharray: 5 5\`
-- Add a short issue summary as a note or label annotation on the affected node
+- Define dash classes AFTER the \`graph LR\` line (never before it), then apply them with separate \`class\` statements:
+  - **Critical** issues: \`classDef critical stroke:#d63d2f,stroke-width:3px,stroke-dasharray:5 5\` then \`class NodeId critical\`
+  - **High** issues: \`classDef high stroke:#e8790c,stroke-width:2px,stroke-dasharray:5 5\` then \`class NodeId high\`
+  - **Medium/low** issues: \`classDef medlow stroke:#d4a017,stroke-width:2px,stroke-dasharray:5 5\` then \`class NodeId medlow\`
+- NEVER put \`classDef\` or \`class\` lines before the \`graph\` declaration — Mermaid requires the graph type first
+- NEVER put \`stroke-dasharray\` inside an inline \`style\` statement — always use \`classDef\`/\`class\`
+- NEVER use the \`:::\` inline class syntax — always use separate \`class NodeId className\` statements at the end of the diagram
+- NEVER chain multiple \`:::\` on the same node (e.g., \`A1:::foo:::bar\` is INVALID)
+- Add a short issue summary as a label on the affected edge or in the node label itself (e.g., \`A1("Service Name\\n⚠ High error rate")\`)
+- NEVER use \`note for\` syntax — it is NOT valid in \`graph\` diagrams
 - Match issues to entities using stream_refs and evidence feature_name fields
 
 ## Rules
@@ -71,6 +77,122 @@ When active issues (discoveries) are provided, annotate affected entities:
 - Prioritize clarity: at most 30 nodes; collapse minor entities into group summaries if needed
 - Assign colors to EVERY node based on its role
 - Return ONLY the Mermaid diagram code, no explanation or markdown fences`;
+
+/**
+ * Aggressively sanitizes LLM-generated Mermaid graph code.
+ *
+ * LLMs frequently produce invalid Mermaid syntax. Rather than fixing individual
+ * patterns, this sanitizer applies broad rules:
+ * 1. Ensures `graph` declaration comes first
+ * 2. Strips ALL `:::` inline class syntax → converts to `class` statements
+ * 3. Strips `note for/left/right/over` fragments (invalid in graph diagrams)
+ * 4. Moves `classDef`/`class` before graph declaration to after it
+ * 5. Extracts `stroke-dasharray` from inline `style` into `classDef`
+ * 6. Removes lines that are clearly not valid graph syntax
+ */
+function sanitizeMermaid(code: string): string {
+  const lines = code.split('\n');
+  const outputLines: string[] = [];
+  const deferredClassLines: string[] = [];
+  const extraClassStatements: string[] = [];
+  let graphDeclSeen = false;
+  let fixCounter = 0;
+
+  for (const rawLine of lines) {
+    let trimmed = rawLine.trim();
+
+    if (!trimmed || trimmed.startsWith('%%')) {
+      outputLines.push(rawLine);
+      continue;
+    }
+
+    // Strip markdown fences the LLM sometimes wraps around the code
+    if (/^```/.test(trimmed)) {
+      continue;
+    }
+
+    // Detect graph declaration
+    if (!graphDeclSeen && /^(graph|flowchart)\s+(LR|RL|TD|TB|BT)/i.test(trimmed)) {
+      graphDeclSeen = true;
+      outputLines.push(rawLine);
+      if (deferredClassLines.length > 0) {
+        outputLines.push(...deferredClassLines);
+        deferredClassLines.length = 0;
+      }
+      continue;
+    }
+
+    // Defer classDef/class lines that appear before graph declaration
+    if (!graphDeclSeen && /^(classDef|class)\s+/i.test(trimmed)) {
+      deferredClassLines.push(`    ${trimmed}`);
+      continue;
+    }
+
+    // Strip `note for/left/right/over` anywhere in the line (invalid in graph diagrams)
+    if (/\bnote\s+(for|left|right|over)\b/i.test(trimmed)) {
+      trimmed = trimmed.replace(/\s*\bnote\s+(for|left|right|over)\b\s+\S+\s*"[^"]*"/gi, '');
+      trimmed = trimmed.replace(/\s*\bnote\s+(for|left|right|over)\b.*/gi, '');
+      trimmed = trimmed.trim();
+      if (!trimmed) continue;
+    }
+
+    // Strip ALL `:::className` inline syntax → collect as `class` statements
+    while (/(\b\w+):::(\w+)/.test(trimmed)) {
+      const match = trimmed.match(/(\b\w+):::(\w+)/);
+      if (!match) break;
+      const [fullMatch, nodeId, className] = match;
+      extraClassStatements.push(`    class ${nodeId} ${className}`);
+      trimmed = trimmed.replace(fullMatch, nodeId);
+    }
+
+    // Extract stroke-dasharray from inline style → classDef
+    if (/^style\s+/.test(trimmed) && /stroke-dasharray/i.test(trimmed)) {
+      const nodeMatch = trimmed.match(/^style\s+(\S+)\s+(.+)$/);
+      if (nodeMatch) {
+        const [, nodeId, propsRaw] = nodeMatch;
+        const parts = propsRaw.split(',');
+        const dashParts: string[] = [];
+        const normalParts: string[] = [];
+
+        for (const part of parts) {
+          if (/stroke-dasharray/i.test(part)) {
+            dashParts.push(part.replace(/:\s+/g, ':'));
+          } else {
+            normalParts.push(part);
+          }
+        }
+
+        if (normalParts.length > 0) {
+          outputLines.push(`    style ${nodeId} ${normalParts.join(',')}`);
+        }
+        if (dashParts.length > 0) {
+          const cls = `_dash${fixCounter++}`;
+          outputLines.push(`    classDef ${cls} ${dashParts.join(',')}`);
+          outputLines.push(`    class ${nodeId} ${cls}`);
+        }
+        continue;
+      }
+    }
+
+    outputLines.push(trimmed ? `    ${trimmed}` : rawLine);
+  }
+
+  // Append any deferred classDef/class lines and extracted class statements
+  if (deferredClassLines.length > 0) {
+    outputLines.push(...deferredClassLines);
+  }
+
+  // Deduplicate class statements
+  const seenClassStatements = new Set<string>();
+  for (const stmt of extraClassStatements) {
+    if (!seenClassStatements.has(stmt)) {
+      seenClassStatements.add(stmt);
+      outputLines.push(stmt);
+    }
+  }
+
+  return outputLines.join('\n');
+}
 
 const getTopologyRoute = createServerRoute({
   endpoint: 'GET /internal/streams/_topology',
@@ -225,6 +347,8 @@ const generateTopologyRoute = createServerRoute({
       .replace(/^```\s*/m, '')
       .replace(/```\s*$/m, '')
       .trim();
+
+    mermaidCode = sanitizeMermaid(mermaidCode);
 
     // Persist the generated topology
     let existing: DiscoverySettingsAttributes = {};

@@ -40,6 +40,7 @@ export async function generateDiscoveries({
   discoveryClient,
   featureClient,
   connectorId,
+  enableMetricsTraces,
 }: {
   streamsClient: StreamsClient;
   queryClient: QueryClient;
@@ -285,14 +286,6 @@ async function generateStreamDiscoveries({
 
   const queryDataList = queryDataResults.filter((data): data is QueryData => data !== undefined);
 
-  if (queryDataList.length === 0) {
-    return {
-      discoveries: [],
-      suggestions: [],
-      tokensUsed: { prompt: 0, completion: 0, total: 0 },
-    };
-  }
-
   try {
     const pipelineCallbacks = toolDeps ? createPipelineToolCallbacks(toolDeps) : {};
     const noopSubmit = async () => ({ response: { acknowledged: true } });
@@ -301,7 +294,10 @@ async function generateStreamDiscoveries({
       prompt: ExtractDiscoveriesPrompt,
       input: {
         streamName: stream.name,
-        queries: JSON.stringify(queryDataList),
+        queries:
+          queryDataList.length > 0
+            ? JSON.stringify(queryDataList)
+            : '[]  (no pre-existing query data — use tools to investigate the stream directly)',
       },
       inferenceClient,
       maxSteps: 8,

@@ -176,11 +176,15 @@ export class InferencePlugin
         anonymizationRulesPromise: createAnonymizationRulesPromise(request),
         regexWorker: (() => {
           if (!this.regexWorker) {
-            this.logger.error(
-              'RegexWorkerService is not initialized — Anonymization plugin.start() may not have completed'
+            this.logger.warn(
+              'RegexWorkerService is not initialized — creating fallback instance'
+            );
+            this.regexWorker = new RegexWorkerService(
+              this.config.workers.anonymization,
+              this.logger.get('regex_worker')
             );
           }
-          return this.regexWorker!;
+          return this.regexWorker;
         })(),
         esClient: core.elasticsearch.client.asScoped(request).asCurrentUser,
         anonymization: {

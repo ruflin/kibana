@@ -261,17 +261,15 @@ export class StreamsPlugin
               return discoveryService.getClientWithRequest({ request });
             },
             getStreamsClient: async (request) => {
-              const [ac, fc, sc, qc] = await Promise.all([
+              const [ac, fc, qc] = await Promise.all([
                 attachmentService.getClientWithRequest({ request }),
                 featureService.getClientWithRequest({ request }),
-                systemService.getClientWithRequest({ request }),
                 queryService.getClientWithRequest({ request }),
               ]);
               return streamsService.getClientWithRequest({
                 request,
                 attachmentClient: ac,
                 queryClient: qc,
-                systemClient: sc,
                 featureClient: fc,
               });
             },

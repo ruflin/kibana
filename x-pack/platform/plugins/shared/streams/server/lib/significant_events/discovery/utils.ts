@@ -7,7 +7,6 @@
 
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import { omit } from 'lodash';
-import type { Condition } from '@kbn/streamlang';
 import type { Discovery, Suggestion } from '@kbn/streams-schema';
 import { parse as parseEsql } from '@kbn/esql-language';
 import type { Query } from '../../../../common/queries';
@@ -18,17 +17,14 @@ import { SUBMIT_SUGGESTIONS_TOOL_NAME, parseSuggestionsWithErrors } from './sugg
 
 export interface QueryData {
   title: string;
-  kql: string;
-  feature?: {
-    name: string;
-    filter: Condition;
-  };
+  esql: string;
+  query_purpose?: string;
   currentCount: number;
   sampleEvents: string[];
 }
 
 const SAMPLE_EVENTS_COUNT = 5;
-const CURRENT_WINDOW_MINUTES = 15;
+const CURRENT_WINDOW_HOURS = 24;
 
 export function extractDiscoveriesFromResponse(
   response: { toolCalls?: Array<{ function: { name: string; arguments: unknown } }> },
@@ -127,62 +123,66 @@ export async function collectQueryData({
 }): Promise<QueryData | undefined> {
   const { rule_id: ruleId } = query;
 
-  const currentResponse = await esClient
-    .search<{ original_source: Record<string, unknown> }>({
-      index: '.alerts-streams.alerts-default',
-      size: SAMPLE_EVENTS_COUNT,
-      query: {
-        bool: {
-          filter: [
-            {
-              range: {
-                '@timestamp': {
-                  gte: `now-${CURRENT_WINDOW_MINUTES}m`,
-                  lte: 'now',
+  try {
+    const currentResponse = await esClient
+      .search<{ original_source: Record<string, unknown> }>({
+        index: '.alerts-streams.alerts-default',
+        size: SAMPLE_EVENTS_COUNT,
+        query: {
+          bool: {
+            filter: [
+              {
+                range: {
+                  '@timestamp': {
+                    gte: `now-${CURRENT_WINDOW_HOURS}h`,
+                    lte: 'now',
+                  },
                 },
               },
-            },
-            {
-              term: {
-                'kibana.alert.rule.uuid': ruleId,
+              {
+                term: {
+                  'kibana.alert.rule.uuid': ruleId,
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-      track_total_hits: true,
-    })
-    .catch((err) => {
-      const { type, message } = parseError(err);
-      if (type === 'security_exception') {
-        throw new SecurityError(
-          `Cannot read Significant events, insufficient privileges: ${message}`,
-          { cause: err }
-        );
-      }
-      throw err;
-    });
+        track_total_hits: true,
+      })
+      .catch((err) => {
+        const { type, message } = parseError(err);
+        if (type === 'security_exception') {
+          throw new SecurityError(
+            `Cannot read Significant events, insufficient privileges: ${message}`,
+            { cause: err }
+          );
+        }
+        throw err;
+      });
 
-  const currentCount =
-    typeof currentResponse.hits.total === 'number'
-      ? currentResponse.hits.total
-      : currentResponse.hits.total?.value ?? 0;
+    const currentCount =
+      typeof currentResponse.hits.total === 'number'
+        ? currentResponse.hits.total
+        : currentResponse.hits.total?.value ?? 0;
 
-  if (currentCount === 0) {
-    return undefined;
+    const sampleEvents = currentResponse.hits.hits.map((hit) =>
+      JSON.stringify(omit(hit._source?.original_source ?? {}, '_id'))
+    );
+
+    return {
+      title: query.query.title,
+      esql: query.query.esql.query,
+      query_purpose: query.query.query_purpose,
+      currentCount,
+      sampleEvents,
+    };
+  } catch (error) {
+    return {
+      title: query.query.title,
+      esql: query.query.esql.query,
+      query_purpose: query.query.query_purpose,
+      currentCount: 0,
+      sampleEvents: [],
+    };
   }
-
-  const sampleEvents = currentResponse.hits.hits.map((hit) =>
-    JSON.stringify(omit(hit._source?.original_source ?? {}, '_id'))
-  );
-
-  return {
-    title: query.query.title,
-    kql: query.query.kql.query,
-    feature: query.query.feature
-      ? { name: query.query.feature.name, filter: query.query.feature.filter }
-      : undefined,
-    currentCount,
-    sampleEvents,
-  };
 }

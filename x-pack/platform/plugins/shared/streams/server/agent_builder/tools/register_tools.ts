@@ -26,6 +26,7 @@ import { createGetLogPatternsTool } from './get_log_patterns';
 import { createRunLogRateAnalysisTool } from './run_log_rate_analysis';
 import { createGetQueryResultsTool } from './get_query_results';
 import { createGetQueryDefinitionsTool } from './get_query_definitions';
+import { createCreateSuggestionTool } from './create_suggestion';
 
 export const registerTools = (
   agentBuilder: AgentBuilderPluginSetup,
@@ -49,6 +50,7 @@ export const registerTools = (
     createRunLogRateAnalysisTool({ deps }),
     createGetQueryResultsTool({ deps }),
     createGetQueryDefinitionsTool({ deps }),
+    createCreateSuggestionTool({ deps }),
   ];
 
   for (const tool of tools) {

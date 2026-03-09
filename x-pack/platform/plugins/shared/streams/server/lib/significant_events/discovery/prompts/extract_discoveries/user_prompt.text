@@ -1,8 +1,13 @@
-Analyze the significant events for this data stream and generate structured discoveries.
-Start by calling get_sig_events_with_change_points to identify queries with statistically significant changes, then investigate the most interesting findings using the other available tools.
+Analyze this data stream and generate structured discoveries.
 
 `data stream`
 {{{streamName}}}
 
 `initial query data (for context — use tools for deeper investigation)`
 {{{queries}}}
+
+Start your investigation:
+1. If query data is available above, call `get_sig_events_with_change_points` to check for statistically significant changes.
+2. Always call `search_events` with a broad query (e.g., `FROM {{{streamName}}} | LIMIT 20`) to understand the data, then `get_log_patterns` to identify dominant patterns.
+3. Use `get_stream_features` to understand what systems are present.
+4. Submit at least one discovery based on your findings.

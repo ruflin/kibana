@@ -482,10 +482,8 @@ export function createPipelineToolCallbacks(
         const definitions = queries.map((q) => ({
           id: q.query.id,
           title: q.query.title,
-          kql: q.query.kql.query,
-          feature: q.query.feature
-            ? { name: q.query.feature.name, filter: q.query.feature.filter }
-            : undefined,
+          esql: q.query.esql.query,
+          query_purpose: q.query.query_purpose ?? 'detection',
           severity_score: q.query.severity_score,
           rule_backed: q.rule_backed,
         }));

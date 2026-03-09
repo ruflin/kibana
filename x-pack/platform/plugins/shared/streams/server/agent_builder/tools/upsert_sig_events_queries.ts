@@ -19,25 +19,16 @@ const upsertSigEventsQueriesSchema = z.object({
     .array(
       z.object({
         title: z.string().describe('Query title'),
-        kql: z
+        esql_query: z
           .string()
-          .optional()
-          .describe('KQL filter. Required for row queries. Use "*" to match all events.'),
-        query_type: z
-          .enum(['row', 'stats'])
-          .default('row')
-          .describe('ES|QL execution type: row for event-level filtering, stats for aggregation'),
+          .describe(
+            'ES|QL query string. Must include a FROM clause targeting the stream. When filtering on text fields (e.g. message), use MATCH(field, "text") instead of ==. Examples: "FROM logs.otel | WHERE MATCH(message, \\"error\\") | LIMIT 100", "FROM logs.otel | STATS error_count = COUNT(*) BY service.name | SORT error_count DESC"'
+          ),
         query_purpose: z
           .enum(['detection', 'exclusion', 'stats', 'baseline', 'correlation'])
           .default('detection')
           .describe(
             'Purpose of the query: detection (default, detects significant events), exclusion (noise-canceling, filters known-noisy patterns), stats (aggregation metrics like error rates), baseline (normal operating range reference), correlation (co-occurrence analysis)'
-          ),
-        esql_query: z
-          .string()
-          .optional()
-          .describe(
-            'Raw ES|QL query string. Required for stats queries (query_type: stats). Must include a FROM clause targeting the stream. When filtering on text fields (e.g. message), use MATCH(field, "text") instead of ==. Example: "FROM logs | WHERE MATCH(message, "error") | STATS error_count = COUNT(*) BY service.name | SORT error_count DESC"'
           ),
       })
     )
@@ -54,11 +45,11 @@ export const createUpsertSigEventsQueriesTool = ({
   const toolDefinition: BuiltinToolDefinition<typeof upsertSigEventsQueriesSchema> = {
     id: UPSERT_SIG_EVENTS_QUERIES_TOOL_ID,
     type: ToolType.builtin,
-    description: `Write sig events query definitions for a stream. Supports multiple query purposes:
+    description: `Write sig events query definitions for a stream using ES|QL. Supports multiple query purposes:
 
-- detection (default): KQL row queries that detect specific significant events (errors, failures, anomalies)
-- exclusion: KQL row queries that identify known-noisy patterns to filter out (health checks, heartbeats, debug logs)
-- stats: Raw ES|QL aggregation queries for metrics like error rates, throughput, latency percentiles
+- detection (default): ES|QL queries that detect specific significant events (errors, failures, anomalies)
+- exclusion: ES|QL queries that identify known-noisy patterns to filter out (health checks, heartbeats, debug logs)
+- stats: ES|QL aggregation queries for metrics like error rates, throughput, latency percentiles
 - baseline: Aggregation queries capturing normal operating ranges as anomaly detection references
 - correlation: Aggregation queries surfacing co-occurring patterns across fields or streams
 
@@ -85,10 +76,8 @@ When to use:
             index: {
               id: uuidv4(),
               title: q.title,
-              kql: { query: q.kql ?? '*' },
-              query_type: q.query_type,
+              esql: { query: q.esql_query },
               query_purpose: q.query_purpose,
-              esql_override: q.esql_query,
             },
           })),
           { createRules: false }
