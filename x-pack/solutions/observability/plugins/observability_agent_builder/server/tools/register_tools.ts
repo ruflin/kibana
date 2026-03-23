@@ -62,6 +62,8 @@ export const PLATFORM_TOOL_IDS = [
   platformCoreTools.getDocumentById,
   platformCoreTools.productDocumentation,
   platformStreamsSigEventsTools.searchKnowledgeIndicators,
+  platformStreamsSigEventsTools.writeFeatureKnowledgeIndicator,
+  platformStreamsSigEventsTools.writeQueryKnowledgeIndicator,
 ];
 
 export const OBSERVABILITY_TOOL_IDS = [

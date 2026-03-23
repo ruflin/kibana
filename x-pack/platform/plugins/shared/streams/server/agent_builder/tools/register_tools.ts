@@ -13,8 +13,20 @@ import {
   createSearchKnowledgeIndicatorsTool,
   STREAMS_SEARCH_KNOWLEDGE_INDICATORS_TOOL_ID,
 } from './search_knowledge_indicators/tool';
+import {
+  createWriteFeatureKnowledgeIndicatorTool,
+  STREAMS_WRITE_FEATURE_KNOWLEDGE_INDICATOR_TOOL_ID,
+} from './write_feature_knowledge_indicator/tool';
+import {
+  createWriteQueryKnowledgeIndicatorTool,
+  STREAMS_WRITE_QUERY_KNOWLEDGE_INDICATOR_TOOL_ID,
+} from './write_query_knowledge_indicator/tool';
 
-export { STREAMS_SEARCH_KNOWLEDGE_INDICATORS_TOOL_ID };
+export {
+  STREAMS_SEARCH_KNOWLEDGE_INDICATORS_TOOL_ID,
+  STREAMS_WRITE_FEATURE_KNOWLEDGE_INDICATOR_TOOL_ID,
+  STREAMS_WRITE_QUERY_KNOWLEDGE_INDICATOR_TOOL_ID,
+};
 
 export function registerAgentBuilderTools({
   agentBuilder,
@@ -36,6 +48,16 @@ export function registerAgentBuilderTools({
       getScopedClients,
       server,
       logger: logger.get('search_knowledge_indicators_tool'),
+    }),
+    createWriteFeatureKnowledgeIndicatorTool({
+      getScopedClients,
+      server,
+      logger: logger.get('write_feature_knowledge_indicator_tool'),
+    }),
+    createWriteQueryKnowledgeIndicatorTool({
+      getScopedClients,
+      server,
+      logger: logger.get('write_query_knowledge_indicator_tool'),
     }),
   ];
 

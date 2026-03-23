@@ -37,6 +37,8 @@ export const platformCoreTools = {
 
 export const platformStreamsSigEventsTools = {
   searchKnowledgeIndicators: `${internalNamespaces.platformStreams}.sig_events.search_knowledge_indicators`,
+  writeFeatureKnowledgeIndicator: `${internalNamespaces.platformStreams}.sig_events.write_feature_knowledge_indicator`,
+  writeQueryKnowledgeIndicator: `${internalNamespaces.platformStreams}.sig_events.write_query_knowledge_indicator`,
 } as const;
 
 export const attachmentTools = {
