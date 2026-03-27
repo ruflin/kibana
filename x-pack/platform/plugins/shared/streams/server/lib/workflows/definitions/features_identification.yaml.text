@@ -1,0 +1,52 @@
+version: '1'
+name: streams-features-identification
+description: Identify knowledge indicator features for a stream using LLM and computed analysis
+enabled: true
+triggers:
+  - type: manual
+inputs:
+  - name: stream_name
+    type: string
+    required: true
+  - name: start
+    type: number
+    required: true
+  - name: end
+    type: number
+    required: true
+
+settings:
+  concurrency:
+    key: "streams-features-${{ inputs.stream_name }}"
+    max: 1
+    strategy: cancel-in-progress
+  timeout: 30m
+
+steps:
+  - name: fetch_samples
+    type: streams.fetchSampleDocuments
+    with:
+      stream-name: ${{ inputs.stream_name }}
+      start: ${{ inputs.start }}
+      end: ${{ inputs.end }}
+
+  - name: identify_features
+    type: streams.identifyFeatures
+    with:
+      stream-name: ${{ inputs.stream_name }}
+      documents: ${{ steps.fetch_samples.output.documents }}
+
+  - name: computed_features
+    type: streams.generateComputedFeatures
+    with:
+      stream-name: ${{ inputs.stream_name }}
+      start: ${{ inputs.start }}
+      end: ${{ inputs.end }}
+
+  - name: persist_features
+    type: streams.reconcileAndPersistFeatures
+    with:
+      stream-name: ${{ inputs.stream_name }}
+      inferred-features: ${{ steps.identify_features.output.features }}
+      computed-features: ${{ steps.computed_features.output.features }}
+      ignored-features: ${{ steps.identify_features.output.ignored-features }}

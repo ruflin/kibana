@@ -25,6 +25,7 @@ import type { TaskClient } from '../lib/tasks/task_client';
 import type { StreamsTaskType } from '../lib/tasks/task_definitions';
 import type { InsightClient } from '../lib/significant_events/insights/client/insight_client';
 import type { ModelSettingsConfigClient } from '../lib/saved_objects/significant_events/model_settings_config_service';
+import type { StreamsWorkflowService } from '../lib/workflows/streams_workflow_service';
 
 export type GetScopedClients = ({
   request,
@@ -54,6 +55,7 @@ export interface RouteDependencies {
   telemetry: EbtTelemetryClient;
   getScopedClients: GetScopedClients;
   processorSuggestions: ProcessorSuggestionsService;
+  workflowService?: StreamsWorkflowService;
 }
 
 export type StreamsRouteHandlerResources = RouteDependencies & DefaultRouteHandlerResources;

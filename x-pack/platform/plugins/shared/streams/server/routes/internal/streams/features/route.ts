@@ -8,8 +8,9 @@
 import { z } from '@kbn/zod/v4';
 import { BooleanFromString } from '@kbn/zod-helpers/v4';
 import type { IdentifyFeaturesResult, TaskResult } from '@kbn/streams-schema';
-import { baseFeatureSchema, featureSchema, type Feature } from '@kbn/streams-schema';
+import { baseFeatureSchema, featureSchema, TaskStatus, type Feature } from '@kbn/streams-schema';
 import { v4 as uuid } from 'uuid';
+import type { KibanaRequest } from '@kbn/core/server';
 import { createServerRoute } from '../../../create_server_route';
 import { assertSignificantEventsAccess } from '../../../utils/assert_significant_events_access';
 import { STREAMS_API_PRIVILEGES } from '../../../../../common/constants';
@@ -20,6 +21,7 @@ import {
 } from '../../../../lib/tasks/task_definitions/features_identification';
 import { taskActionSchema } from '../../../../lib/tasks/task_action_schema';
 import { handleTaskAction } from '../../../utils/task_helpers';
+import type { StreamsWorkflowService } from '../../../../lib/workflows/streams_workflow_service';
 
 const dateFromString = z.string().transform((input) => new Date(input));
 
@@ -267,6 +269,7 @@ export const featuresStatusRoute = createServerRoute({
     request,
     getScopedClients,
     server,
+    workflowService,
   }): Promise<FeaturesIdentificationTaskResult> => {
     const { streamsClient, licensing, uiSettingsClient, taskClient } = await getScopedClients({
       request,
@@ -276,6 +279,10 @@ export const featuresStatusRoute = createServerRoute({
 
     const { name } = params.path;
     await streamsClient.ensureStream(name);
+
+    if (workflowService) {
+      return await workflowService.getStatus(name, 'featuresIdentification', 'default');
+    }
 
     return await taskClient.getStatus<FeaturesIdentificationTaskParams, IdentifyFeaturesResult>(
       getFeaturesIdentificationTaskId(name)
@@ -308,6 +315,7 @@ export const featuresTaskRoute = createServerRoute({
     request,
     getScopedClients,
     server,
+    workflowService,
   }): Promise<FeaturesIdentificationTaskResult> => {
     const { streamsClient, licensing, uiSettingsClient, taskClient } = await getScopedClients({
       request,
@@ -320,6 +328,10 @@ export const featuresTaskRoute = createServerRoute({
       body,
     } = params;
     await streamsClient.ensureStream(name);
+
+    if (workflowService) {
+      return handleWorkflowAction({ workflowService, streamName: name, body, request });
+    }
 
     const taskId = getFeaturesIdentificationTaskId(name);
 
@@ -347,6 +359,40 @@ export const featuresTaskRoute = createServerRoute({
     });
   },
 });
+
+async function handleWorkflowAction({
+  workflowService,
+  streamName,
+  body,
+  request,
+}: {
+  workflowService: StreamsWorkflowService;
+  streamName: string;
+  body: { action: string; from?: Date; to?: Date };
+  request: KibanaRequest;
+}): Promise<FeaturesIdentificationTaskResult> {
+  if (body.action === 'schedule') {
+    if (!body.from || !body.to) {
+      throw new Error('from and to are required for schedule action');
+    }
+    await workflowService.run(
+      'featuresIdentification',
+      {
+        stream_name: streamName,
+        start: body.from.getTime(),
+        end: body.to.getTime(),
+      },
+      request,
+      'default'
+    );
+    return { status: TaskStatus.InProgress };
+  } else if (body.action === 'cancel') {
+    await workflowService.cancel(streamName, 'featuresIdentification', 'default');
+    return { status: TaskStatus.BeingCanceled };
+  }
+
+  return workflowService.getStatus(streamName, 'featuresIdentification', 'default');
+}
 
 export const featureRoutes = {
   ...upsertFeatureRoute,

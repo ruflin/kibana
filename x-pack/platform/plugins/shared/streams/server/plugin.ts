@@ -56,6 +56,8 @@ import { TaskService } from './lib/tasks/task_service';
 import { InsightService } from './lib/significant_events/insights/client/insight_service';
 import { baseFields } from './lib/streams/component_templates/logs_layer';
 import { ecsBaseFields } from './lib/streams/component_templates/logs_ecs_layer';
+import { registerStreamsWorkflowSteps } from './lib/workflows/steps';
+import { StreamsWorkflowService } from './lib/workflows/streams_workflow_service';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface StreamsPluginSetup {}
@@ -195,6 +197,15 @@ export class StreamsPlugin
       };
     };
 
+    if (plugins.workflowsExtensions) {
+      registerStreamsWorkflowSteps(plugins.workflowsExtensions, getScopedClients);
+    }
+
+    const workflowService =
+      plugins.workflowsExtensions && plugins.workflowsManagement
+        ? new StreamsWorkflowService(core, plugins.workflowsManagement.management, this.logger)
+        : undefined;
+
     if (plugins.agentBuilder) {
       registerStreamsAgentBuilder({
         agentBuilder: plugins.agentBuilder,
@@ -272,6 +283,7 @@ export class StreamsPlugin
         telemetry: telemetryClient,
         processorSuggestions: this.processorSuggestionsService,
         getScopedClients,
+        workflowService,
       },
       core,
       logger: this.logger,
