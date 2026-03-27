@@ -22,6 +22,7 @@ import {
 import { taskActionSchema } from '../../../../lib/tasks/task_action_schema';
 import { handleTaskAction } from '../../../utils/task_helpers';
 import type { StreamsWorkflowService } from '../../../../lib/workflows/streams_workflow_service';
+import { featureWorkflowPhaseRoutes } from './workflow_phase_routes';
 
 const dateFromString = z.string().transform((input) => new Date(input));
 
@@ -402,4 +403,5 @@ export const featureRoutes = {
   ...bulkFeaturesRoute,
   ...featuresStatusRoute,
   ...featuresTaskRoute,
+  ...featureWorkflowPhaseRoutes,
 };

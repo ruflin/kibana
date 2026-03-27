@@ -24,29 +24,45 @@ settings:
 
 steps:
   - name: fetch_samples
-    type: streams.fetchSampleDocuments
+    type: kibana.request
     with:
-      stream-name: ${{ inputs.stream_name }}
-      start: ${{ inputs.start }}
-      end: ${{ inputs.end }}
+      method: POST
+      path: /internal/streams/{{ inputs.stream_name }}/features/_workflow/fetch_samples
+      headers:
+        x-elastic-internal-origin: kibana
+      body:
+        start: ${{ inputs.start }}
+        end: ${{ inputs.end }}
 
   - name: identify_features
-    type: streams.identifyFeatures
+    type: kibana.request
     with:
-      stream-name: ${{ inputs.stream_name }}
-      documents: ${{ steps.fetch_samples.output.documents }}
+      method: POST
+      path: /internal/streams/{{ inputs.stream_name }}/features/_workflow/identify
+      headers:
+        x-elastic-internal-origin: kibana
+      body:
+        documents: ${{ steps.fetch_samples.output.documents }}
 
   - name: computed_features
-    type: streams.generateComputedFeatures
+    type: kibana.request
     with:
-      stream-name: ${{ inputs.stream_name }}
-      start: ${{ inputs.start }}
-      end: ${{ inputs.end }}
+      method: POST
+      path: /internal/streams/{{ inputs.stream_name }}/features/_workflow/computed
+      headers:
+        x-elastic-internal-origin: kibana
+      body:
+        start: ${{ inputs.start }}
+        end: ${{ inputs.end }}
 
   - name: persist_features
-    type: streams.reconcileAndPersistFeatures
+    type: kibana.request
     with:
-      stream-name: ${{ inputs.stream_name }}
-      inferred-features: ${{ steps.identify_features.output.features }}
-      computed-features: ${{ steps.computed_features.output.features }}
-      ignored-features: ${{ steps.identify_features.output.ignored-features }}
+      method: POST
+      path: /internal/streams/{{ inputs.stream_name }}/features/_workflow/persist
+      headers:
+        x-elastic-internal-origin: kibana
+      body:
+        inferred_features: ${{ steps.identify_features.output.features }}
+        computed_features: ${{ steps.computed_features.output.features }}
+        ignored_features: ${{ steps.identify_features.output.ignored_features }}
