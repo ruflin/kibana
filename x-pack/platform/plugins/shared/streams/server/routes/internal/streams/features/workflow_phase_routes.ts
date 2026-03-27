@@ -6,7 +6,7 @@
  */
 
 import type { SearchHit } from '@elastic/elasticsearch/lib/api/types';
-import type { BaseFeature, IgnoredFeature } from '@kbn/streams-schema';
+import type { BaseFeature, Feature, IgnoredFeature } from '@kbn/streams-schema';
 import { z } from '@kbn/zod/v4';
 import { createServerRoute } from '../../../create_server_route';
 import { assertSignificantEventsAccess } from '../../../utils/assert_significant_events_access';
@@ -23,37 +23,13 @@ import {
   executePersistPhase,
 } from '../../../../lib/workflows/feature_identification_phases';
 
-const bodySchemaFetch = z.object({
-  start: z.number(),
-  end: z.number(),
-});
-
-const bodySchemaIdentify = z.object({
-  documents: z.array(z.unknown()),
-});
-
-const bodySchemaComputed = z.object({
-  start: z.number(),
-  end: z.number(),
-});
-
-const bodySchemaPersist = z.object({
-  inferred_features: z.array(z.unknown()),
-  computed_features: z.array(z.unknown()),
-  ignored_features: z.array(z.unknown()),
-});
-
-/**
- * Internal phases invoked by the features-identification workflow via kibana.request
- * (no custom workflow step types required).
- */
 export const fetchSamplesWorkflowPhaseRoute = createServerRoute({
   endpoint: 'POST /internal/streams/{name}/features/_workflow/fetch_samples',
   options: {
     access: 'internal',
     summary: 'Workflow phase: fetch sample documents for feature identification',
     description:
-      'Used by the streams-features-identification workflow. Returns sample documents for LLM analysis.',
+      'Fetches sample documents with entity-filter exclusion. Existing features are passed in by the workflow.',
   },
   security: {
     authz: {
@@ -62,7 +38,11 @@ export const fetchSamplesWorkflowPhaseRoute = createServerRoute({
   },
   params: z.object({
     path: z.object({ name: z.string() }),
-    body: bodySchemaFetch,
+    body: z.object({
+      start: z.number(),
+      end: z.number(),
+      existing_features: z.array(z.unknown()).optional(),
+    }),
   }),
   handler: async ({
     params,
@@ -80,6 +60,7 @@ export const fetchSamplesWorkflowPhaseRoute = createServerRoute({
       streamName: params.path.name,
       start: params.body.start,
       end: params.body.end,
+      existingFeatures: (params.body.existing_features ?? []) as Feature[],
       logger,
     });
   },
@@ -91,7 +72,8 @@ export const identifyWorkflowPhaseRoute = createServerRoute({
     access: 'internal',
     summary: 'Workflow phase: LLM feature identification',
     description:
-      'Used by the streams-features-identification workflow. Runs inference on sample documents.',
+      'Runs inference on sample documents. Connector ID, prompt, and excluded features are passed in by the workflow.',
+    timeout: { idleSocket: 5 * 60 * 1000 },
   },
   security: {
     authz: {
@@ -100,7 +82,12 @@ export const identifyWorkflowPhaseRoute = createServerRoute({
   },
   params: z.object({
     path: z.object({ name: z.string() }),
-    body: bodySchemaIdentify,
+    body: z.object({
+      documents: z.array(z.unknown()),
+      connector_id: z.string().optional(),
+      system_prompt: z.string().optional(),
+      excluded_features: z.array(z.unknown()).optional(),
+    }),
   }),
   handler: async ({ params, request, getScopedClients, server }): Promise<IdentifyPhaseResult> => {
     const { licensing, uiSettingsClient } = await getScopedClients({ request });
@@ -112,6 +99,9 @@ export const identifyWorkflowPhaseRoute = createServerRoute({
       request,
       streamName: params.path.name,
       documents: params.body.documents as Array<SearchHit<Record<string, unknown>>>,
+      connectorId: params.body.connector_id,
+      systemPrompt: params.body.system_prompt,
+      excludedFeatures: (params.body.excluded_features ?? []) as Feature[],
       logger,
     });
   },
@@ -122,8 +112,7 @@ export const computedWorkflowPhaseRoute = createServerRoute({
   options: {
     access: 'internal',
     summary: 'Workflow phase: generate computed features',
-    description:
-      'Used by the streams-features-identification workflow. Runs ES aggregations and dataset analysis.',
+    description: 'Runs ES aggregations and dataset analysis to generate computed features.',
   },
   security: {
     authz: {
@@ -132,7 +121,10 @@ export const computedWorkflowPhaseRoute = createServerRoute({
   },
   params: z.object({
     path: z.object({ name: z.string() }),
-    body: bodySchemaComputed,
+    body: z.object({
+      start: z.number(),
+      end: z.number(),
+    }),
   }),
   handler: async ({
     params,
@@ -161,7 +153,7 @@ export const persistWorkflowPhaseRoute = createServerRoute({
     access: 'internal',
     summary: 'Workflow phase: reconcile and persist features',
     description:
-      'Used by the streams-features-identification workflow. Merges inferred and computed features and persists.',
+      'Merges inferred and computed features, deduplicates against existing/excluded, and bulk writes.',
   },
   security: {
     authz: {
@@ -170,7 +162,11 @@ export const persistWorkflowPhaseRoute = createServerRoute({
   },
   params: z.object({
     path: z.object({ name: z.string() }),
-    body: bodySchemaPersist,
+    body: z.object({
+      inferred_features: z.array(z.unknown()),
+      computed_features: z.array(z.unknown()),
+      ignored_features: z.array(z.unknown()),
+    }),
   }),
   handler: async ({ params, request, getScopedClients, server }): Promise<PersistPhaseResult> => {
     const { licensing, uiSettingsClient } = await getScopedClients({ request });

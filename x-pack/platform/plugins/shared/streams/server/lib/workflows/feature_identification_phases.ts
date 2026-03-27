@@ -15,7 +15,6 @@ import type { BaseFeature, Feature, IgnoredFeature } from '@kbn/streams-schema';
 import { isComputedFeature, isDuplicateFeature, isFeatureWithFilter } from '@kbn/streams-schema';
 import { v4 as uuid, v5 as uuidv5 } from 'uuid';
 import { fetchSampleDocuments } from '../tasks/task_definitions/features_identification/fetch_sample_documents';
-import { PromptsConfigService } from '../saved_objects/significant_events/prompts_config_service';
 import { resolveConnectorId } from '../../routes/utils/resolve_connector_id';
 import { MAX_FEATURE_AGE_MS } from '../streams/feature/feature_client';
 import type { GetScopedClients } from '../../routes/types';
@@ -35,6 +34,7 @@ export async function executeFetchSamplesPhase({
   streamName,
   start,
   end,
+  existingFeatures,
   logger,
 }: {
   getScopedClients: GetScopedClients;
@@ -42,15 +42,14 @@ export async function executeFetchSamplesPhase({
   streamName: string;
   start: number;
   end: number;
+  existingFeatures: Feature[];
   logger: Logger;
 }): Promise<FetchSamplesPhaseResult> {
-  const { scopedClusterClient, featureClient, streamsClient } = await getScopedClients({
+  const { scopedClusterClient, streamsClient } = await getScopedClients({
     request,
   });
 
   await streamsClient.ensureStream(streamName);
-
-  const { hits: existingFeatures } = await featureClient.getFeatures(streamName);
 
   const { documents, totalFilters, filtersCapped, hasFilteredDocuments } =
     await fetchSampleDocuments({
@@ -81,31 +80,30 @@ export async function executeIdentifyPhase({
   request,
   streamName,
   documents,
+  connectorId: providedConnectorId,
+  systemPrompt,
+  excludedFeatures: rawExcludedFeatures,
   logger,
 }: {
   getScopedClients: GetScopedClients;
   request: KibanaRequest;
   streamName: string;
   documents: Array<SearchHit<Record<string, unknown>>>;
+  connectorId?: string;
+  systemPrompt?: string;
+  excludedFeatures?: Feature[];
   logger: Logger;
 }): Promise<IdentifyPhaseResult> {
-  const { inferenceClient, featureClient, soClient, modelSettingsClient, uiSettingsClient } =
-    await getScopedClients({ request });
+  const { inferenceClient, uiSettingsClient } = await getScopedClients({ request });
 
-  const settings = await modelSettingsClient.getSettings();
   const connectorId = await resolveConnectorId({
-    connectorId: settings.connectorIdKnowledgeIndicatorExtraction,
+    connectorId: providedConnectorId,
     uiSettingsClient,
     logger,
   });
 
-  const { hits: excludedFeatures } = await featureClient.getExcludedFeatures(streamName);
-  const { featurePromptOverride } = await new PromptsConfigService({
-    soClient,
-    logger,
-  }).getPrompt();
-
-  const excludedSummaries: ExcludedFeatureSummary[] = excludedFeatures
+  const excludedSummaries: ExcludedFeatureSummary[] = (rawExcludedFeatures ?? [])
+    .filter((f) => f.excluded_at != null)
     .slice(0, MAX_EXCLUDED_FEATURES_FOR_PROMPT)
     .map(({ id, type, subtype, title, description, properties }) => ({
       id,
@@ -125,7 +123,7 @@ export async function executeIdentifyPhase({
     inferenceClient: boundInferenceClient,
     logger,
     signal: new AbortController().signal,
-    systemPrompt: featurePromptOverride,
+    systemPrompt: systemPrompt ?? '',
   });
 
   return {

@@ -23,6 +23,16 @@ settings:
   timeout: 30m
 
 steps:
+  # 1. Fetch existing features (used for entity-filter sampling)
+  - name: get_existing_features
+    type: kibana.request
+    with:
+      method: GET
+      path: /internal/streams/{{ inputs.stream_name }}/features
+      headers:
+        x-elastic-internal-origin: kibana
+
+  # 2. Fetch sample documents (needs existing features for entity filters)
   - name: fetch_samples
     type: kibana.request
     with:
@@ -33,9 +43,39 @@ steps:
       body:
         start: ${{ inputs.start }}
         end: ${{ inputs.end }}
+        existing_features: ${{ steps.get_existing_features.output.features }}
 
+  # 3. Get significant events settings (connector ID for LLM)
+  - name: get_settings
+    type: kibana.request
+    with:
+      method: GET
+      path: /internal/streams/_significant_events/settings
+      headers:
+        x-elastic-internal-origin: kibana
+
+  # 4. Get prompt overrides
+  - name: get_prompts
+    type: kibana.request
+    with:
+      method: GET
+      path: /internal/streams/_prompts
+      headers:
+        x-elastic-internal-origin: kibana
+
+  # 5. Get excluded features (for LLM context)
+  - name: get_excluded_features
+    type: kibana.request
+    with:
+      method: GET
+      path: /internal/streams/{{ inputs.stream_name }}/features?include_excluded=true
+      headers:
+        x-elastic-internal-origin: kibana
+
+  # 6. LLM feature identification (only the inference call + post-processing)
   - name: identify_features
     type: kibana.request
+    timeout: 5m
     with:
       method: POST
       path: /internal/streams/{{ inputs.stream_name }}/features/_workflow/identify
@@ -43,9 +83,14 @@ steps:
         x-elastic-internal-origin: kibana
       body:
         documents: ${{ steps.fetch_samples.output.documents }}
+        connector_id: ${{ steps.get_settings.output.connectorIdKnowledgeIndicatorExtraction }}
+        system_prompt: ${{ steps.get_prompts.output.featurePromptOverride }}
+        excluded_features: ${{ steps.get_excluded_features.output.features }}
 
+  # 7. Generate computed features (dataset analysis, log patterns, etc.)
   - name: computed_features
     type: kibana.request
+    timeout: 3m
     with:
       method: POST
       path: /internal/streams/{{ inputs.stream_name }}/features/_workflow/computed
@@ -55,6 +100,7 @@ steps:
         start: ${{ inputs.start }}
         end: ${{ inputs.end }}
 
+  # 8. Reconcile and persist all features
   - name: persist_features
     type: kibana.request
     with:
