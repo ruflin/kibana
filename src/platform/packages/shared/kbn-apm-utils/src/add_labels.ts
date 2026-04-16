@@ -27,10 +27,16 @@ export const prefixKeys = (labels: Labels, prefix: string): Record<string, Attri
 
 export const addSpanLabels = (labels: Labels, opts?: AddLabelsOptions): void => {
   apm.addLabels(labels, opts?.isString);
-  trace.getActiveSpan()?.setAttributes(opts?.otelAttributes ?? prefixKeys(labels, 'kibana.'));
+  const activeSpan = trace.getActiveSpan();
+  if (activeSpan?.isRecording()) {
+    activeSpan.setAttributes(opts?.otelAttributes ?? prefixKeys(labels, 'kibana.'));
+  }
 };
 
 export const addTransactionLabels = (labels: Labels, opts?: AddLabelsOptions): void => {
   apm.currentTransaction?.addLabels(labels, opts?.isString);
-  trace.getActiveSpan()?.setAttributes(opts?.otelAttributes ?? prefixKeys(labels, 'kibana.'));
+  const activeSpan = trace.getActiveSpan();
+  if (activeSpan?.isRecording()) {
+    activeSpan.setAttributes(opts?.otelAttributes ?? prefixKeys(labels, 'kibana.'));
+  }
 };
