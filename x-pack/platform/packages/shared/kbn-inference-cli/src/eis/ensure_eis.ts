@@ -8,6 +8,9 @@
 import type { ToolingLog } from '@kbn/tooling-log';
 import http from 'http';
 import https from 'https';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import execa from 'execa';
 import chalk from 'chalk';
 
@@ -22,8 +25,19 @@ interface ElasticsearchConnection {
   ssl: boolean;
 }
 
+interface CachedEisApiKey {
+  key: string;
+  fetched_at_ms: number;
+  vault_addr: string;
+}
+
 const EIS_QA_URL = 'https://inference.eu-west-1.aws.svc.qa.elastic.cloud';
 const EIS_URL_FLAG = `-E xpack.inference.elastic.url=${EIS_QA_URL}`;
+
+const EIS_KEY_CACHE_PATH = path.join(os.homedir(), '.elastic', 'eis-ccm-key.json');
+// Keys from vault are long-lived; re-fetch weekly so we don't require a browser
+// login on every run but still refresh often enough to pick up rotations.
+const EIS_KEY_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const createBasicAuthHeader = (credentials: ElasticsearchCredentials): string =>
   Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
@@ -49,6 +63,12 @@ function httpRequest(
     });
 
     req.on('error', reject);
+
+    if (typeof options.timeout === 'number') {
+      req.on('timeout', () => {
+        req.destroy(new Error(`Request to ${url} timed out after ${options.timeout}ms`));
+      });
+    }
 
     if (body) {
       req.write(body);
@@ -162,6 +182,100 @@ async function getES(log: ToolingLog) {
       'If using custom credentials, set ES_USERNAME and ES_PASSWORD environment variables.',
     ].join('\n')
   );
+}
+
+function readCachedEisApiKey(vaultAddress: string, log: ToolingLog): string | undefined {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(EIS_KEY_CACHE_PATH, 'utf8');
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      log.debug(`Could not read cached EIS key at ${EIS_KEY_CACHE_PATH}: ${error.message}`);
+    }
+    return undefined;
+  }
+
+  let cached: CachedEisApiKey;
+  try {
+    cached = JSON.parse(raw) as CachedEisApiKey;
+  } catch (error) {
+    log.debug(`Cached EIS key at ${EIS_KEY_CACHE_PATH} is not valid JSON, ignoring`);
+    return undefined;
+  }
+
+  if (!cached.key || typeof cached.key !== 'string') {
+    return undefined;
+  }
+
+  if (cached.vault_addr !== vaultAddress) {
+    log.debug(
+      `Cached EIS key was fetched from a different vault (${cached.vault_addr}), ignoring`
+    );
+    return undefined;
+  }
+
+  const ageMs = Date.now() - (cached.fetched_at_ms ?? 0);
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > EIS_KEY_CACHE_TTL_MS) {
+    log.debug(
+      `Cached EIS key at ${EIS_KEY_CACHE_PATH} is stale (age ${Math.round(
+        ageMs / (60 * 60 * 1000)
+      )}h), refreshing`
+    );
+    return undefined;
+  }
+
+  return cached.key;
+}
+
+function writeCachedEisApiKey(apiKey: string, vaultAddress: string, log: ToolingLog): void {
+  const payload: CachedEisApiKey = {
+    key: apiKey,
+    fetched_at_ms: Date.now(),
+    vault_addr: vaultAddress,
+  };
+
+  try {
+    fs.mkdirSync(path.dirname(EIS_KEY_CACHE_PATH), { recursive: true });
+    fs.writeFileSync(EIS_KEY_CACHE_PATH, JSON.stringify(payload, null, 2), { mode: 0o600 });
+    log.debug(`Cached EIS API key to ${EIS_KEY_CACHE_PATH}`);
+  } catch (error) {
+    log.warning(`Failed to cache EIS API key at ${EIS_KEY_CACHE_PATH}: ${error.message}`);
+  }
+}
+
+async function isEisApiKeyValid(apiKey: string, log: ToolingLog): Promise<boolean> {
+  // Probe the EIS root with the candidate key. EIS (like most API gateways)
+  // validates auth before routing, so a 401/403 is a definitive "key rejected"
+  // signal even if the root path itself returns 404/405 on success. Network
+  // errors are treated as "valid" so a transient EIS outage doesn't force a
+  // browser-based vault login.
+  try {
+    const { statusCode } = await httpRequest(
+      EIS_QA_URL,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `ApiKey ${apiKey}`,
+        },
+        timeout: 5000,
+      },
+      undefined,
+      true
+    );
+
+    if (statusCode === 401 || statusCode === 403) {
+      log.debug(`EIS rejected cached API key (HTTP ${statusCode}), refreshing from vault`);
+      return false;
+    }
+
+    log.debug(`EIS accepted cached API key (HTTP ${statusCode})`);
+    return true;
+  } catch (error) {
+    log.debug(
+      `Could not reach EIS to validate cached API key, assuming valid: ${error.message}`
+    );
+    return true;
+  }
 }
 
 async function getEisApiKeyFromVault(vaultAddress: string): Promise<string> {
@@ -317,6 +431,7 @@ export async function ensureEis({ log }: { log: ToolingLog }) {
 
   // Step 3: Resolve the CCM API key
   const envApiKey = process.env.KIBANA_EIS_CCM_API_KEY?.trim();
+  const forceRefresh = process.env.KIBANA_EIS_CCM_REFRESH === 'true';
   let apiKey: string;
 
   if (envApiKey) {
@@ -324,8 +439,24 @@ export async function ensureEis({ log }: { log: ToolingLog }) {
     apiKey = envApiKey;
   } else {
     const vaultAddress = process.env.VAULT_ADDR || 'https://secrets.elastic.co:8200';
-    log.info('Fetching CCM API key from vault...');
-    apiKey = await getEisApiKeyFromVault(vaultAddress);
+
+    const cachedApiKey = forceRefresh ? undefined : readCachedEisApiKey(vaultAddress, log);
+    const cachedApiKeyIsValid = cachedApiKey
+      ? await isEisApiKeyValid(cachedApiKey, log)
+      : false;
+
+    if (cachedApiKey && cachedApiKeyIsValid) {
+      log.info(`Using cached CCM API key from ${chalk.cyan(EIS_KEY_CACHE_PATH)}`);
+      apiKey = cachedApiKey;
+    } else {
+      if (cachedApiKey && !cachedApiKeyIsValid) {
+        log.info('Cached CCM API key was rejected by EIS, fetching a fresh one from vault...');
+      } else {
+        log.info('Fetching CCM API key from vault...');
+      }
+      apiKey = await getEisApiKeyFromVault(vaultAddress);
+      writeCachedEisApiKey(apiKey, vaultAddress, log);
+    }
   }
 
   // Step 4: Set the CCM API key in Elasticsearch
