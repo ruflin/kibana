@@ -307,6 +307,14 @@ export interface Conversation {
    * Keeps track of which prompts have been answered and the response.
    */
   state?: ConversationInternalState;
+  /**
+   * When true, the conversation is hidden from the conversation list by default.
+   * It remains accessible by ID and can be revealed via a "Show hidden" toggle.
+   * Typically set by automated callers (e.g. the `ai.agent` workflow step) so
+   * machine-driven runs do not pollute the user's chat history while remaining
+   * fully traceable.
+   */
+  hidden?: boolean;
 }
 
 /**

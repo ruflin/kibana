@@ -626,6 +626,33 @@ describe('conversation model converters', () => {
 
       expect(serialized.state).toBeUndefined();
     });
+
+    it('writes `hidden: true` when conversation is hidden', () => {
+      const conversation = conversationBase();
+      conversation.hidden = true;
+
+      const serialized = toEs(conversation, 'space');
+
+      expect(serialized.hidden).toBe(true);
+    });
+
+    it('omits `hidden` when conversation is not hidden', () => {
+      const conversation = conversationBase();
+      // hidden is not set
+
+      const serialized = toEs(conversation, 'space');
+
+      expect(serialized.hidden).toBeUndefined();
+    });
+
+    it('omits `hidden` when conversation.hidden is explicitly false', () => {
+      const conversation = conversationBase();
+      conversation.hidden = false;
+
+      const serialized = toEs(conversation, 'space');
+
+      expect(serialized.hidden).toBeUndefined();
+    });
   });
 
   describe('createRequestToEs', () => {
@@ -662,6 +689,98 @@ describe('conversation model converters', () => {
       });
 
       expect(serialized.state).toBeUndefined();
+    });
+
+    it('writes `hidden: true` when the create request is hidden', () => {
+      const serialized = createRequestToEs({
+        conversation: {
+          agent_id: 'agent_id',
+          title: 'conv_title',
+          rounds: [],
+          hidden: true,
+        },
+        space: 'space',
+        currentUser: { id: 'user_id', username: 'user_name' },
+        creationDate: new Date(creationDate),
+      });
+
+      expect(serialized.hidden).toBe(true);
+    });
+
+    it('omits `hidden` when create request is not hidden', () => {
+      const serialized = createRequestToEs({
+        conversation: {
+          agent_id: 'agent_id',
+          title: 'conv_title',
+          rounds: [],
+        },
+        space: 'space',
+        currentUser: { id: 'user_id', username: 'user_name' },
+        creationDate: new Date(creationDate),
+      });
+
+      expect(serialized.hidden).toBeUndefined();
+    });
+  });
+
+  describe('hidden round-trip via fromEs', () => {
+    it('reads `hidden: true` back from a stored doc', () => {
+      const document = {
+        _id: 'conv_id',
+        _source: {
+          agent_id: 'agent_id',
+          title: 'conv_title',
+          user_id: 'user_id',
+          user_name: 'user_name',
+          space: 'space',
+          conversation_rounds: [],
+          created_at: creationDate,
+          updated_at: updateDate,
+          hidden: true,
+        },
+      } as ConversationDocument;
+
+      const deserialized = fromEs(document);
+      expect(deserialized.hidden).toBe(true);
+    });
+
+    it('does not surface `hidden` when the stored doc has hidden=false', () => {
+      const document = {
+        _id: 'conv_id',
+        _source: {
+          agent_id: 'agent_id',
+          title: 'conv_title',
+          user_id: 'user_id',
+          user_name: 'user_name',
+          space: 'space',
+          conversation_rounds: [],
+          created_at: creationDate,
+          updated_at: updateDate,
+          hidden: false,
+        },
+      } as ConversationDocument;
+
+      const deserialized = fromEs(document);
+      expect(deserialized.hidden).toBeUndefined();
+    });
+
+    it('does not surface `hidden` when the stored doc omits the field (legacy)', () => {
+      const document = {
+        _id: 'conv_id',
+        _source: {
+          agent_id: 'agent_id',
+          title: 'conv_title',
+          user_id: 'user_id',
+          user_name: 'user_name',
+          space: 'space',
+          conversation_rounds: [],
+          created_at: creationDate,
+          updated_at: updateDate,
+        },
+      } as ConversationDocument;
+
+      const deserialized = fromEs(document);
+      expect(deserialized.hidden).toBeUndefined();
     });
   });
 });

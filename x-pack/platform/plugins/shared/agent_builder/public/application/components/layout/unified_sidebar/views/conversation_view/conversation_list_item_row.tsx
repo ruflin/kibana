@@ -9,6 +9,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom-v5-compat';
 
 import {
+  EuiBadge,
   EuiButtonIcon,
   EuiContextMenuItem,
   EuiContextMenuPanel,
@@ -46,6 +47,9 @@ const labels = {
   actionsMenu: i18n.translate('xpack.agentBuilder.sidebar.conversationList.actionsMenu', {
     defaultMessage: 'Conversation actions',
   }),
+  hiddenBadge: i18n.translate('xpack.agentBuilder.sidebar.conversationList.hiddenBadge', {
+    defaultMessage: 'Hidden',
+  }),
 };
 
 export interface ConversationListItemRowProps {
@@ -55,6 +59,8 @@ export interface ConversationListItemRowProps {
   isActive: boolean;
   routeConversationId: string | undefined;
   onItemClick?: () => void;
+  /** When true, render a small "Hidden" badge next to the title. */
+  hidden?: boolean;
 }
 
 export const ConversationListItemRow: React.FC<ConversationListItemRowProps> = ({
@@ -64,6 +70,7 @@ export const ConversationListItemRow: React.FC<ConversationListItemRowProps> = (
   isActive,
   routeConversationId,
   onItemClick,
+  hidden,
 }) => {
   const { euiTheme } = useEuiTheme();
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -203,6 +210,17 @@ export const ConversationListItemRow: React.FC<ConversationListItemRowProps> = (
             <EuiTextTruncate text={title || conversationId} />
           </Link>
         </EuiFlexItem>
+
+        {hidden ? (
+          <EuiFlexItem grow={false}>
+            <EuiBadge
+              color="hollow"
+              data-test-subj={`agentBuilderSidebarConversationHiddenBadge-${conversationId}`}
+            >
+              {labels.hiddenBadge}
+            </EuiBadge>
+          </EuiFlexItem>
+        ) : null}
 
         <EuiFlexItem grow={false}>
           <div css={actionsStyles} className={ACTIONS_CLASS}>

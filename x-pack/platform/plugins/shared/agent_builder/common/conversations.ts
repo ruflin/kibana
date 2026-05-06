@@ -16,6 +16,12 @@ export type ConversationCreateRequest = Omit<
 
 export interface ConversationListOptions {
   agentId?: string;
+  /**
+   * When true, hidden conversations are included in the list. Defaults to
+   * false. Hidden conversations remain accessible by ID regardless of this
+   * flag.
+   */
+  includeHidden?: boolean;
 }
 
 export interface ConversationGetOptions {

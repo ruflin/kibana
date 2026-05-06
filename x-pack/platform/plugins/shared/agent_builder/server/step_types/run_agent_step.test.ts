@@ -419,6 +419,105 @@ describe('ai.agent workflow step (Agent Builder)', () => {
     });
   });
 
+  describe('hidden conversations', () => {
+    const okEvents$ = () =>
+      of(
+        {
+          type: ChatEventType.conversationCreated,
+          data: { conversation_id: 'c-hidden', title: 't' },
+        },
+        {
+          type: ChatEventType.roundComplete,
+          data: {
+            round: {
+              id: 'r-1',
+              response: { message: 'ok' },
+            },
+          },
+        }
+      );
+
+    it('forwards `hidden: true` as metadata { hidden: "true" } on executeAgent', async () => {
+      const execution = createExecutionMock(okEvents$());
+      const serviceManager = { internalStart: { execution } } as any;
+      const step = getRunAgentStepDefinition(serviceManager);
+
+      await step.handler(
+        createContext({
+          input: { message: 'hello' },
+          config: { 'create-conversation': true, hidden: true },
+        })
+      );
+
+      expect(execution.executeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { hidden: 'true' },
+        })
+      );
+    });
+
+    it('does not set metadata when `hidden` is omitted', async () => {
+      const execution = createExecutionMock(okEvents$());
+      const serviceManager = { internalStart: { execution } } as any;
+      const step = getRunAgentStepDefinition(serviceManager);
+
+      await step.handler(
+        createContext({
+          input: { message: 'hello' },
+          config: { 'create-conversation': true },
+        })
+      );
+
+      const call = execution.executeAgent.mock.calls[0][0];
+      expect(call).not.toHaveProperty('metadata');
+    });
+
+    it('does not set metadata when `hidden: false`', async () => {
+      const execution = createExecutionMock(okEvents$());
+      const serviceManager = { internalStart: { execution } } as any;
+      const step = getRunAgentStepDefinition(serviceManager);
+
+      await step.handler(
+        createContext({
+          input: { message: 'hello' },
+          config: { 'create-conversation': true, hidden: false },
+        })
+      );
+
+      const call = execution.executeAgent.mock.calls[0][0];
+      expect(call).not.toHaveProperty('metadata');
+    });
+
+    it('ConfigSchema accepts `hidden: true` together with `create-conversation: true`', () => {
+      const parsed = ConfigSchema.safeParse({
+        'create-conversation': true,
+        hidden: true,
+      });
+      expect(parsed.success).toBe(true);
+    });
+
+    it('ConfigSchema rejects `hidden: true` without `create-conversation: true`', () => {
+      const parsed = ConfigSchema.safeParse({ hidden: true });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        expect(parsed.error.issues.some((i) => i.path.includes('hidden'))).toBe(true);
+      }
+    });
+
+    it('ConfigSchema rejects `hidden: true` with explicit `create-conversation: false`', () => {
+      const parsed = ConfigSchema.safeParse({
+        'create-conversation': false,
+        hidden: true,
+      });
+      expect(parsed.success).toBe(false);
+    });
+
+    it('ConfigSchema accepts `hidden: false` without `create-conversation: true`', () => {
+      const parsed = ConfigSchema.safeParse({ hidden: false });
+      expect(parsed.success).toBe(true);
+    });
+  });
+
   describe('connector-id / inference-id', () => {
     it('ConfigSchema rejects when both ids are meaningful', () => {
       const parsed = ConfigSchema.safeParse({

@@ -34,6 +34,11 @@ interface ConversationListProps {
   currentConversationId: string | undefined;
   isNewConversationRoute: boolean;
   onItemClick?: () => void;
+  /**
+   * When true, includes hidden conversations in the list (and renders a "Hidden"
+   * badge next to the title for visual differentiation).
+   */
+  includeHidden?: boolean;
 }
 
 export const ConversationList: React.FC<ConversationListProps> = ({
@@ -41,9 +46,10 @@ export const ConversationList: React.FC<ConversationListProps> = ({
   currentConversationId,
   isNewConversationRoute,
   onItemClick,
+  includeHidden = false,
 }) => {
   const { euiTheme } = useEuiTheme();
-  const { conversations = [], isLoading } = useConversationList({ agentId });
+  const { conversations = [], isLoading } = useConversationList({ agentId, includeHidden });
 
   const sortedConversations = useMemo(
     () =>
@@ -97,6 +103,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
               isActive={isActive}
               routeConversationId={currentConversationId}
               onItemClick={onItemClick}
+              hidden={conversation.hidden}
             />
           </EuiFlexItem>
         );

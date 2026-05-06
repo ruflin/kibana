@@ -15,6 +15,7 @@ import {
   EuiHorizontalRule,
   EuiPanel,
   EuiSpacer,
+  EuiSwitch,
   EuiText,
   useEuiTheme,
 } from '@elastic/eui';
@@ -68,6 +69,10 @@ const conversationListScrollRegionLabel = i18n.translate(
   }
 );
 
+const showHiddenLabel = i18n.translate('xpack.agentBuilder.sidebar.conversation.showHidden', {
+  defaultMessage: 'Show hidden',
+});
+
 export const ConversationSidebarView: React.FC = () => {
   const { pathname } = useLocation();
   const agentId = getAgentIdFromPath(pathname) ?? agentBuilderDefaultAgentId;
@@ -79,7 +84,11 @@ export const ConversationSidebarView: React.FC = () => {
   const lastAgentId = useLastAgentId();
   const featureFlags = useFeatureFlags();
 
-  const { conversations = [] } = useConversationList({ agentId });
+  const [showHiddenConversations, setShowHiddenConversations] = useState(false);
+  const { conversations = [] } = useConversationList({
+    agentId,
+    includeHidden: showHiddenConversations,
+  });
   const hasConversations = conversations.length > 0;
 
   const isNewConversationRoute =
@@ -220,6 +229,20 @@ export const ConversationSidebarView: React.FC = () => {
                     </EuiFlexItem>
 
                     <EuiFlexItem grow={false}>
+                      <EuiSpacer size="s" />
+                    </EuiFlexItem>
+
+                    <EuiFlexItem grow={false}>
+                      <EuiSwitch
+                        compressed
+                        label={showHiddenLabel}
+                        checked={showHiddenConversations}
+                        onChange={(e) => setShowHiddenConversations(e.target.checked)}
+                        data-test-subj="agentBuilderSidebarShowHiddenConversations"
+                      />
+                    </EuiFlexItem>
+
+                    <EuiFlexItem grow={false}>
                       <EuiSpacer size="m" />
                     </EuiFlexItem>
 
@@ -234,6 +257,7 @@ export const ConversationSidebarView: React.FC = () => {
                         agentId={agentId}
                         currentConversationId={conversationId}
                         isNewConversationRoute={isNewConversationRoute}
+                        includeHidden={showHiddenConversations}
                       />
                     </EuiFlexItem>
                   </EuiFlexGroup>

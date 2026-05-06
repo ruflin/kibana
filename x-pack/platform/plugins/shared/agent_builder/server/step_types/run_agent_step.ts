@@ -40,6 +40,7 @@ export const getRunAgentStepDefinition = (serviceManager: ServiceManager) => {
           'create-conversation': createConversation,
           instructions,
           tools,
+          hidden,
         } = context.config;
 
         context.logger.debug('ai.agent step started');
@@ -77,6 +78,14 @@ export const getRunAgentStepDefinition = (serviceManager: ServiceManager) => {
           agentId: effectiveAgentId,
         });
 
+        // Forward `hidden` to the execution as metadata, which `handleConversationExecution`
+        // reads to mark the newly-created conversation as hidden. metadata is only meaningful
+        // for new conversations (CREATE) — schema validation already requires
+        // `create-conversation: true` when `hidden: true`.
+        const metadata: Record<string, string> | undefined = hidden
+          ? { hidden: 'true' }
+          : undefined;
+
         const { events$ } = await executionService.executeAgent({
           mode: AgentExecutionMode.conversation,
           request,
@@ -95,6 +104,7 @@ export const getRunAgentStepDefinition = (serviceManager: ServiceManager) => {
             },
             ...(configurationOverrides ? { configurationOverrides } : {}),
           },
+          ...(metadata ? { metadata } : {}),
           // workflows already run as scheduled tasks
           useTaskManager: false,
         });

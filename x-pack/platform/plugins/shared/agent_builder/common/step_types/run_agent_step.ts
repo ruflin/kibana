@@ -163,6 +163,17 @@ export const ConfigSchema = z
       .describe(
         "Inline tool selection that overrides the agent's stored tool list for this step only. Recorded on the conversation round for audit."
       ),
+    /**
+     * When true, the conversation created by this step is hidden from the conversation list by
+     * default. Hidden conversations remain accessible by ID and can be revealed via the
+     * "Show hidden" toggle. Only meaningful with `create-conversation: true`.
+     */
+    hidden: z
+      .boolean()
+      .optional()
+      .describe(
+        'When true, the conversation created by this step is hidden from the conversation list by default. It remains accessible by ID and via the "Show hidden" toggle. Requires create-conversation: true.'
+      ),
   })
   .superRefine((cfg, ctx) => {
     const connector = normalizeOptionalConnectorOrInferenceParam(cfg['connector-id']);
@@ -172,6 +183,13 @@ export const ConfigSchema = z
         code: z.ZodIssueCode.custom,
         message: CONNECTOR_OR_INFERENCE_ID_CONFLICT_MESSAGE_WORKFLOW,
         path: ['connector-id'],
+      });
+    }
+    if (cfg.hidden === true && cfg['create-conversation'] !== true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '`hidden: true` requires `create-conversation: true`.',
+        path: ['hidden'],
       });
     }
   });
@@ -320,6 +338,21 @@ When a schema is provided, the agent's response will be available in \`output.st
 \`\`\`
 
 The \`instructions\` and \`tools\` fields override the stored agent's configuration for this step only. They are persisted as \`configuration_overrides\` on the resulting conversation round, so the override is auditable from the conversation viewer.`,
+
+      `## Hide the resulting conversation from the chat history
+\`\`\`yaml
+- name: workflow_run
+  type: ${RunAgentStepTypeId}
+  create-conversation: true
+  hidden: true
+  instructions: "You are a concise log analyst."
+  tools:
+    - tool_ids: ["platform.core.execute_esql"]
+  with:
+    message: "Summarise the last 10 logs."
+\`\`\`
+
+When \`hidden: true\` is set, the conversation is excluded from the default conversation list so machine-driven (workflow) runs do not pollute the user's chat history. It remains accessible by ID — via deep links, the workflow step output, or the "Show hidden" toggle in the conversation sidebar — so the full trace is still available for debugging. Requires \`create-conversation: true\`.`,
     ],
   },
   inputSchema: InputSchema,

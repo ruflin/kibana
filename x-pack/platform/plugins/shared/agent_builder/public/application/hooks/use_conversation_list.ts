@@ -9,7 +9,10 @@ import { useQuery } from '@kbn/react-query';
 import { queryKeys } from '../query_keys';
 import { useAgentBuilderServices } from './use_agent_builder_service';
 
-export const useConversationList = ({ agentId }: { agentId?: string } = {}) => {
+export const useConversationList = ({
+  agentId,
+  includeHidden = false,
+}: { agentId?: string; includeHidden?: boolean } = {}) => {
   const { conversationsService } = useAgentBuilderServices();
 
   const {
@@ -17,9 +20,9 @@ export const useConversationList = ({ agentId }: { agentId?: string } = {}) => {
     isLoading,
     refetch: refresh,
   } = useQuery({
-    queryKey: agentId ? queryKeys.conversations.byAgent(agentId) : queryKeys.conversations.all,
+    queryKey: queryKeys.conversations.list(agentId, { includeHidden }),
     queryFn: () => {
-      return conversationsService.list({ agentId });
+      return conversationsService.list({ agentId, includeHidden });
     },
   });
 

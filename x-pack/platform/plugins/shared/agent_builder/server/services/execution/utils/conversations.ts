@@ -25,12 +25,19 @@ export const createConversation$ = ({
   conversationId,
   title$,
   roundCompletedEvents$,
+  hidden,
 }: {
   agentId: string;
   conversationClient: ConversationClient;
   conversationId?: string;
   title$: Observable<string>;
   roundCompletedEvents$: Observable<RoundCompleteEvent>;
+  /**
+   * When true, the resulting conversation is marked hidden — excluded from the
+   * default conversation list but still accessible by ID. Set by automated
+   * callers (e.g. the `ai.agent` workflow step with `hidden: true`).
+   */
+  hidden?: boolean;
 }) => {
   return forkJoin({
     title: title$,
@@ -46,6 +53,7 @@ export const createConversation$ = ({
         ...(roundCompletedEvent.data.attachments
           ? { attachments: roundCompletedEvent.data.attachments }
           : {}),
+        ...(hidden ? { hidden: true } : {}),
       });
     }),
     switchMap((createdConversation) => {

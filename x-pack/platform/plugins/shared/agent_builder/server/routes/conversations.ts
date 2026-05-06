@@ -54,6 +54,14 @@ export function registerConversationRoutes({
                   },
                 })
               ),
+              include_hidden: schema.maybe(
+                schema.boolean({
+                  meta: {
+                    description:
+                      'When true, hidden conversations are included in the result. Defaults to false. Hidden conversations remain accessible by ID regardless of this flag.',
+                  },
+                })
+              ),
             }),
           },
         },
@@ -63,10 +71,10 @@ export function registerConversationRoutes({
       },
       wrapHandler(async (ctx, request, response) => {
         const { conversations: conversationsService } = getInternalServices();
-        const { agent_id: agentId } = request.query;
+        const { agent_id: agentId, include_hidden: includeHidden } = request.query;
 
         const client = await conversationsService.getScopedClient({ request });
-        const conversations = await client.list({ agentId });
+        const conversations = await client.list({ agentId, includeHidden });
 
         return response.ok<ListConversationsResponse>({
           body: {

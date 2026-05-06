@@ -10,8 +10,29 @@
  */
 export const queryKeys = {
   conversations: {
+    /**
+     * Broad prefix for invalidating any conversation list cache, regardless of agentId
+     * or includeHidden. Use with `queryClient.invalidateQueries({ queryKey: ... })`.
+     */
     all: ['conversations'] as const,
-    byAgent: (agentId: string) => ['conversations', 'list', { agentId }],
+    /**
+     * Specific list query key, parameterized by agentId and includeHidden so toggling
+     * "Show hidden" caches its own entry rather than mutating the visible list in place.
+     */
+    list: (
+      agentId: string | undefined,
+      options: { includeHidden?: boolean } = {}
+    ): readonly unknown[] => [
+      'conversations',
+      'list',
+      { agentId, includeHidden: options.includeHidden ?? false },
+    ],
+    /**
+     * @deprecated Use `queryKeys.conversations.list(agentId, { includeHidden })`.
+     * Retained as a thin wrapper for callers that don't pass includeHidden.
+     */
+    byAgent: (agentId: string, options: { includeHidden?: boolean } = {}) =>
+      queryKeys.conversations.list(agentId, options),
     byId: (conversationId: string) => ['conversations', conversationId],
   },
   agentProfiles: {

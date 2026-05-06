@@ -30,6 +30,12 @@ export type ConversationUpdateRequest = Pick<Conversation, 'id'> &
 
 export interface ConversationListOptions {
   agentId?: string;
+  /**
+   * When true, hidden conversations are included in the list. Defaults to
+   * false so machine-driven (e.g. workflow) conversations don't pollute the
+   * user's chat history. Hidden conversations remain accessible by ID.
+   */
+  includeHidden?: boolean;
 }
 
 /**

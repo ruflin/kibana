@@ -26,12 +26,16 @@ export class ConversationsService {
     this.http = http;
   }
 
-  async list({ agentId }: ConversationListOptions): Promise<ConversationWithoutRounds[]> {
+  async list({
+    agentId,
+    includeHidden,
+  }: ConversationListOptions): Promise<ConversationWithoutRounds[]> {
     const response = await this.http.get<ListConversationsResponse>(
       `${publicApiPath}/conversations`,
       {
         query: {
           agent_id: agentId,
+          ...(includeHidden ? { include_hidden: true } : {}),
         },
       }
     );

@@ -174,7 +174,10 @@ const handleConversationExecution = async ({
         })
       : of(conversation.title);
 
-  // Persist conversation (optional)
+  // Persist conversation (optional). Forward the `hidden` flag from execution metadata so
+  // automated callers (e.g. the `ai.agent` workflow step with `hidden: true`) mark the
+  // newly-created conversation as hidden from the default list.
+  const hidden = execution.metadata?.hidden === 'true';
   const persistenceEvents$ = storeConversation
     ? buildPersistenceEvents({
         agentId,
@@ -184,6 +187,7 @@ const handleConversationExecution = async ({
         title$,
         agentEvents$,
         action,
+        hidden,
       })
     : EMPTY;
 
@@ -368,6 +372,7 @@ const buildPersistenceEvents = ({
   title$,
   agentEvents$,
   action,
+  hidden,
 }: {
   agentId: string;
   conversation: ConversationWithOperation;
@@ -376,6 +381,7 @@ const buildPersistenceEvents = ({
   title$: Observable<string>;
   agentEvents$: Observable<ChatEvent>;
   action?: ConversationAction;
+  hidden?: boolean;
 }): Observable<ChatEvent> => {
   const roundCompletedEvents$ = agentEvents$.pipe(filter(isRoundCompleteEvent));
 
@@ -386,6 +392,7 @@ const buildPersistenceEvents = ({
       conversationId: conversationId || conversation.id,
       title$,
       roundCompletedEvents$,
+      hidden,
     });
   }
 
