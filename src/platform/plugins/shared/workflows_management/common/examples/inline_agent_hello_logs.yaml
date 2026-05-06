@@ -1,0 +1,91 @@
+version: "1"
+
+name: Inline agent — hello logs (full trace in workflow output)
+description: >
+  Demonstrates the inline-agent feature of the ai.agent workflow step:
+  an ephemeral agent (no pre-registered AgentDefinition) is defined entirely
+  inline via `instructions` and `tools`, fetches the last 10 logs via ES|QL,
+  summarises them, then a second ai.agent step asks a follow-up on the same
+  conversation. The full conversation document (all rounds, tool calls, tool
+  results, reasoning, model usage, configuration_overrides) is then read back
+  from the .chat-conversations index and emitted as workflow output, so the
+  entire trace is visible from the workflow execution alone — no extra UI
+  navigation or API calls required.
+enabled: true
+tags: ['demo', 'agent-builder', 'inline-agent']
+
+triggers:
+  - type: manual
+
+consts:
+  CONVERSATIONS_INDEX: ".chat-conversations"
+
+steps:
+  - name: summarise_recent_logs
+    type: ai.agent
+    connector-id: ".anthropic-claude-4.6-sonnet-chat_completion"
+    create-conversation: true
+    instructions: |
+      You are a concise log analyst.
+
+      You have one tool: platform.core.execute_esql.
+
+      1. Run this ES|QL query exactly:
+
+         FROM logs-*
+         | SORT @timestamp DESC
+         | LIMIT 10
+
+      2. Read the 10 rows you get back.
+      3. Reply with a 3–5 sentence summary covering:
+         - what services/sources the logs come from
+         - any obvious errors or warnings
+         - the time range covered
+
+      Do not invent rows. If the query returns nothing, say so plainly.
+    tools:
+      - tool_ids: ["platform.core.execute_esql"]
+    with:
+      message: "Fetch the last 10 logs and summarise them for me."
+
+  - name: followup_question
+    type: ai.agent
+    connector-id: ".anthropic-claude-4.6-sonnet-chat_completion"
+    instructions: |
+      You are a concise log analyst. You answer follow-up questions using the
+      log data already retrieved earlier in this conversation. Only run the
+      ES|QL tool again if the user explicitly asks for fresh data.
+    tools:
+      - tool_ids: ["platform.core.execute_esql"]
+    with:
+      conversation_id: "{{ steps.summarise_recent_logs.output.conversation_id }}"
+      message: |
+        Looking at the same 10 logs, which single line is the most concerning
+        and why? Quote the timestamp and the message. Do not run the query
+        again unless absolutely necessary.
+
+  # Pull the persisted conversation document straight from the storage index.
+  # _source contains the full transcript: conversation_rounds[] -> steps[]
+  # with tool_call params + results, reasoning steps, response, model_usage,
+  # and configuration_overrides per round (audit trail of the inline agent).
+  - name: fetch_full_conversation
+    type: elasticsearch.request
+    with:
+      method: GET
+      path: '/{{ consts.CONVERSATIONS_INDEX }}/_doc/{{ steps.summarise_recent_logs.output.conversation_id }}'
+    on-failure:
+      continue: true
+
+  # Emit everything as workflow output. The whole conversation document lands
+  # in the workflow execution's step output, viewable from the workflow run UI
+  # and via /api/workflows/executions/{id}/step/{stepExecutionId}. Note the
+  # `${{ … }}` syntax (not `{{ … }}`) which preserves complex objects rather
+  # than rendering them to a string.
+  - name: emit_outputs
+    type: data.set
+    with:
+      conversation_id: "{{ steps.summarise_recent_logs.output.conversation_id }}"
+      summary: "{{ steps.summarise_recent_logs.output.message }}"
+      followup: "{{ steps.followup_question.output.message }}"
+      conversation: "${{ steps.fetch_full_conversation.output._source }}"
+      conversation_rounds: "${{ steps.fetch_full_conversation.output._source.conversation_rounds }}"
