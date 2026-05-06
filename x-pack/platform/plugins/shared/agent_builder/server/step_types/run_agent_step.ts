@@ -12,6 +12,7 @@ import {
   isRoundCompleteEvent,
   AgentExecutionMode,
 } from '@kbn/agent-builder-common';
+import type { RuntimeAgentConfigurationOverrides } from '@kbn/agent-builder-common';
 import { createServerStepDefinition } from '@kbn/workflows-extensions/server';
 import { firstValueFrom, toArray } from 'rxjs';
 import type { ServiceManager } from '../services';
@@ -37,6 +38,8 @@ export const getRunAgentStepDefinition = (serviceManager: ServiceManager) => {
           'connector-id': connectorIdRaw,
           'inference-id': inferenceIdRaw,
           'create-conversation': createConversation,
+          instructions,
+          tools,
         } = context.config;
 
         context.logger.debug('ai.agent step started');
@@ -52,6 +55,18 @@ export const getRunAgentStepDefinition = (serviceManager: ServiceManager) => {
         );
 
         const storeConversation = createConversation || Boolean(conversationId);
+
+        // Build inline configuration overrides from `instructions` / `tools` step config.
+        // Forwarded as configuration_overrides on the conversation round for audit, so a workflow
+        // can reuse a generic placeholder agent and define per-step instructions and tools without
+        // creating a separate AgentDefinition for each step.
+        const configurationOverrides: RuntimeAgentConfigurationOverrides | undefined =
+          instructions !== undefined || tools !== undefined
+            ? {
+                ...(instructions !== undefined ? { instructions } : {}),
+                ...(tools !== undefined ? { tools } : {}),
+              }
+            : undefined;
 
         const executionService = serviceManager.internalStart?.execution;
         if (!executionService) {
@@ -78,6 +93,7 @@ export const getRunAgentStepDefinition = (serviceManager: ServiceManager) => {
               message,
               attachments,
             },
+            ...(configurationOverrides ? { configurationOverrides } : {}),
           },
           // workflows already run as scheduled tasks
           useTaskManager: false,

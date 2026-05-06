@@ -319,6 +319,106 @@ describe('ai.agent workflow step (Agent Builder)', () => {
     expect(res.output?.message).toBe('ok');
   });
 
+  describe('inline configuration overrides', () => {
+    const okEvents$ = () =>
+      of({
+        type: ChatEventType.roundComplete,
+        data: {
+          round: {
+            id: 'r-1',
+            response: { message: 'ok' },
+          },
+        },
+      });
+
+    it('forwards inline instructions as configurationOverrides', async () => {
+      const execution = createExecutionMock(okEvents$());
+      const serviceManager = { internalStart: { execution } } as any;
+      const step = getRunAgentStepDefinition(serviceManager);
+
+      await step.handler(
+        createContext({
+          input: { message: 'hello' },
+          config: { instructions: 'You are a junior SRE. Triage alerts.' },
+        })
+      );
+
+      expect(execution.executeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          params: expect.objectContaining({
+            configurationOverrides: { instructions: 'You are a junior SRE. Triage alerts.' },
+          }),
+        })
+      );
+    });
+
+    it('forwards inline tools as configurationOverrides', async () => {
+      const execution = createExecutionMock(okEvents$());
+      const serviceManager = { internalStart: { execution } } as any;
+      const step = getRunAgentStepDefinition(serviceManager);
+
+      const tools = [
+        { tool_ids: ['platform.core.execute_esql'] },
+        { tool_ids: ['observability.get_logs'] },
+      ];
+
+      await step.handler(
+        createContext({
+          input: { message: 'hello' },
+          config: { tools },
+        })
+      );
+
+      expect(execution.executeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          params: expect.objectContaining({
+            configurationOverrides: { tools },
+          }),
+        })
+      );
+    });
+
+    it('forwards both inline instructions and tools as configurationOverrides', async () => {
+      const execution = createExecutionMock(okEvents$());
+      const serviceManager = { internalStart: { execution } } as any;
+      const step = getRunAgentStepDefinition(serviceManager);
+
+      const instructions = 'Investigate the alert and report.';
+      const tools = [{ tool_ids: ['platform.core.execute_esql'] }];
+
+      await step.handler(
+        createContext({
+          input: { message: 'hello' },
+          config: { instructions, tools },
+        })
+      );
+
+      expect(execution.executeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          params: expect.objectContaining({
+            configurationOverrides: { instructions, tools },
+          }),
+        })
+      );
+    });
+
+    it('does not pass configurationOverrides when neither instructions nor tools are provided', async () => {
+      const execution = createExecutionMock(okEvents$());
+      const serviceManager = { internalStart: { execution } } as any;
+      const step = getRunAgentStepDefinition(serviceManager);
+
+      await step.handler(
+        createContext({
+          input: { message: 'hello' },
+          config: {},
+        })
+      );
+
+      const params = execution.executeAgent.mock.calls[0][0].params;
+      expect(params).not.toHaveProperty('configurationOverrides');
+    });
+  });
+
   describe('connector-id / inference-id', () => {
     it('ConfigSchema rejects when both ids are meaningful', () => {
       const parsed = ConfigSchema.safeParse({

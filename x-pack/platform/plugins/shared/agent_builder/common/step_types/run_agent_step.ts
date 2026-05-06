@@ -135,6 +135,34 @@ export const ConfigSchema = z
       .boolean()
       .optional()
       .describe('When true, creates a conversation for the step.'),
+    /**
+     * Optional inline instructions that override the stored agent's instructions for this step only.
+     * Forwarded as `configuration_overrides.instructions` and recorded on the resulting conversation
+     * round, so the override is auditable from the conversation viewer.
+     */
+    instructions: z
+      .string()
+      .optional()
+      .describe(
+        "Inline instructions that override the agent's stored instructions for this step only. Recorded on the conversation round for audit."
+      ),
+    /**
+     * Optional inline tool selection that overrides the stored agent's tool list for this step only.
+     * Same shape as the `tools` field on an agent definition (`agent.yaml`). Forwarded as
+     * `configuration_overrides.tools` and recorded on the resulting conversation round.
+     */
+    tools: z
+      .array(
+        z.object({
+          tool_ids: z
+            .array(z.string())
+            .describe('List of tool IDs to expose. Use ["*"] to expose all tools.'),
+        })
+      )
+      .optional()
+      .describe(
+        "Inline tool selection that overrides the agent's stored tool list for this step only. Recorded on the conversation round for audit."
+      ),
   })
   .superRefine((cfg, ctx) => {
     const connector = normalizeOptionalConnectorOrInferenceParam(cfg['connector-id']);
@@ -274,6 +302,24 @@ When a schema is provided, the agent's response will be available in \`output.st
         - sentiment
         - confidence
 \`\`\``,
+
+      `## Override agent instructions and tools inline (per-step)
+\`\`\`yaml
+- name: investigate
+  type: ${RunAgentStepTypeId}
+  agent-id: "my-workflow-runner"
+  create-conversation: true
+  instructions: |
+    You are a junior SRE. Triage the alerts and correlate them
+    into incidents using shared infrastructure and temporal proximity.
+  tools:
+    - tool_ids: ["platform.core.execute_esql"]
+    - tool_ids: ["observability.get_logs"]
+  with:
+    message: "{{ event | json }}"
+\`\`\`
+
+The \`instructions\` and \`tools\` fields override the stored agent's configuration for this step only. They are persisted as \`configuration_overrides\` on the resulting conversation round, so the override is auditable from the conversation viewer.`,
     ],
   },
   inputSchema: InputSchema,
