@@ -13,6 +13,7 @@ import Fs from 'fs';
 import { load } from 'js-yaml';
 import { mapValues } from 'lodash';
 import { REPO_ROOT } from '@kbn/repo-info';
+import { getPreDiscoveredEisModels } from './eis_helpers';
 
 /**
  * The environment variable that is used by the CI to load the connectors configuration
@@ -84,6 +85,35 @@ const getConnectorsFromKibanaDevYml = (): Record<string, AvailableConnector> => 
   }
 };
 
+/**
+ * Build preconfigured `.inference` connector entries from EIS models that were
+ * discovered into `target/eis_models.json` (either by `scripts/discover_eis_models.js`
+ * or by `enable_eis_ccm.js` after enabling Cloud Connected Mode).
+ *
+ * Returns an empty object when the file is missing — callers can unconditionally
+ * spread the result.
+ */
+const getConnectorsFromEisModelsFile = (): Record<string, AvailableConnector> => {
+  const models = getPreDiscoveredEisModels();
+  const connectors: Record<string, AvailableConnector> = {};
+
+  for (const model of models) {
+    const connectorId = `eis-${model.modelId}`;
+    connectors[connectorId] = {
+      name: `EIS ${model.modelId}`,
+      actionTypeId: '.inference',
+      config: {
+        provider: 'elastic',
+        taskType: 'chat_completion',
+        inferenceId: model.inferenceId,
+      },
+      secrets: {},
+    };
+  }
+
+  return connectors;
+};
+
 const loadConnectors = (): Record<string, AvailableConnector> => {
   const envValue = process.env[AI_CONNECTORS_VAR_ENV];
   if (envValue) {
@@ -100,12 +130,20 @@ const loadConnectors = (): Record<string, AvailableConnector> => {
     return connectorsSchema.validate(connectors);
   }
 
-  // don't attempt to read from kibana.dev.yml on CI
+  // don't attempt to read local files on CI - CI must use KIBANA_TESTING_AI_CONNECTORS explicitly
   if (process.env.CI) {
     throw new Error(`Can't read connectors, env variable ${AI_CONNECTORS_VAR_ENV} is not set`);
   }
 
-  return connectorsSchema.validate(getConnectorsFromKibanaDevYml());
+  // Locally, merge EIS-discovered connectors (from target/eis_models.json) with
+  // any preconfigured ones declared in config/kibana.dev.yml. EIS connectors win
+  // on id collisions, since they reflect the live CCM-provisioned endpoints.
+  const merged = {
+    ...getConnectorsFromKibanaDevYml(),
+    ...getConnectorsFromEisModelsFile(),
+  };
+
+  return connectorsSchema.validate(merged);
 };
 
 /**

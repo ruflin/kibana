@@ -28,9 +28,44 @@
 const Fs = require('fs');
 const Path = require('path');
 
+const EIS_MODELS_OUTPUT_PATH = Path.resolve(process.cwd(), 'target/eis_models.json');
+
 function die(message) {
   process.stderr.write(`${message}\n`);
   process.exit(1);
+}
+
+/**
+ * Persist the discovered EIS chat_completion endpoints to `target/eis_models.json`
+ * in the same shape produced by `scripts/discover_eis_models.js`. This is read by
+ * `getPreDiscoveredEisModels()` in `@kbn/gen-ai-functional-testing`, which lets
+ * downstream consumers (Playwright eval configs, FTR configs, etc.) pick up the
+ * live CCM endpoints without any manual configuration.
+ */
+function writeEisModelsFile(endpoints) {
+  const models = endpoints
+    .map((ep) => ({
+      inferenceId: ep && ep.inference_id,
+      modelId: (ep && ep.service_settings && ep.service_settings.model_id) || 'unknown',
+      metadata:
+        ep && ep.metadata
+          ? {
+              heuristics: {
+                properties: ep.metadata.heuristics && ep.metadata.heuristics.properties,
+              },
+            }
+          : undefined,
+    }))
+    .filter((m) => typeof m.inferenceId === 'string' && m.inferenceId.length > 0);
+
+  Fs.mkdirSync(Path.dirname(EIS_MODELS_OUTPUT_PATH), { recursive: true });
+  Fs.writeFileSync(EIS_MODELS_OUTPUT_PATH, JSON.stringify({ models }, null, 2) + '\n');
+  process.stdout.write(
+    `Wrote ${models.length} EIS model(s) to ${Path.relative(
+      process.cwd(),
+      EIS_MODELS_OUTPUT_PATH
+    )}\n`
+  );
 }
 
 function parseArgs(argv) {
@@ -158,6 +193,8 @@ async function main() {
       if (eisChat.length > 10) {
         process.stdout.write(`  ... and ${eisChat.length - 10} more\n`);
       }
+
+      writeEisModelsFile(eisChat);
       return;
     }
 

@@ -13,11 +13,12 @@ import type { ToolingLog } from '@kbn/tooling-log';
 import { resolveEvalSuites, type EvalSuiteDefinition } from './suites';
 
 const KIBANA_DEV_YML = 'config/kibana.dev.yml';
+const EIS_MODELS_PATH = 'target/eis_models.json';
 
 export interface AvailableConnectorEntry {
   id: string;
   name: string;
-  source: 'env' | 'kibana.dev.yml';
+  source: 'env' | 'kibana.dev.yml' | 'eis-ccm';
 }
 
 export const parseConnectorsFromEnv = (): AvailableConnectorEntry[] => {
@@ -75,18 +76,59 @@ export const parseConnectorsFromKibanaDevYml = (repoRoot: string): AvailableConn
 };
 
 /**
- * Returns all available connectors, merging from KIBANA_TESTING_AI_CONNECTORS
- * and kibana.dev.yml. Env connectors take precedence (listed first); duplicates
- * from kibana.dev.yml are excluded.
+ * Reads EIS models discovered into `target/eis_models.json` (written by
+ * `scripts/discover_eis_models.js` or by `enable_eis_ccm.js` after enabling
+ * Cloud Connected Mode) and converts them into connector entries with the
+ * `eis-` id prefix used elsewhere in the eval pipeline.
+ */
+export const parseConnectorsFromEisModelsFile = (repoRoot: string): AvailableConnectorEntry[] => {
+  const modelsPath = Path.join(repoRoot, EIS_MODELS_PATH);
+  if (!Fs.existsSync(modelsPath)) {
+    return [];
+  }
+
+  try {
+    const raw = Fs.readFileSync(modelsPath, 'utf-8');
+    const parsed = JSON.parse(raw) as {
+      models?: Array<{ inferenceId?: string; modelId?: string }>;
+    };
+    const models = Array.isArray(parsed.models) ? parsed.models : [];
+
+    return models
+      .filter(
+        (m): m is { inferenceId: string; modelId: string } =>
+          typeof m.inferenceId === 'string' && typeof m.modelId === 'string' && m.modelId.length > 0
+      )
+      .map((m) => ({
+        id: `eis-${m.modelId}`,
+        name: `EIS ${m.modelId}`,
+        source: 'eis-ccm' as const,
+      }));
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * Returns all available connectors, merging from KIBANA_TESTING_AI_CONNECTORS,
+ * `target/eis_models.json`, and `config/kibana.dev.yml`. Env connectors take
+ * precedence (listed first), then EIS-discovered, then kibana.dev.yml; later
+ * sources are deduplicated by id.
  */
 export const getAllAvailableConnectors = (repoRoot: string): AvailableConnectorEntry[] => {
   const envConnectors = parseConnectorsFromEnv();
+  const eisConnectors = parseConnectorsFromEisModelsFile(repoRoot);
   const ymlConnectors = parseConnectorsFromKibanaDevYml(repoRoot);
 
-  const seen = new Set(envConnectors.map((c) => c.id));
-  const deduped = ymlConnectors.filter((c) => !seen.has(c.id));
+  const seen = new Set<string>();
+  const merged: AvailableConnectorEntry[] = [];
+  for (const c of [...envConnectors, ...eisConnectors, ...ymlConnectors]) {
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    merged.push(c);
+  }
 
-  return [...envConnectors, ...deduped];
+  return merged;
 };
 
 export const promptForSuite = async (
@@ -119,7 +161,9 @@ export const promptForSuite = async (
 
 const formatConnectorChoice = (c: AvailableConnectorEntry): { name: string; value: string } => {
   const label = c.name !== c.id ? `${c.id} (${c.name})` : c.id;
-  const tag = c.source === 'kibana.dev.yml' ? ' [kibana.dev.yml]' : '';
+  let tag = '';
+  if (c.source === 'kibana.dev.yml') tag = ' [kibana.dev.yml]';
+  else if (c.source === 'eis-ccm') tag = ' [EIS]';
   return { name: `${label}${tag}`, value: c.id };
 };
 

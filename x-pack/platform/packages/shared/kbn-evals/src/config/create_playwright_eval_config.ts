@@ -60,10 +60,13 @@ export function createPlaywrightEvalsConfig({
   );
 
   if (!evaluationConnector) {
+    const available = connectors.map((connector) => connector.id).join(', ') || '<none>';
+    const isEisId = evaluationConnectorId.startsWith('eis-');
+    const hint = isEisId
+      ? '\n\nThis id looks like an EIS connector. EIS connectors are discovered from `target/eis_models.json`, which is written when EIS Cloud Connected Mode is enabled (e.g. by `node scripts/evals start ...` or `node scripts/discover_eis_models.js`). If that file is missing or stale, the available list above will not include EIS connectors.'
+      : '';
     throw new Error(
-      `Evaluation connector id ${evaluationConnectorId} was not found, pick one from ${connectors
-        .map((connector) => connector.id)
-        .join(', ')}`
+      `Evaluation connector id "${evaluationConnectorId}" was not found, pick one from: ${available}${hint}`
     );
   }
 
