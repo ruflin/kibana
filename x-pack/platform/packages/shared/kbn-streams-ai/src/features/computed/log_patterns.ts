@@ -44,7 +44,7 @@ Use the \`properties.patterns\` array to see both common and rare log patterns. 
 Each pattern includes: field (source field name), pattern (normalized message with placeholders), count (frequency), and sample (a real example message, possibly truncated).
 This is useful for understanding the types of logs in the stream and identifying anomalies or trends.`,
 
-  generate: async ({ stream, start, end, esClient, logger }) => {
+  generate: async ({ source, metadataMode, start, end, esClient, logger }) => {
     const tracedClient = createTracedEsClient({
       client: esClient,
       logger,
@@ -53,11 +53,12 @@ This is useful for understanding the types of logs in the stream and identifying
 
     const patterns = await getSigEventsLogPatternsEsql({
       esClient: tracedClient,
-      index: stream.name,
+      index: source,
       start,
       end,
       fields: LOG_MESSAGE_FIELDS,
       logger,
+      metadataMode,
     });
 
     return { patterns: selectLogPatternsForLlm(patterns) };

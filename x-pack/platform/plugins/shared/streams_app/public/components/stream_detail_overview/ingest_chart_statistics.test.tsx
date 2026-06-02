@@ -58,6 +58,9 @@ const loadingFetch = { value: undefined, loading: true, error: undefined, refres
  *   1. totalDocsFetch
  *   2. previousPeriodFetch
  *   3. storeStatsFetch
+ *
+ * For ingest streams the total docs fetch resolves to a `StreamDocsStat[]`; for query streams it
+ * resolves to an ES|QL response (`{ values, columns }`), so `totalDocs` accepts either shape.
  */
 function setupFetches({
   totalDocs = [{ stream: 'logs', count: 10_000 }],
@@ -67,7 +70,7 @@ function setupFetches({
   previousPeriodLoading = false,
   storeStatsLoading = false,
 }: {
-  totalDocs?: Array<{ stream: string; count: number }>;
+  totalDocs?: Array<{ stream: string; count: number }> | { values: unknown[][]; columns: unknown[] };
   previousDocCount?: number | null;
   storeSizeBytes?: number;
   totalDocsLoading?: boolean;
@@ -180,6 +183,32 @@ describe('IngestChartStatistics', () => {
 
       // EuiLoadingSpinner renders an element with the loading role
       expect(container.querySelector('.euiLoadingSpinner')).toBeInTheDocument();
+    });
+
+    it('reads the total doc count from the ES|QL response for a query stream', () => {
+      // Query streams have no backing data stream, so the total comes from an ES|QL
+      // `STATS doc_count = COUNT(*)` over the query view rather than the doc_counts endpoint.
+      setupFetches({
+        totalDocs: { values: [[42_000]], columns: [{ name: 'doc_count', type: 'long' }] },
+      });
+      renderWithI18n(
+        <IngestChartStatistics {...baseProps} isQueryStream esqlSource="$.logs" />
+      );
+
+      expect(screen.getByText('42,000')).toBeInTheDocument();
+      expect(screen.getByText('total docs')).toBeInTheDocument();
+    });
+
+    it('falls back to zero when the query-stream ES|QL response is empty', () => {
+      setupFetches({ totalDocs: { values: [], columns: [{ name: 'doc_count', type: 'long' }] } });
+      renderWithI18n(
+        <IngestChartStatistics {...baseProps} isQueryStream esqlSource="$.logs" />
+      );
+
+      // Both "Docs total" (no data) and "Docs in time range" share the same buckets,
+      // so assert specifically on the total docs unit being present with a 0 value.
+      expect(screen.getByText('0')).toBeInTheDocument();
+      expect(screen.getByText('total docs')).toBeInTheDocument();
     });
   });
 

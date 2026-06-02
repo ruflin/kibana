@@ -19,12 +19,15 @@ export async function describeDataset({
   end,
   index,
   kql,
+  metadataMode = 'index',
 }: {
   esClient: ElasticsearchClient;
   start: number;
   end: number;
   index: string | string[];
   kql?: string;
+  /** `'view'` for ES|QL views (query streams) that expose no `_id`/`_source`. */
+  metadataMode?: 'index' | 'view';
 }) {
   const [columns, sampleDocs, total] = await Promise.all([
     getEsqlColumnSchema({ esClient, index, start, end }),
@@ -34,6 +37,7 @@ export async function describeDataset({
       start,
       end,
       kql,
+      metadataMode,
     }),
     runEsqlPopulationCount({ esClient, index, start, end, kql }),
   ]);

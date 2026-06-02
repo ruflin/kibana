@@ -116,6 +116,7 @@ describe('fetchSampleDocuments', () => {
       start: 100,
       end: 200,
       sampleSize: 5,
+      metadataMode: 'index',
     });
     expect(getDiverseSampleDocumentsMock).not.toHaveBeenCalled();
     expect(result.documents.map((document) => document._id)).toEqual(['random-1']);
@@ -180,6 +181,7 @@ describe('fetchSampleDocuments', () => {
       size: 6,
       offset: 0,
       logger,
+      metadataMode: 'index',
     });
     expect(getSampleDocumentsEsqlMock.mock.calls[1][0]).toEqual({
       esClient,
@@ -187,6 +189,7 @@ describe('fetchSampleDocuments', () => {
       start: 100,
       end: 200,
       sampleSize: 10,
+      metadataMode: 'index',
     });
     expect(esClient.fieldCaps).not.toHaveBeenCalled();
     expect(result.documents.map((document) => document._id)).toEqual([

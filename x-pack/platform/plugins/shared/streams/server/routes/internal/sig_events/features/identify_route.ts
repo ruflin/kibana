@@ -8,6 +8,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { z } from '@kbn/zod/v4';
 import {
+  getSourcesForStream,
   getStreamTypeFromDefinition,
   STREAMS_SIG_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID,
 } from '@kbn/streams-schema';
@@ -110,6 +111,9 @@ const identifyInferredFeaturesRoute = createServerRoute({
     ]);
 
     const streamType = getStreamTypeFromDefinition(stream);
+    // Query streams have no index named after them; sample their ES|QL view
+    // (e.g. `$.foobar`) instead of `FROM <name>`, which would fail.
+    const sampleSource = getSourcesForStream(stream).join(',');
 
     try {
       const result = await identifyInferredFeatures({
@@ -121,6 +125,7 @@ const identifyInferredFeaturesRoute = createServerRoute({
         signal: getRequestAbortSignal(request),
         streamName,
         streamType,
+        sampleSource,
         start,
         end,
         runId,

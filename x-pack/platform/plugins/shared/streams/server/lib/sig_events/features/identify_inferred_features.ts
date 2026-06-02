@@ -178,6 +178,14 @@ async function tryIdentifyFeatures(
 interface RunInferredIterationOptions {
   esClient: ElasticsearchClient;
   streamName: string;
+  /**
+   * ES|QL source to sample documents from. For ingest streams this is the
+   * stream name (== backing data stream); for query streams it is the ES|QL
+   * view (e.g. `$.foobar`), since no index named after the stream exists.
+   */
+  sampleSource: string;
+  /** `'view'` for query streams (ES|QL views with no `_id`/`_source` metadata). */
+  metadataMode: 'index' | 'view';
   start: number;
   end: number;
   runId: string;
@@ -217,6 +225,8 @@ type InferredIterationResult =
 async function runInferredIteration({
   esClient,
   streamName,
+  sampleSource,
+  metadataMode,
   start,
   end,
   runId,
@@ -244,7 +254,7 @@ async function runInferredIteration({
 
   const batchResult = await fetchSampleDocuments({
     esClient,
-    index: streamName,
+    index: sampleSource,
     start,
     end,
     features: discoveredFeatures.filter(isFeatureWithFilter),
@@ -254,6 +264,7 @@ async function runInferredIteration({
     diverseRatio,
     maxEntityFilters,
     diverseOffset,
+    metadataMode,
   });
 
   if (batchResult.documents.length === 0) {
@@ -349,6 +360,13 @@ export interface IdentifyInferredFeaturesOptions {
   signal: AbortSignal;
   streamName: string;
   streamType: StreamType;
+  /**
+   * ES|QL source to sample documents from. Defaults to `streamName` for ingest
+   * streams (whose name is the backing data stream). Query streams must pass
+   * their ES|QL view (e.g. `$.foobar`) since no index is named after them —
+   * sampling `FROM <name>` would fail with `Unknown index`.
+   */
+  sampleSource?: string;
   start: number;
   end: number;
   runId: string;
@@ -376,6 +394,7 @@ export async function identifyInferredFeatures({
   signal,
   streamName,
   streamType,
+  sampleSource = streamName,
   start,
   end,
   runId,
@@ -401,6 +420,10 @@ export async function identifyInferredFeatures({
   const iterationResult = await runInferredIteration({
     esClient,
     streamName,
+    sampleSource,
+    // Query streams resolve to ES|QL views, which expose no `_id`/`_source`
+    // metadata; sample them in view mode (reconstruct docs from columns).
+    metadataMode: streamType === 'query' ? 'view' : 'index',
     start,
     end,
     runId,

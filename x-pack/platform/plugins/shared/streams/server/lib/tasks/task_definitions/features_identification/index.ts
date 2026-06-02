@@ -16,6 +16,7 @@ import {
   type IdentifyFeaturesResult,
   type IterationResult,
   type Feature,
+  getSourcesForStream,
   getStreamTypeFromDefinition,
 } from '@kbn/streams-schema';
 import { v4 as uuid } from 'uuid';
@@ -133,6 +134,9 @@ async function runFeaturesIdentification(
     const stream = await streamsClient.getStream(streamName);
 
     const streamType = getStreamTypeFromDefinition(stream);
+    // Query streams have no index named after them; sample their ES|QL view
+    // (e.g. `$.foobar`) instead of `FROM <name>`, which would fail.
+    const sampleSource = getSourcesForStream(stream).join(',');
     const boundInferenceClient = inferenceClient.bindTo({ connectorId });
     const esClient = scopedClusterClient.asCurrentUser;
 
@@ -201,6 +205,7 @@ async function runFeaturesIdentification(
         signal: runContext.abortController.signal,
         streamName: stream.name,
         streamType,
+        sampleSource,
         start,
         end,
         runId,

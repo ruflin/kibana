@@ -31,6 +31,12 @@ interface GetDiverseSampleDocumentsOptions {
   offset: number;
   size?: number;
   logger: Logger;
+  /**
+   * `'view'` for ES|QL views (query streams), which expose no `_index`/`_id`
+   * metadata and therefore cannot use the two-pass categorize-then-fetch
+   * strategy. In view mode this falls back to plain ES|QL random sampling.
+   */
+  metadataMode?: 'index' | 'view';
 }
 
 export async function getDiverseSampleDocuments({
@@ -41,7 +47,22 @@ export async function getDiverseSampleDocuments({
   size = 100,
   offset,
   logger,
+  metadataMode = 'index',
 }: GetDiverseSampleDocumentsOptions): Promise<{ hits: Array<SearchHit<Record<string, unknown>>> }> {
+  // Views cannot do the `CONCAT(_index, _id)` two-pass join; fall back to plain
+  // ES|QL random sampling, which is view-compatible.
+  if (metadataMode === 'view') {
+    const { hits } = await getSampleDocumentsEsql({
+      esClient,
+      index,
+      start,
+      end,
+      sampleSize: size,
+      metadataMode: 'view',
+    });
+    return { hits };
+  }
+
   const timeRangeFilter = dateRangeQuery(start, end);
   const filter = { bool: { filter: timeRangeFilter } };
   const indices = Array.isArray(index) ? index : [index];

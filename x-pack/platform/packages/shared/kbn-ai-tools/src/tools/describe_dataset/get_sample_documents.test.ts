@@ -270,4 +270,78 @@ describe('getSampleDocumentsEsql', () => {
 
     expect(result).toEqual({ hits: [], total: 0 });
   });
+
+  describe('view metadata mode', () => {
+    it('omits METADATA and reconstructs documents from the returned columns', async () => {
+      const { esClient, query } = createEsClient();
+      query.mockResolvedValueOnce(
+        createResponse({
+          columns: [
+            { name: '@timestamp', type: 'date' },
+            { name: 'service.name', type: 'keyword' },
+            { name: 'message', type: 'text' },
+          ],
+          values: [
+            ['2026-04-28T08:00:00.000Z', 'checkout', 'first'],
+            ['2026-04-28T08:01:00.000Z', null, 'second'],
+          ],
+        })
+      );
+
+      const result = await getSampleDocumentsEsql({
+        esClient,
+        index: '$.foobar',
+        start: 100,
+        end: 200,
+        size: 2,
+        metadataMode: 'view',
+      });
+
+      expect(query.mock.calls[0][0].query).toBe('FROM $.foobar | LIMIT 2');
+      expect(result).toEqual({
+        hits: [
+          {
+            _index: '',
+            _id: 'view-0',
+            _source: {
+              '@timestamp': '2026-04-28T08:00:00.000Z',
+              'service.name': 'checkout',
+              message: 'first',
+            },
+          },
+          {
+            // Null columns are dropped from the reconstructed document.
+            _index: '',
+            _id: 'view-1',
+            _source: { '@timestamp': '2026-04-28T08:01:00.000Z', message: 'second' },
+          },
+        ],
+        total: 2,
+      });
+    });
+
+    it('reconstructs view documents on the SAMPLE path', async () => {
+      const { esClient, query } = createEsClient();
+      query
+        .mockResolvedValueOnce({ columns: [{ name: 'total', type: 'long' }], values: [[100]] })
+        .mockResolvedValueOnce({
+          columns: [{ name: 'message', type: 'text' }],
+          values: [['a'], ['b'], ['c']],
+        });
+      jest.spyOn(Math, 'random').mockReturnValue(0);
+
+      const result = await getSampleDocumentsEsql({
+        esClient,
+        index: '$.foobar',
+        start: 100,
+        end: 200,
+        sampleSize: 2,
+        metadataMode: 'view',
+      });
+
+      expect(query.mock.calls[1][0].query).toBe('FROM $.foobar | SAMPLE 0.06 | LIMIT 20');
+      expect(result.hits).toHaveLength(2);
+      expect(result.hits.every((hit) => typeof hit._source?.message === 'string')).toBe(true);
+    });
+  });
 });

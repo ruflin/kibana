@@ -2,6 +2,7 @@
 .signing-config.json
 .ackrc
 /.es
+/.es-remote
 /.chromium
 .DS_Store
 .node_binaries

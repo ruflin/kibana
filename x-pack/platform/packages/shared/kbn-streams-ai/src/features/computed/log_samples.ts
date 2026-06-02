@@ -22,13 +22,14 @@ export const logSamplesGenerator: ComputedFeatureGenerator = {
 Use the \`properties.samples\` array to see actual log entries and their field values.
 This is useful for understanding the format of logs, identifying patterns, and seeing real examples of data in the stream.`,
 
-  generate: async ({ stream, start, end, esClient }) => {
+  generate: async ({ source, metadataMode, start, end, esClient }) => {
     const { hits } = await getSampleDocumentsEsql({
       esClient,
-      index: stream.name,
+      index: source,
       start,
       end,
       sampleSize: SAMPLE_SIZE,
+      metadataMode,
     });
 
     return {

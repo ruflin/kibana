@@ -115,6 +115,43 @@ describe('getSigEventsLogPatternsEsql', () => {
     ]);
   });
 
+  it('uses a single view-mode categorize query (no _index/_id pass-2) when metadataMode is view', async () => {
+    const { esClient, esql, rawEsqlQuery } = createEsClient([{ name: 'message', type: 'text' }]);
+    // esClient.esql(...) is used for the count query.
+    esql.mockResolvedValueOnce(countResponse(10));
+    // The view categorize query goes through the raw client (rawEsqlQuery).
+    // Call 0 was already consumed by the column-schema query in createEsClient.
+    rawEsqlQuery.mockResolvedValueOnce({
+      columns: [
+        { name: 'sample', type: 'text' },
+        { name: 'count', type: 'long' },
+        { name: 'pattern', type: 'keyword' },
+      ],
+      values: [
+        ['error one', 10, 'error'],
+        // Null pattern (field absent on the doc) is dropped.
+        [null, 3, null],
+      ],
+    });
+
+    const result = await getSigEventsLogPatternsEsql({
+      esClient,
+      index: '$.foobar',
+      start: 100,
+      end: 200,
+      fields: ['message'],
+      logger,
+      metadataMode: 'view',
+    });
+
+    expect(rawEsqlQuery.mock.calls[1][0].query).toBe(
+      'FROM $.foobar | STATS `sample` = TOP(message, 1, "desc"), count = COUNT(*) BY pattern = CATEGORIZE(message) | SORT count DESC | LIMIT 1000'
+    );
+    // Only the schema + categorize queries run on the raw client; no pass-2.
+    expect(rawEsqlQuery).toHaveBeenCalledTimes(2);
+    expect(result).toEqual([{ field: 'message', pattern: 'error', count: 10, sample: 'error one' }]);
+  });
+
   it('short-circuits when schema returns no eligible text fields', async () => {
     const { esClient, esql } = createEsClient([{ name: 'host.name', type: 'keyword' }]);
 

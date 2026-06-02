@@ -13,6 +13,20 @@ import type { Streams } from '@kbn/streams-schema';
  */
 export interface ComputedFeatureGeneratorOptions {
   stream: Streams.all.Definition;
+  /**
+   * ES|QL source to read documents from (comma-separated when multiple).
+   * Derived from the stream definition via `getSourcesForStream`: ingest
+   * streams resolve to their data-stream index patterns, query streams to
+   * their ES|QL view (e.g. `$.foobar`). Generators must use this instead of
+   * `stream.name`, which is not a valid index for query streams.
+   */
+  source: string;
+  /**
+   * How to read documents from `source`. `'view'` for query streams (ES|QL
+   * views), which expose no `_id`/`_source` metadata, so samplers must
+   * reconstruct documents from columns rather than reading `_source`.
+   */
+  metadataMode: 'index' | 'view';
   start: number;
   end: number;
   esClient: ElasticsearchClient;

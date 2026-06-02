@@ -48,7 +48,7 @@ export const errorLogsGenerator: ComputedFeatureGenerator = {
 Use the \`properties.samples\` array to see actual error log entries.
 This is useful for understanding error patterns, identifying recurring issues, and diagnosing problems in the system.`,
 
-  generate: async ({ stream, start, end, esClient }) => {
+  generate: async ({ source, metadataMode, start, end, esClient }) => {
     // `unmappedFields: 'NULLIFY'` lets `MATCH_PHRASE` skip clauses whose field
     // is not mapped on any backing index. Without it, ECS-only streams (no
     // `body.text`) and OTEL-only streams (no `message`) would fail with
@@ -56,12 +56,13 @@ This is useful for understanding error patterns, identifying recurring issues, a
     // silently no-matches missing fields, so this preserves baseline parity.
     const { hits } = await getSampleDocumentsEsql({
       esClient,
-      index: stream.name,
+      index: source,
       start,
       end,
       sampleSize: SAMPLE_SIZE,
       whereCondition: ERROR_WHERE_CONDITION,
       unmappedFields: 'NULLIFY',
+      metadataMode,
     });
 
     return {

@@ -76,6 +76,73 @@ export function buildPass1Query({
 }
 
 /**
+ * Single-pass categorization for ES|QL views (query streams), which expose no
+ * `_index`/`_id` and therefore cannot use the two-pass fetch-`_source`-by-key
+ * strategy. Captures one representative sample value per pattern directly with
+ * `TOP(field, 1)`, so no second query is needed.
+ */
+export function buildViewCategorizeQuery({
+  indices,
+  field,
+  limit,
+  samplingProbability,
+  kql,
+}: {
+  indices: string[];
+  field: string;
+  limit: number;
+  samplingProbability: number;
+  kql?: string;
+}): string {
+  let query = esql.from(indices);
+
+  if (kql) {
+    query = query.where`KQL(${esql.str(kql)})`;
+  }
+  if (samplingProbability < 1) {
+    query = query.pipe`SAMPLE ${esql.num(samplingProbability)}`;
+  }
+
+  return query.pipe`STATS sample = TOP(${esql.col(columnPath(field))}, 1, "desc"), count = COUNT(*) BY pattern = CATEGORIZE(${esql.col(
+    columnPath(field)
+  )})`
+    .sort([['count'], 'DESC', ''])
+    .limit(limit)
+    .print('basic');
+}
+
+/**
+ * Parses a view-mode categorization response (`buildViewCategorizeQuery`) into
+ * rows tagged with the pattern, count, and representative sample value. Rows
+ * with a null pattern (documents where the categorized field is absent) are
+ * skipped.
+ */
+export function parseViewPatternRows(
+  response: ESQLSearchResponse
+): Array<{ pattern: string; count: number; sample: string }> {
+  const sampleIndex = response.columns.findIndex((column) => column.name === 'sample');
+  const countIndex = response.columns.findIndex((column) => column.name === 'count');
+  const patternIndex = response.columns.findIndex((column) => column.name === 'pattern');
+
+  if (sampleIndex === -1 || countIndex === -1 || patternIndex === -1) {
+    return [];
+  }
+
+  return response.values.flatMap((row) => {
+    const rawSample = row[sampleIndex];
+    const sample = Array.isArray(rawSample) ? rawSample[0] : rawSample;
+    const count = row[countIndex];
+    const pattern = row[patternIndex];
+
+    if (typeof count !== 'number' || typeof pattern !== 'string') {
+      return [];
+    }
+
+    return [{ pattern, count, sample: typeof sample === 'string' ? sample : '' }];
+  });
+}
+
+/**
  * Fetches `_source` for the exact composite (`_index:_id`) keys chosen by pass
  * 1. Used by both the diverse-sampling and SigEvents log-patterns helpers.
  *

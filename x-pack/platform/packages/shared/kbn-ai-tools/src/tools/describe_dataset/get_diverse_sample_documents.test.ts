@@ -74,6 +74,37 @@ describe('getDiverseSampleDocuments', () => {
     jest.clearAllMocks();
   });
 
+  it('falls back to plain ES|QL view sampling when metadataMode is view', async () => {
+    const { esClient, query } = createEsClient();
+    getSampleDocumentsEsqlMock.mockResolvedValueOnce({
+      hits: [{ _index: '', _id: 'view-0', _source: { message: 'hello' } }],
+      total: 1,
+    });
+
+    const result = await getDiverseSampleDocuments({
+      esClient,
+      index: '$.foobar',
+      start: 100,
+      end: 200,
+      size: 5,
+      offset: 0,
+      logger,
+      metadataMode: 'view',
+    });
+
+    // No two-pass categorize/fetch queries are issued in view mode.
+    expect(query).not.toHaveBeenCalled();
+    expect(getSampleDocumentsEsqlMock).toHaveBeenCalledWith({
+      esClient,
+      index: '$.foobar',
+      start: 100,
+      end: 200,
+      sampleSize: 5,
+      metadataMode: 'view',
+    });
+    expect(result.hits).toEqual([{ _index: '', _id: 'view-0', _source: { message: 'hello' } }]);
+  });
+
   it('uses ES|QL count, categorize pass, and composite-key source fetch', async () => {
     const { esClient, query } = createEsClient();
     query

@@ -18,12 +18,13 @@ export const datasetAnalysisGenerator: ComputedFeatureGenerator = {
 Use the \`properties.analysis\` field to understand available fields and their value distributions.
 This is useful for understanding what fields are available for querying and what values they typically contain.`,
 
-  generate: async ({ stream, start, end, esClient }) => {
+  generate: async ({ source, metadataMode, start, end, esClient }) => {
     const analysis = await describeDataset({
       esClient,
-      index: stream.name,
+      index: source,
       start,
       end,
+      metadataMode,
     });
 
     const formattedAnalysis = formatDocumentAnalysis(analysis, {

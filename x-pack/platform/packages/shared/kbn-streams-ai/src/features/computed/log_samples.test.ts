@@ -17,6 +17,7 @@ jest.mock('@kbn/ai-tools', () => ({
 const getSampleDocumentsEsqlMock = jest.mocked(getSampleDocumentsEsql);
 
 const stream = { name: 'logs.test-default' } as Streams.all.Definition;
+const source = 'logs.test-default,logs.test-default.*';
 const esClient = {} as ElasticsearchClient;
 const logger = {} as Logger;
 
@@ -42,6 +43,8 @@ describe('logSamplesGenerator', () => {
 
     const result = await logSamplesGenerator.generate({
       stream,
+      source,
+      metadataMode: 'index',
       start: 100,
       end: 200,
       esClient,
@@ -50,10 +53,11 @@ describe('logSamplesGenerator', () => {
 
     expect(getSampleDocumentsEsqlMock).toHaveBeenCalledWith({
       esClient,
-      index: stream.name,
+      index: source,
       start: 100,
       end: 200,
       sampleSize: 5,
+      metadataMode: 'index',
     });
     expect(result).toEqual({
       samples: [{ 'service.name': 'checkout', message: 'checkout succeeded' }],

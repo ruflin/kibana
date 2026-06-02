@@ -8,6 +8,8 @@
 import React, { useMemo } from 'react';
 import { EuiFlexGroup, EuiHorizontalRule, EuiLoadingSpinner, formatNumber } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
+import type { ESQLSearchResponse } from '@kbn/es-types';
+import type { StreamDocsStat } from '@kbn/streams-plugin/common';
 import { buildDataQualityTotalDocCountEsql } from '../../util/stream_overview_esql';
 import { useKibana } from '../../hooks/use_kibana';
 import { useStreamsAppFetch } from '../../hooks/use_streams_app_fetch';
@@ -62,13 +64,23 @@ export function IngestChartStatistics({
     },
   } = useKibana();
 
+  // Query streams are ES|QL views with no backing data stream, so the data-stream-based
+  // doc_counts endpoint would fail with an index_not_found_exception. Count via ES|QL over
+  // the view instead. Ingest streams continue to use the (cheaper) doc_counts endpoint.
   const totalDocsFetch = useStreamsAppFetch(
     ({ signal }) =>
-      streamsRepositoryClient.fetch('GET /internal/streams/doc_counts/total', {
-        signal,
-        params: { query: { stream: streamName } },
-      }),
-    [streamName, streamsRepositoryClient]
+      isQueryStream
+        ? executeEsqlQuery({
+            query: buildDataQualityTotalDocCountEsql(esqlSource),
+            search: data.search.search,
+            signal,
+            uiSettings,
+          })
+        : streamsRepositoryClient.fetch('GET /internal/streams/doc_counts/total', {
+            signal,
+            params: { query: { stream: streamName } },
+          }),
+    [isQueryStream, esqlSource, streamName, data.search.search, uiSettings, streamsRepositoryClient]
   );
 
   // Count docs for the equivalent period one week ago to compute trends.
@@ -110,7 +122,20 @@ export function IngestChartStatistics({
     };
   }, [allTimeseries, intervalMs, timeStart, timeEnd]);
 
-  const totalDocs = totalDocsFetch.value?.find((s) => s.stream === streamName)?.count ?? 0;
+  const totalDocs = useMemo(() => {
+    const result = totalDocsFetch.value;
+    if (!result) {
+      return 0;
+    }
+    if (isQueryStream) {
+      // ES|QL response: single `doc_count` value from `STATS doc_count = COUNT(*)`.
+      const esqlResult = result as ESQLSearchResponse;
+      return (esqlResult.values?.[0]?.[0] as number | undefined) ?? 0;
+    }
+    // doc_counts endpoint response: a list of per-stream counts.
+    const stats = result as StreamDocsStat[];
+    return stats.find((s) => s.stream === streamName)?.count ?? 0;
+  }, [totalDocsFetch.value, isQueryStream, streamName]);
 
   const previousDocsInRange = useMemo(() => {
     const result = previousPeriodFetch.value;

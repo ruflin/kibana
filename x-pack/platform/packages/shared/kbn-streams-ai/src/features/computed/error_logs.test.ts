@@ -17,6 +17,7 @@ jest.mock('@kbn/ai-tools', () => ({
 const getSampleDocumentsEsqlMock = jest.mocked(getSampleDocumentsEsql);
 
 const stream = { name: 'logs.test-default' } as Streams.all.Definition;
+const source = 'logs.test-default,logs.test-default.*';
 const esClient = {} as ElasticsearchClient;
 const logger = {} as Logger;
 
@@ -42,6 +43,8 @@ describe('errorLogsGenerator', () => {
 
     const result = await errorLogsGenerator.generate({
       stream,
+      source,
+      metadataMode: 'index',
       start: 100,
       end: 200,
       esClient,
@@ -51,11 +54,12 @@ describe('errorLogsGenerator', () => {
     expect(getSampleDocumentsEsqlMock).toHaveBeenCalledWith(
       expect.objectContaining({
         esClient,
-        index: stream.name,
+        index: source,
         start: 100,
         end: 200,
         sampleSize: 5,
         unmappedFields: 'NULLIFY',
+        metadataMode: 'index',
         // Composer-built expression; deep-equality matchers fail here so just
         // assert it is present. The query-string assertion lives in
         // get_sample_documents.test.ts; this test guarantees the generator

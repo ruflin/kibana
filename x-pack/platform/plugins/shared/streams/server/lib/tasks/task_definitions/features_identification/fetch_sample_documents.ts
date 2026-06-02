@@ -31,6 +31,7 @@ export async function fetchSampleDocuments({
   diverseRatio,
   maxEntityFilters,
   diverseOffset = 0,
+  metadataMode = 'index',
 }: {
   esClient: ElasticsearchClient;
   index: string;
@@ -43,6 +44,8 @@ export async function fetchSampleDocuments({
   diverseRatio: number;
   diverseOffset?: number;
   maxEntityFilters: number;
+  /** `'view'` for query streams (ES|QL views with no `_id`/`_source` metadata). */
+  metadataMode?: 'index' | 'view';
 }) {
   if (entityFilteredRatio < 0 || diverseRatio < 0) {
     throw new Error(
@@ -70,12 +73,13 @@ export async function fetchSampleDocuments({
             size: diverseSize,
             offset: diverseOffset,
             logger,
+            metadataMode,
           }).catch((err) => {
             logger.warn(`Diverse sampling query failed: ${parseError(err).message}`);
             return EMPTY_SAMPLE;
           })
         : Promise.resolve(EMPTY_SAMPLE),
-      getSampleDocumentsEsql({ esClient, index, start, end, sampleSize: size }),
+      getSampleDocumentsEsql({ esClient, index, start, end, sampleSize: size, metadataMode }),
     ]);
 
     const { documents, bucketCounts } = mergeDocuments(
@@ -116,6 +120,7 @@ export async function fetchSampleDocuments({
         sampleSize: entityFilteredSize,
         whereCondition,
         unmappedFields: 'LOAD',
+        metadataMode,
       }).catch((err) => {
         logger.warn(`Entity-filtered sampling query failed: ${parseError(err).message}`);
         return EMPTY_SAMPLE;
@@ -129,6 +134,7 @@ export async function fetchSampleDocuments({
             size: diverseSize + entityFilteredSize,
             offset: diverseOffset,
             logger,
+            metadataMode,
           }).catch((err) => {
             logger.warn(`Diverse sampling query failed: ${parseError(err).message}`);
             return EMPTY_SAMPLE;
@@ -140,6 +146,7 @@ export async function fetchSampleDocuments({
         start,
         end,
         sampleSize: size,
+        metadataMode,
       }),
     ]);
 

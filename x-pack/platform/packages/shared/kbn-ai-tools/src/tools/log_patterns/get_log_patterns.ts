@@ -29,8 +29,10 @@ import { pValueToLabel } from '../../utils/p_value_to_label';
 import {
   buildPass1Query,
   buildPass2Query,
+  buildViewCategorizeQuery,
   parsePass1Rows,
   parsePass2Hits,
+  parseViewPatternRows,
 } from '../../utils/esql_two_pass';
 
 const MAX_DOCS_TO_SAMPLE = 100_000;
@@ -297,6 +299,13 @@ interface SigEventsLogPatternEsqlOptions {
   fields: string[];
   kql?: string;
   logger: Logger;
+  /**
+   * `'view'` for ES|QL views (query streams). Views expose no `_index`/`_id`,
+   * so the two-pass categorize-then-fetch-`_source` strategy is replaced by a
+   * single categorization query that captures a representative sample value via
+   * `TOP(field, 1)`.
+   */
+  metadataMode?: 'index' | 'view';
 }
 
 export async function getLogPatterns<TChanges extends boolean | undefined = undefined>(
@@ -432,7 +441,9 @@ export async function getSigEventsLogPatternsEsql({
   kql,
   fields,
   logger,
+  metadataMode = 'index',
 }: SigEventsLogPatternEsqlOptions): Promise<LogPatternEsqlEntry[]> {
+  const isView = metadataMode === 'view';
   const columns = await getEsqlColumnSchema({
     esClient: esClient.client,
     index,
@@ -459,6 +470,31 @@ export async function getSigEventsLogPatternsEsql({
     MAX_DOCS_TO_SAMPLE / totalDocs < 0.5 ? MAX_DOCS_TO_SAMPLE / totalDocs : 1;
   const perField = await Promise.all(
     eligibleFields.map(async (field) => {
+      // Views expose no `_index`/`_id`, so the two-pass fetch-`_source`-by-key
+      // strategy is impossible. Categorize in a single pass and capture a
+      // representative sample value via `TOP(field, 1)` instead.
+      if (isView) {
+        const viewResponse = (await esClient.client.esql.query({
+          query: buildViewCategorizeQuery({
+            indices: Array.isArray(index) ? index : [index],
+            kql,
+            field,
+            samplingProbability,
+            limit: SIG_EVENTS_PASS1_LIMIT,
+          }),
+          filter: { bool: { filter: dateRangeQuery(start, end) } },
+          drop_null_columns: true,
+        })) as unknown as ESQLSearchResponse;
+
+        return parseViewPatternRows(viewResponse).map((row) => ({
+          field,
+          pattern: row.pattern,
+          // ES|QL SAMPLE returns sampled counts; scale back for prompt parity.
+          count: Math.round(row.count / samplingProbability),
+          sample: row.sample,
+        }));
+      }
+
       // Pass 1 mirrors the diverse-sampling strategy: categorize and keep one
       // representative composite key per pattern. ES|QL grouped aggregations do
       // not provide a coherent full `_source` document in the same row.

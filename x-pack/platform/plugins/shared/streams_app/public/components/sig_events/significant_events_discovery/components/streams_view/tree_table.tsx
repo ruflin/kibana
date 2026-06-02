@@ -23,7 +23,6 @@ import { css } from '@emotion/css';
 import { i18n } from '@kbn/i18n';
 import type { ListStreamDetail } from '@kbn/streams-plugin/server/routes/internal/streams/crud/route';
 import {
-  Streams,
   StreamsKIsOnboardingStatus,
   STREAMS_KIS_ONBOARDING_IN_PROGRESS_STATUSES,
   type StreamsKIsOnboardingStatusResult,
@@ -54,6 +53,7 @@ import {
   enrichStream,
   filterCollapsedStreamRows,
   filterStreamsByQuery,
+  isSignificantEventsEligibleStream,
   shouldComposeTree,
 } from './utils';
 
@@ -87,10 +87,12 @@ export function StreamsTreeTable({
     pageSize: 25,
   });
 
-  // Filter streams by query, including ancestors of matches
+  // Filter streams by query, including ancestors of matches.
+  // Include ingest (wired + classic) streams and query streams; query streams
+  // are ES|QL views and support significant events just like ingest streams.
   const filteredStreams = React.useMemo(() => {
     return filterStreamsByQuery(
-      streams.filter((stream) => Streams.ingest.all.Definition.is(stream.stream)),
+      streams.filter(isSignificantEventsEligibleStream),
       searchQuery?.text ?? ''
     );
   }, [streams, searchQuery]);

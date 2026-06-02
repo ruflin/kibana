@@ -27,7 +27,7 @@ export interface EnrichedStream extends ListStreamDetail {
   nameSortKey: string;
   documentsCount: number;
   retentionMs: number;
-  type: 'wired' | 'root' | 'classic';
+  type: 'wired' | 'root' | 'classic' | 'query';
   children?: EnrichedStream[];
 }
 
@@ -45,6 +45,18 @@ export interface StreamTree extends ListStreamDetail {
 export function shouldComposeTree(sortField: SortableField) {
   // Always allow tree mode for nameSortKey
   return !sortField || sortField === 'nameSortKey';
+}
+
+/**
+ * Streams that can appear in the Significant Events discovery list: ingest
+ * (wired + classic) streams and query streams (ES|QL views). Other stream
+ * types are excluded.
+ */
+export function isSignificantEventsEligibleStream(stream: ListStreamDetail): boolean {
+  return (
+    Streams.ingest.all.Definition.is(stream.stream) ||
+    Streams.QueryStream.Definition.is(stream.stream)
+  );
 }
 
 // Returns all streams that match the query or are ancestors of a match
@@ -172,13 +184,17 @@ export function asTrees(streams: ListStreamDetail[]): StreamTree[] {
 }
 
 export const enrichStream = (node: StreamTree | ListStreamDetail): EnrichedStream => {
+  const isQueryStream = Streams.QueryStream.Definition.is(node.stream);
+
   let retentionMs = 0;
-  const lc = node.effective_lifecycle!;
-  if (isDslLifecycle(lc)) {
+  // Query streams are ES|QL views without a backing data stream, so they have no
+  // effective_lifecycle; their retention is not applicable.
+  const lc = node.effective_lifecycle;
+  if (lc && isDslLifecycle(lc)) {
     retentionMs = lc.dsl.data_retention
       ? parseDurationInSeconds(lc.dsl.data_retention) * 1000
       : Number.POSITIVE_INFINITY;
-  } else if (isIlmLifecycle(lc)) {
+  } else if (lc && isIlmLifecycle(lc)) {
     retentionMs = Number.POSITIVE_INFINITY;
   }
   const nameSortKey =
@@ -195,7 +211,9 @@ export const enrichStream = (node: StreamTree | ListStreamDetail): EnrichedStrea
     nameSortKey,
     documentsCount: 0,
     retentionMs,
-    type: Streams.ClassicStream.Definition.is(node.stream)
+    type: isQueryStream
+      ? 'query'
+      : Streams.ClassicStream.Definition.is(node.stream)
       ? 'classic'
       : isRootStreamDefinition(node.stream)
       ? 'root'

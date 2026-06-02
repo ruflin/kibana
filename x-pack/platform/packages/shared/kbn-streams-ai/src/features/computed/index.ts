@@ -6,6 +6,7 @@
  */
 
 import type { BaseFeature } from '@kbn/streams-schema';
+import { getSourcesForStream, Streams } from '@kbn/streams-schema';
 import { datasetAnalysisGenerator } from './dataset_analysis';
 import { errorLogsGenerator } from './error_logs';
 import { logPatternsGenerator } from './log_patterns';
@@ -80,13 +81,33 @@ function toComputedFeature(
 
 /**
  * Generates all computed features by running all registered generators in parallel.
+ *
+ * This is the single boundary where stream-type awareness enters the otherwise
+ * stream-agnostic generators. Two things are resolved once here from the stream
+ * definition and injected into every generator, so individual generators never
+ * have to special-case query streams:
+ *
+ *   1. `source` — the ES|QL source to read from. Previously every generator
+ *      used `stream.name`, which is fine for ingest streams (name == backing
+ *      data stream) but is NOT a valid index for query streams and threw
+ *      `verification_exception: Unknown index [<name>]`. `getSourcesForStream`
+ *      returns the data-stream patterns for ingest streams and the ES|QL view
+ *      (e.g. `$.foobar`) for query streams.
+ *   2. `metadataMode` — `'view'` for query streams (ES|QL views expose no
+ *      `_id`/`_source`, so samplers must reconstruct documents from columns)
+ *      and `'index'` for everything else. See `@kbn/ai-tools`
+ *      `get_sample_documents.ts` for the full explanation.
  */
 export async function generateAllComputedFeatures(
-  options: ComputedFeatureGeneratorOptions
+  options: Omit<ComputedFeatureGeneratorOptions, 'source' | 'metadataMode'>
 ): Promise<BaseFeature[]> {
+  const source = getSourcesForStream(options.stream).join(',');
+  const metadataMode = Streams.QueryStream.Definition.is(options.stream) ? 'view' : 'index';
+  const generatorOptions: ComputedFeatureGeneratorOptions = { ...options, source, metadataMode };
+
   return Promise.all(
     registry.getAll().map(async (generator) => {
-      const value = await generator.generate(options);
+      const value = await generator.generate(generatorOptions);
       return toComputedFeature(generator, value, options.stream.name);
     })
   );

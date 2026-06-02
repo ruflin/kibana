@@ -94,3 +94,37 @@ node scripts/sync_logs.js --source-host=https://source:9200 --source-api-key=...
 ```
 
 Required: `SOURCE_ELASTICSEARCH_HOST` and `SOURCE_ELASTICSEARCH_API_KEY` (or `--source-host` and `--source-api-key`). Destination is read from Kibana config (default `config/kibana.dev.yml`) or env; defaults to `http://localhost:9200` with basic auth `elastic`/`changeme`. Use `node scripts/sync_logs.js --help` for all options.
+
+### Cross-cluster search (CCS) setup
+
+**`node scripts/setup_ccs.js [options]`**
+
+Spins up a second local Elasticsearch cluster and registers it as a remote on your primary cluster, so you can develop and test cross-cluster search (CCS) locally. It (1) starts a second ES via `yarn es snapshot` with its own base-path, data dir, cluster name, and ports (default HTTP `9201`, transport `9301`), (2) waits for it to be ready, and (3) registers it on the primary through the Kibana Remote Clusters API (`POST /api/remote_clusters`), so it appears under Stack Management → Remote Clusters. Registering requires Kibana to be running.
+
+```sh
+# Start the remote cluster and register it (Kibana must be running)
+node scripts/setup_ccs.js
+
+# Only register an already-running remote cluster on the primary
+node scripts/setup_ccs.js --register-only
+
+# Only start the remote cluster (don't touch Kibana)
+node scripts/setup_ccs.js --skip-register
+```
+
+Once the remote is up, ingest logs into it and query them via CCS from the primary:
+
+```sh
+# Generate synthetic logs directly into the remote
+node scripts/synthtrace.js simple_logs --target=http://localhost:9201
+
+# …or copy logs from a source cluster into the remote with sync_logs.js
+ELASTICSEARCH_HOST=http://localhost:9201 \
+  SOURCE_ELASTICSEARCH_HOST=https://source:9200 SOURCE_ELASTICSEARCH_API_KEY=... \
+  node scripts/sync_logs.js
+
+# Then from the primary cluster's Dev Tools (alias defaults to "remote"):
+#   GET remote:logs*/_search
+```
+
+Use `node scripts/setup_ccs.js --help` for all options (remote name, ports, base-path, data dir, Kibana URL/auth, license). See also the "Running remote clusters" section in `docs/extend/running-elasticsearch.md`.

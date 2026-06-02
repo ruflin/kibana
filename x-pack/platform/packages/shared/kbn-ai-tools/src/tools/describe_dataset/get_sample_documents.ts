@@ -5,6 +5,42 @@
  * 2.0.
  */
 
+/*
+ * ----------------------------------------------------------------------------
+ * POC NOTE — `metadataMode: 'index' | 'view'`
+ * ----------------------------------------------------------------------------
+ * This module samples documents for the Significant Events / Knowledge
+ * Indicator (KI) feature-identification pipeline. It was written for *concrete*
+ * Elasticsearch sources (indices / data streams), where documents are read back
+ * via the `_id` and `_source` ES|QL metadata columns:
+ *
+ *     FROM <index> METADATA _id, _source | ...
+ *
+ * Streams query streams are NOT concrete indices — they are ES|QL *views*
+ * (named like `$.foobar`). Views do not expose `_id` / `_source`, so the query
+ * above fails at planning time with:
+ *
+ *     verification_exception: Unknown column [_id]
+ *
+ * That is what broke KI generation for query streams (the whole reason for this
+ * change). The fix is the `metadataMode` switch threaded through the samplers:
+ *
+ *   - `'index'` (default): unchanged behavior. Reads `_id` + `_source`
+ *     metadata. Used by every existing ingest-stream caller, so the ingest path
+ *     is byte-for-byte the same.
+ *   - `'view'`: reads NO metadata. Selects all columns (`FROM <view> | ...`) and
+ *     reconstructs each document's `_source` from the returned columns (see
+ *     `parseViewHits`). A synthetic `_id` (`view-<row>`) is assigned because
+ *     views have no stable document id; it is only used for dedup/tracking
+ *     downstream, never for correctness.
+ *
+ * The same `'index' | 'view'` distinction is propagated to the diverse sampler
+ * and the log-pattern helper, which additionally cannot use their two-pass
+ * `CONCAT(_index, _id)` join on views (see `get_diverse_sample_documents.ts`
+ * and `esql_two_pass.ts`).
+ * ----------------------------------------------------------------------------
+ */
+
 import type {
   MappingRuntimeFields,
   QueryDslFieldAndFormat,
@@ -43,6 +79,16 @@ interface GetSampleDocumentsEsqlParams {
    * reference to an unmapped column is a verification error).
    */
   unmappedFields?: 'LOAD' | 'NULLIFY';
+  /**
+   * How to retrieve document contents:
+   * - `'index'` (default) reads `_id` + `_source` metadata. Works on concrete
+   *   indices / data streams.
+   * - `'view'` reads no metadata and reconstructs each document from the
+   *   returned columns. Required for ES|QL views (query streams), which do not
+   *   expose `_id`/`_source` — `FROM <view> METADATA _id` fails with
+   *   `verification_exception: Unknown column [_id]`.
+   */
+  metadataMode?: 'index' | 'view';
   /**
    * Optional Query DSL filter clauses forwarded as the ES|QL `_query` request's
    * `filter` parameter. ES applies these at the request layer (before the ES|QL
@@ -160,9 +206,11 @@ export async function getSampleDocumentsEsql({
   sampleSize,
   whereCondition,
   unmappedFields,
+  metadataMode = 'index',
   dslFilter,
 }: GetSampleDocumentsEsqlParams): Promise<GetSampleDocumentsEsqlResponse> {
   const indices = Array.isArray(index) ? index : [index];
+  const isView = metadataMode === 'view';
   const extraDslClauses = dslFilter ? castArray(dslFilter) : [];
   const filter = {
     bool: { filter: [...dateRangeQuery(start, end), ...extraDslClauses] },
@@ -183,7 +231,9 @@ export async function getSampleDocumentsEsql({
     sampleProbability?: number;
     limit?: number;
   } = {}) => {
-    let query = esql.from(indices, ['_id', '_source']);
+    // Views cannot project `_id`/`_source`; select all columns instead and
+    // reconstruct the document from them in `parseViewHits`.
+    let query = isView ? esql.from(indices) : esql.from(indices, ['_id', '_source']);
     if (whereExpression) {
       query = query.where`${whereExpression}`;
     }
@@ -230,7 +280,7 @@ export async function getSampleDocumentsEsql({
       drop_null_columns: true,
     })) as unknown as ESQLSearchResponse;
 
-    const hits = parseHits(sampleResponse);
+    const hits = isView ? parseViewHits(sampleResponse) : parseHits(sampleResponse);
     shuffleInPlace(hits); // This is very important, read the function jsdoc for more information
     return { hits: hits.slice(0, sampleSize), total: hits.length };
   }
@@ -240,7 +290,7 @@ export async function getSampleDocumentsEsql({
     filter,
     drop_null_columns: true,
   })) as unknown as ESQLSearchResponse;
-  const hits = parseHits(response);
+  const hits = isView ? parseViewHits(response) : parseHits(response);
   return { hits, total: hits.length };
 }
 
@@ -278,6 +328,32 @@ function parseHits(response: ESQLSearchResponse): Array<SearchHit<Record<string,
         _source: (row[sourceIndex] as Record<string, unknown> | null) ?? {},
       },
     ];
+  });
+}
+
+/**
+ * Reconstructs hits from an ES|QL view response, which has no `_id`/`_source`
+ * metadata. Each row is a flat map of (already-dotted) column name -> value;
+ * we rebuild a `_source`-shaped object from the non-null columns so downstream
+ * document formatting (which flattens `_source`) stays compatible. `_id` is
+ * synthesized from the row ordinal since views expose no stable document id —
+ * it is only used for de-duplication/tracking, not correctness.
+ */
+function parseViewHits(response: ESQLSearchResponse): Array<SearchHit<Record<string, unknown>>> {
+  const columnNames = response.columns.map((column) => column.name);
+
+  return response.values.map((row, rowIndex) => {
+    const source: Record<string, unknown> = {};
+    row.forEach((value, columnIndex) => {
+      if (value !== null && value !== undefined) {
+        source[columnNames[columnIndex]] = value;
+      }
+    });
+    return {
+      _index: '',
+      _id: `view-${rowIndex}`,
+      _source: source,
+    };
   });
 }
 
