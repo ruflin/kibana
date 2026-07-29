@@ -32,6 +32,7 @@ import { SettingsTab } from './components/settings/tab';
 import { MemoryTab } from './components/memory/tab';
 import { DetectionsTab } from './components/detections_tab';
 import { SigEventsTab } from './components/significant_events_tab';
+import { EntitiesTab } from './components/entities_tab';
 
 const discoveryTabs = [
   'streams',
@@ -39,6 +40,7 @@ const discoveryTabs = [
   'queries',
   'detections',
   'significant_events',
+  'entities',
   'memory',
   'settings',
 ] as const;
@@ -200,6 +202,14 @@ export function SignificantEventsDiscoveryPage() {
         }),
         href: router.link('/_discovery/{tab}', { path: { tab: 'significant_events' } }),
         isSelected: tab === 'significant_events',
+      },
+      {
+        id: 'entities',
+        label: i18n.translate('xpack.streams.significantEventsDiscovery.entitiesTab', {
+          defaultMessage: 'Entities',
+        }),
+        href: router.link('/_discovery/{tab}', { path: { tab: 'entities' } }),
+        isSelected: tab === 'entities',
       },
       {
         id: 'memory',
@@ -377,6 +387,7 @@ export function SignificantEventsDiscoveryPage() {
             {tab === 'queries' && <QueriesTable />}
             {tab === 'detections' && <DetectionsTab />}
             {tab === 'significant_events' && <SigEventsTab />}
+            {tab === 'entities' && <EntitiesTab />}
             {tab === 'memory' && <MemoryTab />}
             {tab === 'settings' && <SettingsTab />}
           </StreamsAppPageTemplate.Body>

@@ -60,6 +60,12 @@ export interface RouteDependencies {
   workflowClients: WorkflowClients;
   maintenanceService: SignificantEventsMaintenanceService;
   getSpaceId: (request: KibanaRequest) => Promise<string>;
+  /**
+   * Entity Store POC only (see `lib/entity_store_poc`): this plugin's own base URL, used
+   * for the server-to-server loopback call to the Security Entity Store's public HTTP API.
+   * Not needed by any non-POC route.
+   */
+  getKibanaBaseUrl: () => Promise<string>;
 }
 
 export type SignificantEventsRouteHandlerResources = RouteDependencies &

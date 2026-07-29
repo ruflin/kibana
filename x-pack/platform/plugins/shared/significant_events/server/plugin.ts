@@ -79,6 +79,8 @@ import { SIGNIFICANT_EVENT_TIERED_FEATURES } from '../common/constants';
 import { STREAMS_SIGNIFICANT_EVENTS_AVAILABLE_FLAG } from '../common/feature_flags';
 import { isSignificantEventsAvailable } from './lib/feature_flags/is_significant_events_available';
 import type { SignificantEventsKIsOnboardingClient } from './lib/workflows/onboarding_workflow_client';
+import { getKibanaUrl } from './lib/slack_app/get_kibana_url';
+import { getEntityAttachmentSavedObjectType } from './lib/entity_store_poc/attachment_saved_object';
 
 const SIGNIFICANT_EVENTS_MANAGED_WORKFLOW_OWNER = 'significant_events';
 
@@ -133,6 +135,7 @@ export class SignificantEventsPlugin
 
     core.savedObjects.registerType(getRelayAppConnectionSavedObjectType());
     core.savedObjects.registerType(getSignificantEventsMaintenanceStateSavedObjectType());
+    core.savedObjects.registerType(getEntityAttachmentSavedObjectType());
 
     this.ebtTelemetryService.setup(core.analytics);
 
@@ -346,6 +349,11 @@ export class SignificantEventsPlugin
         getSpaceId: async (request: KibanaRequest) => {
           const [, pluginsStart] = await core.getStartServices();
           return pluginsStart.spaces?.spacesService.getSpaceId(request) ?? DEFAULT_SPACE_ID;
+        },
+        // Entity Store POC only — see `lib/entity_store_poc` and `routes/types.ts`.
+        getKibanaBaseUrl: async () => {
+          const [coreStart] = await core.getStartServices();
+          return getKibanaUrl(coreStart, plugins.cloud);
         },
       },
       core,
