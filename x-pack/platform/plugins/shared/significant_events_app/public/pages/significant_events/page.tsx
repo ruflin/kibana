@@ -35,6 +35,7 @@ import { SettingsTab } from './components/settings/tab';
 import { MemoryTab } from './components/memory/tab';
 import { DetectionsTab } from './components/detections_tab';
 import { SignificantEventsTab } from './components/significant_events_tab';
+import { StatsTab } from './components/stats_tab';
 
 const significantEventsTabs = [
   'streams',
@@ -43,6 +44,7 @@ const significantEventsTabs = [
   'detections',
   'significant_events',
   'memory',
+  'stats',
   'settings',
 ] as const;
 type SignificantEventsTabId = (typeof significantEventsTabs)[number];
@@ -210,6 +212,14 @@ export function SignificantEventsPage() {
         isSelected: tab === 'memory',
       },
       {
+        id: 'stats',
+        label: i18n.translate('xpack.significantEventsApp.statsTab', {
+          defaultMessage: 'Stats',
+        }),
+        href: router.link('/{tab}', { path: { tab: 'stats' } }),
+        isSelected: tab === 'stats',
+      },
+      {
         id: 'settings',
         label: i18n.translate('xpack.significantEventsApp.settingsTab', {
           defaultMessage: 'Settings',
@@ -357,6 +367,7 @@ export function SignificantEventsPage() {
             {tab === 'detections' && <DetectionsTab />}
             {tab === 'significant_events' && <SignificantEventsTab />}
             {tab === 'memory' && <MemoryTab />}
+            {tab === 'stats' && <StatsTab />}
             {tab === 'settings' && <SettingsTab />}
           </SignificantEventsAppPageTemplate.Body>
         </SignificantEventsPageProvider>

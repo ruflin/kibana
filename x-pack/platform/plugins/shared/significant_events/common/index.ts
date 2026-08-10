@@ -84,3 +84,13 @@ export {
   stateBlocksNewActivity,
 } from './maintenance/state_machine';
 export type { SignificantEventsMaintenanceState } from './maintenance/state_machine';
+
+export type {
+  SignificantEventsStatsDailyBucket,
+  SignificantEventsStatsInterval,
+  SignificantEventsStatsResponse,
+  SignificantEventsStatsSources,
+  SignificantEventsStatsTokenTotals,
+  SignificantEventsStatsToolRow,
+  SignificantEventsStatsWorkflowTypeRow,
+} from './stats';
