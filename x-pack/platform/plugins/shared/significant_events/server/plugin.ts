@@ -76,6 +76,14 @@ import {
   installDiscoveryAgents,
   registerSignificantEventsDiscoveryAgentTypes,
 } from './agent_builder/agents/discovery';
+import {
+  installKiQueriesAgent,
+  registerSignificantEventsKiQueriesAgentType,
+} from './agent_builder/agents/ki_queries';
+import {
+  installKiExtractionAgent,
+  registerSignificantEventsKiExtractionAgentType,
+} from './agent_builder/agents/ki_extraction';
 import { createSignificantEventsAvailability } from './agent_builder/tools/significant_events_availability';
 import { SIGNIFICANT_EVENT_TIERED_FEATURES } from '../common/constants';
 import { STREAMS_SIGNIFICANT_EVENTS_AVAILABLE_FLAG } from '../common/feature_flags';
@@ -264,6 +272,8 @@ export class SignificantEventsPlugin
     if (plugins.agentBuilder) {
       registerInvestigationAgentType(plugins.agentBuilder);
       registerSignificantEventsDiscoveryAgentTypes({ agentBuilder: plugins.agentBuilder });
+      registerSignificantEventsKiQueriesAgentType({ agentBuilder: plugins.agentBuilder });
+      registerSignificantEventsKiExtractionAgentType({ agentBuilder: plugins.agentBuilder });
       void core
         .getStartServices()
         .then(async () => {
@@ -427,11 +437,12 @@ export class SignificantEventsPlugin
       })
     );
 
-    // Editable investigation + discovery agents: installed via agents.ensure when
+    // Editable investigation, discovery, and KI agents: installed via agents.ensure when
     // significant events is available. skip(1) on availabilityEnabled$ drops the initial
     // emission, so catch up at startup as well. Per-space installs also happen just-in-time
     // from triggerInvestigationWorkflow (investigation), scheduled discovery enablement,
-    // and manual discovery execute (discovery).
+    // and manual discovery execute (discovery). KI agents are used by default-space
+    // onboarding workflows, so the default-space install at startup is sufficient.
     // Pause re-assert runs inside ensureSignificantEventsInstalled after every install.
     if (plugins.agentBuilder && this.server) {
       const agentBuilder = plugins.agentBuilder;
@@ -442,6 +453,8 @@ export class SignificantEventsPlugin
       void Promise.all([
         installInvestigationAgent({ agentBuilder, spaceId: DEFAULT_SPACE_ID, availability }),
         installDiscoveryAgents({ agentBuilder, spaceId: DEFAULT_SPACE_ID, availability }),
+        installKiQueriesAgent({ agentBuilder, spaceId: DEFAULT_SPACE_ID, availability }),
+        installKiExtractionAgent({ agentBuilder, spaceId: DEFAULT_SPACE_ID, availability }),
       ]).catch((error: unknown) => {
         this.logManagedResourceError('significant events agents', error);
       });

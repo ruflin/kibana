@@ -13,6 +13,9 @@ import type { GetScopedClients } from '../../routes/types';
 import { createFeatureKnowledgeIndicatorTool } from './create_feature_knowledge_indicator/tool';
 import { createQueryKnowledgeIndicatorTool } from './create_query_knowledge_indicator/tool';
 import { createSearchKnowledgeIndicatorsTool } from './search_knowledge_indicators/tool';
+import { createSampleStreamDocumentsTool } from './sample_stream_documents/tool';
+import { createPersistFeaturesTool } from './persist_features/tool';
+import { createValidateKiQueryTool } from './validate_ki_query/tool';
 import { createSearchEventsTool } from './event_search/tool';
 import { createEventTool } from './event_create/tool';
 import { createEventStatusUpdateTool } from './event_status_update/tool';
@@ -26,6 +29,9 @@ export {
   SIGNIFICANT_EVENTS_KNOWLEDGE_INDICATOR_CREATE_FEATURE_TOOL_ID,
   SIGNIFICANT_EVENTS_KNOWLEDGE_INDICATOR_CREATE_QUERY_TOOL_ID,
   SIGNIFICANT_EVENTS_KNOWLEDGE_INDICATORS_SEARCH_TOOL_ID,
+  SIGNIFICANT_EVENTS_SAMPLE_STREAM_DOCUMENTS_TOOL_ID,
+  SIGNIFICANT_EVENTS_PERSIST_FEATURES_TOOL_ID,
+  SIGNIFICANT_EVENTS_VALIDATE_KI_QUERY_TOOL_ID,
   SIGNIFICANT_EVENTS_SEARCH_EVENTS_TOOL_ID,
   SIGNIFICANT_EVENTS_EVENT_CREATE_TOOL_ID,
   SIGNIFICANT_EVENTS_EVENT_STATUS_UPDATE_TOOL_ID,
@@ -56,6 +62,21 @@ export function registerAgentBuilderTools({
       getScopedClients,
       server,
       logger: logger.get('ki_search_tool'),
+    }),
+    createSampleStreamDocumentsTool({
+      getScopedClients,
+      server,
+      logger: logger.get('ki_sample_documents_tool'),
+    }),
+    createPersistFeaturesTool({
+      getScopedClients,
+      server,
+      logger: logger.get('ki_feature_persist_tool'),
+    }),
+    createValidateKiQueryTool({
+      getScopedClients,
+      server,
+      logger: logger.get('ki_query_validate_tool'),
     }),
     createFeatureKnowledgeIndicatorTool({
       getScopedClients,

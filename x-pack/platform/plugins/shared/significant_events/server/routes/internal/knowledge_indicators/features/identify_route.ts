@@ -34,9 +34,10 @@ import { stateBlocksNewActivity } from '../../../../../common/maintenance/state_
 
 // Best-effort bootstrap of the standalone KI sync (groundedness) sweep workflow,
 // which runs under a request whose API key can schedule the workflow trigger.
-// Only the inferred route bootstraps: it runs at least once per identification
-// pass and always precedes computed identification, so hooking it covers every
-// path. Idempotent and non-blocking — a failure here must never fail extraction.
+// Inferred identification used to be the only hook; computed identification now
+// bootstraps as well so agent-based extraction (which no longer calls
+// `_identify/inferred`) still enables the sweep. Idempotent and non-blocking —
+// a failure here must never fail extraction.
 const bootstrapSyncWorkflow = async ({
   syncWorkflowService,
   maintenanceService,
@@ -275,7 +276,16 @@ const identifyComputedFeaturesRoute = createServerRoute({
       .nullable()
       .optional(),
   }),
-  handler: async ({ params, request, getScopedClients, server, logger, telemetry }) => {
+  handler: async ({
+    params,
+    request,
+    getScopedClients,
+    server,
+    logger,
+    telemetry,
+    syncWorkflowService,
+    maintenanceService,
+  }) => {
     const scopedClients = await getScopedClients({ request });
     const { streamDataEsClient, streamsClient, licensing } = scopedClients;
 
@@ -297,6 +307,17 @@ const identifyComputedFeaturesRoute = createServerRoute({
     const codeGroundingEnabled =
       Boolean(server.agentBuilder?.tools) &&
       (await isSignificantEventsSemanticCodeSearchGroundingEnabled(server.core.featureFlags));
+
+    // Bootstrap here so sync still enables when inferred extraction moved off
+    // `_identify/inferred` onto the KI extraction agent. Run before computed
+    // generation so a later computed failure (YAML continue-on-error) cannot
+    // skip enablement.
+    await bootstrapSyncWorkflow({
+      syncWorkflowService,
+      maintenanceService,
+      request,
+      logger: routeLogger,
+    });
 
     try {
       const computedFeatures = await identifyComputedFeatures({

@@ -1,14 +1,11 @@
 # KI Features Identification Workflow
 #
 # On-demand workflow that identifies KI features for a single stream.
-# Each iteration samples documents, runs LLM inference, and reconciles
-# features in a single endpoint call.
+# Inferred extraction runs as one KI Feature Extractor agent conversation
+# (the agent samples, converges, and persists). Computed features stay on HTTP.
 #
 # Flow:
-#   init → while(iterationCount < max) {
-#     identify_inferred → if(noDocuments) break → update_state → mark_success
-#     → track_convergence → if(converged) break
-#   } → if(allFailed) fail → identify_computed → output
+#   extract_features (ai.agent) → snapshot → identify_computed → output
 #
 # Concurrency is keyed per stream so only one identification run can be active
 # for a given stream at any time; overlapping triggers are dropped.
@@ -16,7 +13,7 @@
 version: "1"
 name: "KI Features Identification"
 enabled: true
-description: "Identifies KI features in a stream using LLM analysis and computed KI features."
+description: "Identifies KI features in a stream using the KI Feature Extractor agent and computed KI features."
 tags:
   - observability
   - streams
@@ -43,7 +40,7 @@ triggers:
         description: "End timestamp (epoch ms) for the document sampling window. Defaults to now."
       - name: connectorId
         type: string
-        description: "Override connector ID for LLM inference. When omitted, the default connector is resolved."
+        description: "Override connector ID for LLM inference. Unused by the agent step (connector is resolved via the Inference Feature Registry)."
       - name: maxIterations
         type: number
         default: 5
@@ -75,120 +72,79 @@ triggers:
         description: "Maximum number of previously identified features sent in the LLM prompt."
 steps:
   # -----------------------------------------------------------------------
-  # Step 1: Initialize loop variables.
+  # Step 1: Extract inferred features via the KI Feature Extractor agent.
   # -----------------------------------------------------------------------
-  - name: init
+  - name: extract_features
+    type: ai.agent
+    agent-id: "significant-events.ki-extraction"
+    # Keep connector-id-by-feature/plugin-id/aggregate-by in sync with @kbn/significant-events-schema
+    # inference_feature_ids.ts (SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID /
+    # SIGNIFICANT_EVENTS_INFERENCE_PARENT_FEATURE_ID).
+    connector-id-by-feature: 'significant_events_ki_extraction'
+    plugin-id: 'significant_events_ki_extraction'
+    aggregate-by: 'significant_events'
+    create-conversation: true
+    public-conversation: true
+    timeout: 720s
+    with:
+      message: |
+        Extract Knowledge Indicator features for stream `{{ inputs.streamName }}`.
+
+        run_id: {{ execution.id }}
+        start: {{ inputs.start }}
+        end: {{ inputs.end }}
+        maxIterations: {{ inputs.maxIterations }}
+        convergencePatience: {{ inputs.convergencePatience }}
+        sampleSize: {{ inputs.sampleSize }}
+        entityFilteredRatio: {{ inputs.entityFilteredRatio }}
+        diverseRatio: {{ inputs.diverseRatio }}
+        maxEntityFilters: {{ inputs.maxEntityFilters }}
+        maxExcludedFeaturesInPrompt: {{ inputs.maxExcludedFeaturesInPrompt }}
+        maxPreviouslyIdentifiedFeatures: {{ inputs.maxPreviouslyIdentifiedFeatures }}
+
+        Sample with platform.sig_events.ki_sample_documents, persist with
+        platform.sig_events.ki_feature_persist, and stop when there are no documents
+        or after convergencePatience barren successes.
+      schema:
+        type: object
+        properties:
+          discoveredFeatures:
+            type: array
+            description: Features persisted during this extraction run (id + title).
+            items:
+              type: object
+              properties:
+                id:
+                  type: string
+                title:
+                  type: string
+              required: [id]
+          hasDocuments:
+            type: boolean
+            description: false when sampling returned no documents.
+        required: [discoveredFeatures]
+    on-failure:
+      retry:
+        max-attempts: 3
+        delay: "5s"
+        strategy: exponential
+
+  # -----------------------------------------------------------------------
+  # Eviction-safe snapshot — ai.agent outputs are evictable; data.set outputs are not.
+  # -----------------------------------------------------------------------
+  - name: snapshot_extract_output
     type: data.set
     with:
-      hasSuccess: false
-      totalCompletionTokens: 0
-      totalPromptTokens: 0
-      totalTokens: 0
-      totalCachedTokens: 0
-      discoveredFeatures: []
-      iterationResults: []
-      connectorId: ""
-      barrenCount: 0
-      effectivePatience: "${{ inputs.convergencePatience | at_least: 1 }}"
+      discoveredFeatures: "${{ steps.extract_features.output.structured_output.discoveredFeatures | default: [] }}"
+      connectorId: "${{ steps.extract_features.output.metadata.usage.connectorId | default: inputs.connectorId }}"
+      tokensUsed:
+        prompt: "${{ steps.extract_features.output.metadata.usage.inputTokens | default: 0 }}"
+        completion: "${{ steps.extract_features.output.metadata.usage.outputTokens | default: 0 }}"
+        total: "${{ steps.extract_features.output.metadata.usage.totalTokens | default: 0 }}"
+        cached: "${{ steps.extract_features.output.metadata.usage.cachedTokens | default: 0 }}"
 
   # -----------------------------------------------------------------------
-  # Step 2: Main loop — each pass runs identify_inferred_features.
-  # -----------------------------------------------------------------------
-  - name: identify_loop
-    type: while
-    condition: "${{ variables.iterationResults.size < inputs.maxIterations }}"
-    steps:
-      # 2a: Sample, infer, and reconcile in one call.
-      - name: identify_inferred
-        type: kibana.request
-        with:
-          method: POST
-          path: "/internal/streams/{{ inputs.streamName }}/features/_identify/inferred"
-          headers:
-            x-elastic-internal-origin: "kibana"
-          body:
-            connectorId: "${{ inputs.connectorId }}"
-            start: "${{ inputs.start }}"
-            end: "${{ inputs.end }}"
-            runId: "${{ execution.id }}"
-            iteration: "${{ variables.iterationResults.size | plus: 1 }}"
-            featureTtlDays: "${{ inputs.featureTtlDays }}"
-            sampleSize: "${{ inputs.sampleSize }}"
-            entityFilteredRatio: "${{ inputs.entityFilteredRatio }}"
-            diverseRatio: "${{ inputs.diverseRatio }}"
-            maxEntityFilters: "${{ inputs.maxEntityFilters }}"
-            maxExcludedFeaturesInPrompt: "${{ inputs.maxExcludedFeaturesInPrompt }}"
-            maxPreviouslyIdentifiedFeatures: "${{ inputs.maxPreviouslyIdentifiedFeatures }}"
-
-      # 2b: If no documents were returned, stop the loop.
-      - name: check_docs
-        type: if
-        condition: "steps.identify_inferred.output.hasDocuments:false"
-        steps:
-          - name: stop_loop
-            type: loop.break
-
-      # 2c: Update loop variables with iteration output.
-      - name: update_state
-        type: data.set
-        with:
-          connectorId: "${{ steps.identify_inferred.output.connectorId }}"
-          discoveredFeatures: "${{ steps.identify_inferred.output.discoveredFeatures }}"
-          iterationResults: "${{ variables.iterationResults | push: steps.identify_inferred.output.iterationResult }}"
-          totalCompletionTokens: "${{ variables.totalCompletionTokens | plus: steps.identify_inferred.output.iterationResult.tokensUsed.completion }}"
-          totalPromptTokens: "${{ variables.totalPromptTokens | plus: steps.identify_inferred.output.iterationResult.tokensUsed.prompt }}"
-          totalTokens: "${{ variables.totalTokens | plus: steps.identify_inferred.output.iterationResult.tokensUsed.total }}"
-          totalCachedTokens: "${{ variables.totalCachedTokens | plus: steps.identify_inferred.output.iterationResult.tokensUsed.cached }}"
-
-      # 2d: Track whether at least one iteration succeeded.
-      - name: mark_success
-        type: if
-        condition: "${{ steps.identify_inferred.output.iterationResult.state == 'success' }}"
-        steps:
-          - name: set_success
-            type: data.set
-            with:
-              hasSuccess: true
-
-      # 2e: Convergence early-stop. LLM failures are neutral; only successful iterations move the counter.
-      - name: track_convergence
-        type: if
-        condition: "${{ steps.identify_inferred.output.iterationResult.state == 'success' }}"
-        steps:
-          - name: update_counter
-            type: if
-            condition: "${{ steps.identify_inferred.output.iterationResult.newFeatures.size > 0 }}"
-            steps:
-              - name: reset_counter
-                type: data.set
-                with:
-                  barrenCount: 0
-            else:
-              - name: bump_counter
-                type: data.set
-                with:
-                  barrenCount: "${{ variables.barrenCount | plus: 1 }}"
-          - name: maybe_stop
-            type: if
-            condition: "${{ variables.barrenCount >= variables.effectivePatience }}"
-            steps:
-              - name: stop_converged
-                type: loop.break
-
-  # -----------------------------------------------------------------------
-  # Step 3: Fail if iterations ran but none succeeded.
-  # -----------------------------------------------------------------------
-  - name: check_all_failed
-    type: if
-    condition: "${{ variables.iterationResults.size > 0 and variables.hasSuccess == false }}"
-    steps:
-      - name: all_failed
-        type: workflow.fail
-        with:
-          message: "All LLM iterations failed for stream {{ inputs.streamName }}"
-
-  # -----------------------------------------------------------------------
-  # Step 4: Identify computed features.
+  # Step 2: Identify computed features.
   #         Computed features are supplementary; failure here should not
   #         block the workflow, so we continue on error.
   # -----------------------------------------------------------------------
@@ -208,7 +164,7 @@ steps:
         featureTtlDays: "${{ inputs.featureTtlDays }}"
 
   # -----------------------------------------------------------------------
-  # Step 5: Output results.
+  # Step 3: Output results.
   # -----------------------------------------------------------------------
   - name: output_result
     type: workflow.output
@@ -217,9 +173,4 @@ steps:
       connectorId: "${{ variables.connectorId }}"
       discoveredFeatures: "${{ variables.discoveredFeatures }}"
       computedFeaturesCount: "${{ steps.identify_computed.output.computedFeaturesCount }}"
-      tokensUsed:
-        completion: "${{ variables.totalCompletionTokens }}"
-        prompt: "${{ variables.totalPromptTokens }}"
-        total: "${{ variables.totalTokens }}"
-        cached: "${{ variables.totalCachedTokens }}"
-      iterations: "${{ variables.iterationResults }}"
+      tokensUsed: "${{ variables.tokensUsed }}"

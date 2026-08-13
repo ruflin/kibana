@@ -26,14 +26,21 @@ export {
 } from './workflows/suggest_processing_pipeline';
 export {
   identifyKIQueries,
+  computeValidationLookback,
   DEFAULT_MAX_EXISTING_QUERIES_FOR_CONTEXT,
+  DEFAULT_QUERY_VALIDATION_TIMEOUT_MS,
   type ExistingQuerySummary,
 } from './src/significant_events/identify_ki_queries';
+export { significantEventsPrompt } from './src/significant_events/prompt';
+export { SIGNIFICANT_EVENTS_FEATURE_TOOL_TYPES } from './src/significant_events/tools/features_tool';
+export { featuresPrompt } from './src/features/prompt';
+export { formatRawDocument } from './src/features/utils/format_raw_document';
 export {
   createDefaultSignificantEventsToolUsage,
   type SignificantEventsToolUsage,
 } from './src/significant_events/tools/tool_usage';
 export { QUERY_GENERATION_EXCLUDED_FEATURE_TYPES } from './src/significant_events/tools/features_tool';
+export { getComputedFeatureInstructions } from './src/features/computed';
 export { EMPTY_TOKENS, sumTokens } from './src/helpers/sum_tokens';
 export {
   identifyFeatures,

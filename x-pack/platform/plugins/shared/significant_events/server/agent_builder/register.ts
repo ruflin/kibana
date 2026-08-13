@@ -47,9 +47,12 @@ export const createMemoryToolsOptions = ({
  * has run, so they rely on request-time gating instead. Skills, which support start-phase
  * registration, are gated by the availability flag from `start()` (see `registerSignificantEventsSkills`).
  *
- * Discovery agents are registered as agent types from plugin setup (see
- * `registerSignificantEventsDiscoveryAgentTypes`) and installed as editable profiles via
- * `installDiscoveryAgents`.
+ * Discovery and KI agents are registered as agent types from plugin setup (see
+ * `registerSignificantEventsDiscoveryAgentTypes`,
+ * `registerSignificantEventsKiQueriesAgentType`,
+ * `registerSignificantEventsKiExtractionAgentType`) and installed as editable
+ * profiles via `installDiscoveryAgents` / `installKiQueriesAgent` /
+ * `installKiExtractionAgent`.
  */
 export const registerStreamsAgentBuilder = async ({
   agentBuilder,

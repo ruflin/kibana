@@ -1,11 +1,11 @@
 # KI Queries Generation Workflow
 #
 # On-demand workflow that generates KI queries for a single
-# stream via LLM inference. Each run calls the _generate endpoint once and
-# returns the generated queries with token usage.
+# stream via the KI Query Generator agent. Persist stays on the
+# dedicated HTTP endpoint so alerting-rule installation is unchanged.
 #
 # Flow:
-#   generate_queries (retry ×3) → persist_queries (retry ×3) → output
+#   generate_queries (ai.agent, retry ×3) → snapshot → persist_queries (retry ×3) → output
 #
 # Concurrency is keyed per stream so only one generation run can be active
 # for a given stream at any time; overlapping triggers are dropped.
@@ -13,7 +13,7 @@
 version: "1"
 name: "KI Queries Generation"
 enabled: true
-description: "Generates KI queries for a stream using LLM inference."
+description: "Generates KI queries for a stream using the KI Query Generator agent."
 tags:
   - observability
   - streams
@@ -34,29 +34,95 @@ triggers:
         description: "The name of the stream to generate queries for."
       - name: connectorId
         type: string
-        description: "Optional connector ID override. When omitted the connector is resolved via the Inference Feature Registry."
+        description: "Optional connector ID override. Unused by the agent step (connector is resolved via the Inference Feature Registry)."
       - name: maxExistingQueriesForContext
         type: number
-        description: "Max number of existing queries to include as LLM context. When omitted the server-side default is used."
+        description: "Max number of existing queries to include as LLM context. When omitted the agent fetches a default page."
 steps:
   # -----------------------------------------------------------------------
-  # Step 1: Call the LLM-backed generation endpoint (retries up to 3×).
+  # Step 1: Generate queries via the KI Query Generator agent (retries up to 3×).
   # -----------------------------------------------------------------------
   - name: generate_queries
-    type: kibana.request
+    type: ai.agent
+    agent-id: "significant-events.ki-queries"
+    # Keep connector-id-by-feature/plugin-id/aggregate-by in sync with @kbn/significant-events-schema
+    # inference_feature_ids.ts (SIGNIFICANT_EVENTS_KI_QUERY_GENERATION_INFERENCE_FEATURE_ID /
+    # SIGNIFICANT_EVENTS_INFERENCE_PARENT_FEATURE_ID).
+    connector-id-by-feature: 'significant_events_ki_query_generation'
+    plugin-id: 'significant_events_ki_query_generation'
+    aggregate-by: 'significant_events'
+    create-conversation: true
+    public-conversation: true
+    timeout: 480s
     with:
-      method: POST
-      path: "/internal/streams/{{ inputs.streamName }}/queries/_generate"
-      headers:
-        x-elastic-internal-origin: "kibana"
-      body:
-        connectorId: "${{ inputs.connectorId }}"
-        maxExistingQueriesForContext: "${{ inputs.maxExistingQueriesForContext }}"
+      message: |
+        Generate Knowledge Indicator queries for stream `{{ inputs.streamName }}`.
+
+        Fetch stored features first, then existing queries. Validate every candidate
+        with platform.sig_events.ki_query_validate before including it in structured output.
+        {% if inputs.maxExistingQueriesForContext %}
+        Cap existing-query context at {{ inputs.maxExistingQueriesForContext }} queries.
+        {% endif %}
+      schema:
+        type: object
+        properties:
+          queries:
+            type: array
+            description: 'Validated queries to persist. esql must be an object with a query string; features must cite stored feature ids.'
+            items:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [match, stats]
+                title:
+                  type: string
+                description:
+                  type: string
+                esql:
+                  type: object
+                  properties:
+                    query:
+                      type: string
+                  required: [query]
+                severity_score:
+                  type: number
+                evidence:
+                  type: array
+                  items:
+                    type: string
+                replaces:
+                  type: string
+                features:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      run_id:
+                        type: string
+                    required: [id]
+              required: [type, title, description, esql, severity_score, features]
+        required: [queries]
     on-failure:
       retry:
         max-attempts: 3
         delay: "5s"
         strategy: exponential
+  # -----------------------------------------------------------------------
+  # Eviction-safe snapshot — ai.agent outputs are evictable; data.set outputs are not.
+  # -----------------------------------------------------------------------
+  - name: snapshot_generate_output
+    type: data.set
+    with:
+      queries: "${{ steps.generate_queries.output.structured_output.queries | default: [] }}"
+      tokensUsed:
+        prompt: "${{ steps.generate_queries.output.metadata.usage.inputTokens | default: 0 }}"
+        completion: "${{ steps.generate_queries.output.metadata.usage.outputTokens | default: 0 }}"
+        total: "${{ steps.generate_queries.output.metadata.usage.totalTokens | default: 0 }}"
+        cached: "${{ steps.generate_queries.output.metadata.usage.cachedTokens | default: 0 }}"
+      connectorId: "${{ steps.generate_queries.output.metadata.usage.connectorId | default: inputs.connectorId }}"
   # -----------------------------------------------------------------------
   # Step 2: Persist the generated queries.
   # -----------------------------------------------------------------------
@@ -73,15 +139,15 @@ steps:
       headers:
         x-elastic-internal-origin: "kibana"
       body:
-        queries: "${{ steps.generate_queries.output.queries }}"
+        queries: "${{ variables.queries }}"
   # -----------------------------------------------------------------------
   # Step 3: Output results.
   # -----------------------------------------------------------------------
   - name: output_result
     type: workflow.output
     with:
-      connectorId: "${{ steps.generate_queries.output.connectorId }}"
-      queries: "${{ steps.generate_queries.output.queries }}"
-      tokensUsed: "${{ steps.generate_queries.output.tokensUsed }}"
+      connectorId: "${{ variables.connectorId }}"
+      queries: "${{ variables.queries }}"
+      tokensUsed: "${{ variables.tokensUsed }}"
       persistedQueries: "${{ steps.persist_queries.output.persistedQueries }}"
       skippedQueries: "${{ steps.persist_queries.output.skippedQueries }}"
