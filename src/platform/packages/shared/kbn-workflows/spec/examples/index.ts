@@ -119,6 +119,15 @@ export const WORKFLOW_EXAMPLES: WorkflowExampleEntry[] = [
     filename: 'esql_to_index.yml',
   },
   {
+    id: 'service_entity_kis',
+    name: 'Service entity KIs from logs',
+    description:
+      'Extracts unique service.name values from logs and creates or updates a Knowledge Indicator for each one in an AI index',
+    category: 'observability',
+    tags: ['manual', 'esql', 'foreach', 'ai', 'knowledge-indicators', 'elasticsearch.index'],
+    filename: 'service_entity_kis.yml',
+  },
+  {
     id: 'mark_alert_closed',
     name: 'Mark Alert as Closed',
     description: 'Closes a security alert as false positive using kibana.SetAlertsStatus',

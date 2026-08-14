@@ -30,12 +30,35 @@ describe('kiAutomationGenerationSkill', () => {
     expect(kiAutomationGenerationSkill.content.length).toBeGreaterThan(0);
   });
 
-  it('has exactly one referencedContent entry for the index-selection reference workflow', () => {
-    expect(kiAutomationGenerationSkill.referencedContent).toHaveLength(1);
-    const ref = kiAutomationGenerationSkill.referencedContent![0];
-    expect(ref.name).toBe('index-selection-reference-workflow');
-    expect(ref.relativePath).toBe('.');
-    expect(ref.content.length).toBeGreaterThan(0);
+  it('has referencedContent entries for the index-selection and service-entity reference workflows', () => {
+    expect(kiAutomationGenerationSkill.referencedContent).toHaveLength(2);
+    expect(kiAutomationGenerationSkill.referencedContent?.map((ref) => ref.name)).toEqual([
+      'index-selection-reference-workflow',
+      'service-entity-reference-workflow',
+    ]);
+    for (const ref of kiAutomationGenerationSkill.referencedContent ?? []) {
+      expect(ref.relativePath).toBe('.');
+      expect(ref.content.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('service-entity reference workflow extracts unique service.name values and upserts entity KIs', () => {
+    const serviceEntityYaml = kiAutomationGenerationSkill.referencedContent?.find(
+      (ref) => ref.name === 'service-entity-reference-workflow'
+    )?.content;
+
+    expect(serviceEntityYaml).toBeDefined();
+    expect(serviceEntityYaml).toContain('STATS doc_count = COUNT(*) BY `service.name`');
+    expect(serviceEntityYaml).toContain('foreach: "{{ steps.list_services.output.values }}"');
+    expect(serviceEntityYaml).toContain('name: get_existing_ki');
+    expect(serviceEntityYaml).toContain('type: elasticsearch.index');
+    expect(serviceEntityYaml).toContain('id: "{{ variables.ki_id }}"');
+    expect(serviceEntityYaml).toContain('ki_id: "logs/service/');
+    expect(serviceEntityYaml).toContain('type: entity');
+    expect(serviceEntityYaml).toContain('entity_type: service');
+    expect(serviceEntityYaml).toContain('target_index: ai-index-idx-services');
+    expect(serviceEntityYaml).toContain('type: ai.prompt');
+    expect(serviceEntityYaml).not.toContain('type: ai.agent');
   });
 
   it('binds all required registry tools including getConnectors', async () => {

@@ -70,6 +70,14 @@ describe('registerGetExamplesTool', () => {
     expect(data.count).toBeGreaterThan(0);
   });
 
+  it('finds the service entity KI example by search', async () => {
+    const result = await invokeHandler(registeredTool, { search: 'knowledge-indicators' }, {});
+    const data = result.results[0].data as any;
+    expect(data.examples.map((example: { id: string }) => example.id)).toContain(
+      'service_entity_kis'
+    );
+  });
+
   it('includes YAML content in results', async () => {
     const result = await invokeHandler(registeredTool, {}, {});
     const data = result.results[0].data as any;
