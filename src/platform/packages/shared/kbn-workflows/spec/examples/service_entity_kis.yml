@@ -2,8 +2,8 @@ version: "1"
 name: Service entity KIs from logs
 description: >
   Discovers every unique service.name in log data, then creates or updates a
-  Cumulative / Wiki-style entity Knowledge Indicator for each name in an AI Index.
-  Re-runs upsert by a stable id derived from the normalized service name.
+  Cumulative / Wiki-style entity Knowledge Indicator for each name in an AI Index
+  using context-engine.createKi / context-engine.updateKi.
 enabled: true
 tags:
   - cumulative
@@ -12,9 +12,9 @@ tags:
   - logs
   - services
 consts:
-  # Must be an index (ai-index-idx-*), not a data stream: the Index API can
-  # create-or-replace by id only on indices. Data streams cannot update existing docs.
-  target_index: ai-index-idx-services
+  # AI index id (not the backing dest). createKi lazily creates this index with
+  # dest ai-index-idx-<id> when it does not exist yet.
+  ai_index_id: services
 triggers:
   - type: manual
     inputs:
@@ -31,13 +31,6 @@ triggers:
         default: 1000
         description: "Cap on unique service.name values (corpus filter). Lower to 3 for a pilot."
 steps:
-  - name: ensure_target_index
-    type: elasticsearch.indices.create
-    with:
-      index: "{{ consts.target_index }}"
-    on-failure:
-      continue: true
-
   # Distinct service.name values, most common first. The name itself is the
   # natural key; doc_count is only used as grounding evidence, never as a live fact.
   - name: list_services
@@ -61,18 +54,27 @@ steps:
           service_name: "{{ foreach.item[0] }}"
           doc_count: "{{ foreach.item[1] }}"
           slug: "{{ foreach.item[0] | downcase | replace: ' ', '-' }}"
-          ki_id: "logs/service/{{ foreach.item[0] | downcase | replace: ' ', '-' }}"
 
-      # Load the current KI (if any) so the prompt can merge rather than overwrite.
+      # Look up by fingerprint (type + entity_type + entity_name), not a client-chosen
+      # _id — createKi allocates the document id. Matches the default dest createKi uses
+      # when it lazily creates the AI index (`ai-index-idx-<ai_index_id>`). If this AI
+      # index already exists with a custom dest, point `index` at that dest instead.
       - name: get_existing_ki
         type: elasticsearch.search
         with:
-          index: "{{ consts.target_index }}"
+          index: "ai-index-idx-{{ consts.ai_index_id }}"
+          ignore_unavailable: true
+          allow_no_indices: true
           size: 1
           query:
-            ids:
-              values:
-                - "{{ variables.ki_id }}"
+            bool:
+              filter:
+                - term:
+                    type: entity
+                - term:
+                    "attributes.entity_type": service
+                - term:
+                    "attributes.entity_name": "{{ variables.service_name }}"
         on-failure:
           continue: true
 
@@ -200,50 +202,99 @@ steps:
               - access_patterns
         timeout: 120s
 
-      # Wrap the sink in `type: if` — step-level `if` is stripped on elasticsearch.* schemas.
-      - name: maybe_sink_service_ki
-        type: if
-        condition: "steps.profile_service.output.content.emit : true"
-        steps:
-          - name: sink_service_ki
-            type: elasticsearch.index
-            with:
-              index: "{{ consts.target_index }}"
-              id: "{{ variables.ki_id }}"
-              refresh: wait_for
-              document:
-                type: entity
-                title: "{{ steps.profile_service.output.content.display_name | default: variables.service_name }}"
-                tags:
-                  - service
-                  - logs
-                  - entity
-                "@timestamp": '{{ "now" | date: "%Y-%m-%dT%H:%M:%S.000Z" }}'
-                attributes:
-                  entity_name: "{{ variables.service_name }}"
-                  entity_type: service
-                  slug: "{{ variables.slug }}"
-                  source_index: "{{ inputs.sourceIndex }}"
-                  when_to_use: "{{ steps.profile_service.output.content.when_to_use }}"
-                  key_fields: "{{ steps.profile_service.output.content.key_fields | join: ', ' }}"
-                  related_indices: "{{ steps.profile_service.output.content.related_indices | join: ', ' }}"
-                  confidence: "{{ steps.profile_service.output.content.confidence }}"
-                  evidence: "{{ steps.profile_service.output.content.evidence | join: '; ' }}"
-                content: |
-                  Entity: service {{ variables.service_name }}. {{ steps.profile_service.output.content.summary }}
-                  Questions answered: {{ steps.profile_service.output.content.answers_questions | join: " | " }}
-                  When to use: {{ steps.profile_service.output.content.when_to_use }}
-                  Key fields: {{ steps.profile_service.output.content.key_fields | join: ", " }}
-                  Related indices: {{ steps.profile_service.output.content.related_indices | join: ", " }}
+      - name: verify_ki
+        type: context-engine.verifyKi
+        with:
+          ki:
+            type: entity
+            title: "{{ steps.profile_service.output.content.display_name | default: variables.service_name }}"
+            attributes:
+              esql: '${{ steps.profile_service.output.content.access_patterns | map: "esql_example" }}'
 
-                  Access patterns:
-                  {% for pattern in steps.profile_service.output.content.access_patterns %}
-                  Q: {{ pattern.question_type }}
-                  ESQL: {{ pattern.esql_template }}
-                  Example: {{ pattern.esql_example }}
-                  {% endfor %}
-                description: |
-                  Service entity {{ variables.service_name }}. {{ steps.profile_service.output.content.when_to_use }}
+      - name: maybe_write_service_ki
+        type: if
+        condition: "${{ steps.profile_service.output.content.emit and steps.verify_ki.output.passed }}"
+        steps:
+          - name: write_existing_or_new
+            type: if
+            condition: "${{ steps.get_existing_ki.error == null and steps.get_existing_ki.output.hits.total.value > 0 }}"
+            steps:
+              - name: update_service_ki
+                type: context-engine.updateKi
+                with:
+                  ai_index_id: "{{ consts.ai_index_id }}"
+                  ki_id: "{{ steps.get_existing_ki.output.hits.hits[0]._id }}"
+                  ki:
+                    type: entity
+                    title: "{{ steps.profile_service.output.content.display_name | default: variables.service_name }}"
+                    tags:
+                      - service
+                      - logs
+                      - entity
+                    attributes:
+                      entity_name: "{{ variables.service_name }}"
+                      entity_type: service
+                      slug: "{{ variables.slug }}"
+                      source_index: "{{ inputs.sourceIndex }}"
+                      when_to_use: "{{ steps.profile_service.output.content.when_to_use }}"
+                      key_fields: '${{ steps.profile_service.output.content.key_fields }}'
+                      related_indices: '${{ steps.profile_service.output.content.related_indices }}'
+                      confidence: '${{ steps.profile_service.output.content.confidence }}'
+                      evidence: '${{ steps.profile_service.output.content.evidence }}'
+                      esql: '${{ steps.profile_service.output.content.access_patterns | map: "esql_example" }}'
+                    content: |
+                      Entity: service {{ variables.service_name }}. {{ steps.profile_service.output.content.summary }}
+                      Questions answered: {{ steps.profile_service.output.content.answers_questions | join: " | " }}
+                      When to use: {{ steps.profile_service.output.content.when_to_use }}
+                      Key fields: {{ steps.profile_service.output.content.key_fields | join: ", " }}
+                      Related indices: {{ steps.profile_service.output.content.related_indices | join: ", " }}
+
+                      Access patterns:
+                      {% for pattern in steps.profile_service.output.content.access_patterns %}
+                      Q: {{ pattern.question_type }}
+                      ESQL: {{ pattern.esql_template }}
+                      Example: {{ pattern.esql_example }}
+                      {% endfor %}
+                    description: |
+                      Service entity {{ variables.service_name }}. {{ steps.profile_service.output.content.when_to_use }}
+            else:
+              - name: create_service_ki
+                type: context-engine.createKi
+                with:
+                  ai_index_id: "{{ consts.ai_index_id }}"
+                  ki:
+                    type: entity
+                    title: "{{ steps.profile_service.output.content.display_name | default: variables.service_name }}"
+                    tags:
+                      - service
+                      - logs
+                      - entity
+                    attributes:
+                      entity_name: "{{ variables.service_name }}"
+                      entity_type: service
+                      slug: "{{ variables.slug }}"
+                      source_index: "{{ inputs.sourceIndex }}"
+                      when_to_use: "{{ steps.profile_service.output.content.when_to_use }}"
+                      key_fields: '${{ steps.profile_service.output.content.key_fields }}'
+                      related_indices: '${{ steps.profile_service.output.content.related_indices }}'
+                      confidence: '${{ steps.profile_service.output.content.confidence }}'
+                      evidence: '${{ steps.profile_service.output.content.evidence }}'
+                      esql: '${{ steps.profile_service.output.content.access_patterns | map: "esql_example" }}'
+                    content: |
+                      Entity: service {{ variables.service_name }}. {{ steps.profile_service.output.content.summary }}
+                      Questions answered: {{ steps.profile_service.output.content.answers_questions | join: " | " }}
+                      When to use: {{ steps.profile_service.output.content.when_to_use }}
+                      Key fields: {{ steps.profile_service.output.content.key_fields | join: ", " }}
+                      Related indices: {{ steps.profile_service.output.content.related_indices | join: ", " }}
+
+                      Access patterns:
+                      {% for pattern in steps.profile_service.output.content.access_patterns %}
+                      Q: {{ pattern.question_type }}
+                      ESQL: {{ pattern.esql_template }}
+                      Example: {{ pattern.esql_example }}
+                      {% endfor %}
+                    description: |
+                      Service entity {{ variables.service_name }}. {{ steps.profile_service.output.content.when_to_use }}
     iteration-on-failure:
       continue: true
 
@@ -252,4 +303,4 @@ steps:
     with:
       message: >
         Processed {{ steps.list_services.output.values | size }} unique service.name
-        value(s) into {{ consts.target_index }} (create or update by logs/service/<slug>).
+        value(s) into AI index {{ consts.ai_index_id }} (createKi or updateKi by entity_name).
