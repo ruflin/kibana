@@ -102,3 +102,37 @@ export async function deleteEsqlView({
     }
   );
 }
+
+const isHiddenDataStreamName = (name: string): boolean => name.startsWith('.');
+
+export async function listDataStreams({
+  esClient,
+  logger,
+}: {
+  esClient: ElasticsearchClient;
+  logger: Logger;
+}): Promise<string[]> {
+  logger.debug('Listing data streams');
+
+  try {
+    const response = await esClient.indices.getDataStream();
+    return (response.data_streams ?? [])
+      .map((dataStream) => dataStream.name)
+      .filter((name) => !isHiddenDataStreamName(name))
+      .sort((left, right) => left.localeCompare(right));
+  } catch (error) {
+    logger.debug(`Data streams catalog is unavailable: ${error}`);
+    return [];
+  }
+}
+
+export async function getDataStreams({
+  esClient,
+  names,
+}: {
+  esClient: ElasticsearchClient;
+  names: string[];
+}): Promise<string[]> {
+  const response = await esClient.indices.getDataStream({ name: names });
+  return (response.data_streams ?? []).map((dataStream) => dataStream.name);
+}

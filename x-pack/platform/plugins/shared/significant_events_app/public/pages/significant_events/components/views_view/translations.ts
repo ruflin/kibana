@@ -27,6 +27,11 @@ export const ADD_EXISTING_VIEW_BUTTON = i18n.translate(
   { defaultMessage: 'Add existing view' }
 );
 
+export const ADD_DATA_STREAMS_BUTTON = i18n.translate(
+  'xpack.significantEventsApp.viewsView.addDataStreamsButton',
+  { defaultMessage: 'Add data streams' }
+);
+
 export const CREATE_VIEW_BUTTON = i18n.translate(
   'xpack.significantEventsApp.viewsView.createViewButton',
   { defaultMessage: 'Create view' }
@@ -49,7 +54,8 @@ export const OWNED_BADGE = i18n.translate('xpack.significantEventsApp.viewsView.
 export const NO_VIEWS_MESSAGE = i18n.translate(
   'xpack.significantEventsApp.viewsView.noViewsMessage',
   {
-    defaultMessage: 'No ES|QL views configured. Add an existing view or create one from a query.',
+    defaultMessage:
+      'No ES|QL views configured. Add an existing view, create one from data streams, or write a query.',
   }
 );
 
@@ -63,11 +69,41 @@ export const CREATE_FLYOUT_TITLE = i18n.translate(
   { defaultMessage: 'Create ES|QL view' }
 );
 
+export const ADD_DATA_STREAMS_FLYOUT_TITLE = i18n.translate(
+  'xpack.significantEventsApp.viewsView.addDataStreamsFlyoutTitle',
+  { defaultMessage: 'Create view from data streams' }
+);
+
 export const VIEW_NAME_LABEL = i18n.translate(
   'xpack.significantEventsApp.viewsView.viewNameLabel',
   {
     defaultMessage: 'Name',
   }
+);
+
+export const VIEW_NAME_PLACEHOLDER = i18n.translate(
+  'xpack.significantEventsApp.viewsView.viewNamePlaceholder',
+  { defaultMessage: 'prod-logs' }
+);
+
+export const DATA_STREAMS_LABEL = i18n.translate(
+  'xpack.significantEventsApp.viewsView.dataStreamsLabel',
+  { defaultMessage: 'Data streams' }
+);
+
+export const DATA_STREAMS_HELP = i18n.translate(
+  'xpack.significantEventsApp.viewsView.dataStreamsHelp',
+  { defaultMessage: 'Select one or more existing data streams to include in this view.' }
+);
+
+export const DATA_STREAMS_PLACEHOLDER = i18n.translate(
+  'xpack.significantEventsApp.viewsView.dataStreamsPlaceholder',
+  { defaultMessage: 'Select data streams' }
+);
+
+export const FROM_QUERY_PREVIEW_LABEL = i18n.translate(
+  'xpack.significantEventsApp.viewsView.fromQueryPreviewLabel',
+  { defaultMessage: 'ES|QL query' }
 );
 
 export const VIEW_QUERY_LABEL = i18n.translate(

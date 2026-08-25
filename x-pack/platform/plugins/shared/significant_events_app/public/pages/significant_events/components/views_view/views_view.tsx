@@ -18,9 +18,10 @@ import { FindSignificantEventsButton } from '../streams_view/find_significant_ev
 import { useSignificantEventsPageContext } from '../../context/significant_events_page_context';
 import { useKiGeneration } from '../knowledge_indicators_table/ki_generation_context';
 import { useDataViewsApi, useFetchDataViews } from '../../hooks/use_data_views';
-import { AddExistingViewFlyout, CreateViewFlyout } from './add_view_flyouts';
+import { AddDataStreamsFlyout, AddExistingViewFlyout, CreateViewFlyout } from './add_view_flyouts';
 import { ViewsTable } from './views_table';
 import {
+  ADD_DATA_STREAMS_BUTTON,
   ADD_EXISTING_VIEW_BUTTON,
   CREATE_VIEW_BUTTON,
   GENERATE_DISABLED_TOOLTIP,
@@ -28,7 +29,7 @@ import {
   VIEWS_SEARCH_PLACEHOLDER,
 } from './translations';
 
-type FlyoutMode = 'add' | 'create' | null;
+type FlyoutMode = 'add' | 'create' | 'data_streams' | null;
 
 export function ViewsView() {
   const {
@@ -46,7 +47,7 @@ export function ViewsView() {
 
   const viewsQuery = useFetchDataViews();
   const views = useMemo(() => viewsQuery.data?.views ?? [], [viewsQuery.data?.views]);
-  const { addExisting, createOwned, setEnabled, remove } = useDataViewsApi();
+  const { addExisting, createOwned, createFromDataStreams, setEnabled, remove } = useDataViewsApi();
 
   const {
     isScheduling,
@@ -114,6 +115,17 @@ export function ViewsView() {
               data-test-subj="significantEventsAddExistingViewButton"
             >
               {ADD_EXISTING_VIEW_BUTTON}
+            </EuiButton>
+          </EuiFlexItem>
+          <EuiFlexItem grow={false}>
+            <EuiButton
+              size="s"
+              iconType="plusCircle"
+              onClick={() => setFlyout('data_streams')}
+              isDisabled={!canManage}
+              data-test-subj="significantEventsAddDataStreamsButton"
+            >
+              {ADD_DATA_STREAMS_BUTTON}
             </EuiButton>
           </EuiFlexItem>
           <EuiFlexItem grow={false}>
@@ -192,6 +204,13 @@ export function ViewsView() {
           isLoading={addExisting.isLoading}
           onClose={() => setFlyout(null)}
           onAdd={(name) => addExisting.mutateAsync(name)}
+        />
+      )}
+      {flyout === 'data_streams' && (
+        <AddDataStreamsFlyout
+          isLoading={createFromDataStreams.isLoading}
+          onClose={() => setFlyout(null)}
+          onCreate={(params) => createFromDataStreams.mutateAsync(params)}
         />
       )}
       {flyout === 'create' && (

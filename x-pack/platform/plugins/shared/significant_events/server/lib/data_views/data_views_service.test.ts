@@ -15,6 +15,7 @@ import {
 import { createDataViewsService } from './data_views_service';
 import {
   deleteEsqlView,
+  getDataStreams,
   getEsqlView,
   listEsqlViews,
   upsertEsqlView,
@@ -22,7 +23,9 @@ import {
 
 jest.mock('../esql_views/manage_esql_views', () => ({
   deleteEsqlView: jest.fn(),
+  getDataStreams: jest.fn(),
   getEsqlView: jest.fn(),
+  listDataStreams: jest.fn(),
   listEsqlViews: jest.fn(),
   upsertEsqlView: jest.fn(),
 }));
@@ -69,6 +72,9 @@ describe('createDataViewsService', () => {
     findRules.mockResolvedValue({ items: [], total: 0 });
     (listEsqlViews as jest.Mock).mockResolvedValue([existingView]);
     (getEsqlView as jest.Mock).mockResolvedValue(existingView);
+    (getDataStreams as jest.Mock).mockImplementation(
+      async ({ names }: { names: string[] }) => names
+    );
     (upsertEsqlView as jest.Mock).mockResolvedValue(undefined);
     (deleteEsqlView as jest.Mock).mockResolvedValue(undefined);
   });
@@ -193,6 +199,64 @@ describe('createDataViewsService', () => {
 
   it('rejects adding a system view', async () => {
     await expect(createService().addExisting('$.rule-events')).rejects.toBeInstanceOf(StatusError);
+    expect(upsertEsqlView).not.toHaveBeenCalled();
+  });
+
+  it('creates an owned view FROM selected data streams', async () => {
+    (getEsqlView as jest.Mock).mockRejectedValue(new Error('not found'));
+    const view = await createService().createFromDataStreams({
+      name: 'checkout',
+      dataStreams: ['logs-foo', ' logs-bar ', 'logs-foo'],
+      spaceId: 'default',
+    });
+
+    expect(view).toEqual({
+      name: '$.nightshift.default.checkout',
+      enabled: true,
+      owned: true,
+      query: 'FROM `logs-foo`, `logs-bar`',
+    });
+    expect(getDataStreams).toHaveBeenCalledWith({
+      esClient,
+      names: ['logs-foo', 'logs-bar'],
+    });
+    expect(upsertEsqlView).toHaveBeenCalledWith({
+      esClient,
+      logger,
+      name: '$.nightshift.default.checkout',
+      query: 'FROM `logs-foo`, `logs-bar`',
+    });
+  });
+
+  it('rejects missing data streams without creating a view', async () => {
+    (getDataStreams as jest.Mock).mockRejectedValue(new Error('not found'));
+
+    await expect(
+      createService().createFromDataStreams({
+        name: 'checkout',
+        dataStreams: ['logs-missing'],
+        spaceId: 'default',
+      })
+    ).rejects.toMatchObject({ statusCode: 404 });
+    expect(upsertEsqlView).not.toHaveBeenCalled();
+  });
+
+  it('rejects hidden and wildcard data stream names', async () => {
+    await expect(
+      createService().createFromDataStreams({
+        name: 'checkout',
+        dataStreams: ['.internal'],
+        spaceId: 'default',
+      })
+    ).rejects.toMatchObject({ statusCode: 400 });
+    await expect(
+      createService().createFromDataStreams({
+        name: 'checkout',
+        dataStreams: ['logs-*'],
+        spaceId: 'default',
+      })
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(getDataStreams).not.toHaveBeenCalled();
     expect(upsertEsqlView).not.toHaveBeenCalled();
   });
 });

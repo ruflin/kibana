@@ -8,6 +8,8 @@
 export { QUERY_STATUSES } from './queries';
 export type { QueryStatus } from './queries';
 
+export { quoteEsqlSource, toFromQuery } from './esql_from';
+
 export {
   STREAMS_SIGNIFICANT_EVENTS_AVAILABLE_FLAG,
   SIGNIFICANT_EVENTS_SEMANTIC_CODE_SEARCH_GROUNDING_ENABLED_FLAG,

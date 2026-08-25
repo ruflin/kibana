@@ -8,6 +8,7 @@
 import {
   EuiButton,
   EuiButtonEmpty,
+  EuiCodeBlock,
   EuiComboBox,
   EuiFieldText,
   EuiFlexGroup,
@@ -22,14 +23,21 @@ import {
   useGeneratedHtmlId,
 } from '@elastic/eui';
 import React, { useMemo, useState } from 'react';
-import { useFetchDataViewsCatalog } from '../../hooks/use_data_views';
+import { toFromQuery } from '@kbn/significant-events-plugin/common';
+import { useFetchDataStreamsCatalog, useFetchDataViewsCatalog } from '../../hooks/use_data_views';
 import {
+  ADD_DATA_STREAMS_FLYOUT_TITLE,
   ADD_EXISTING_FLYOUT_TITLE,
   ADD_VIEW_CONFIRM,
   CANCEL_LABEL,
   CREATE_FLYOUT_TITLE,
   CREATE_VIEW_CONFIRM,
+  DATA_STREAMS_HELP,
+  DATA_STREAMS_LABEL,
+  DATA_STREAMS_PLACEHOLDER,
+  FROM_QUERY_PREVIEW_LABEL,
   VIEW_NAME_LABEL,
+  VIEW_NAME_PLACEHOLDER,
   VIEW_QUERY_LABEL,
 } from './translations';
 
@@ -173,6 +181,100 @@ export function CreateViewFlyout({ isLoading, onClose, onCreate }: CreateViewFly
                 onClose();
               }}
               data-test-subj="significantEventsCreateViewConfirm"
+            >
+              {CREATE_VIEW_CONFIRM}
+            </EuiButton>
+          </EuiFlexItem>
+        </EuiFlexGroup>
+      </EuiFlyoutFooter>
+    </EuiFlyout>
+  );
+}
+
+interface AddDataStreamsFlyoutProps {
+  isLoading: boolean;
+  onClose: () => void;
+  onCreate: (params: { name: string; dataStreams: string[] }) => Promise<unknown>;
+}
+
+export function AddDataStreamsFlyout({ isLoading, onClose, onCreate }: AddDataStreamsFlyoutProps) {
+  const catalog = useFetchDataStreamsCatalog(true);
+  const [name, setName] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const titleId = useGeneratedHtmlId({ prefix: 'addDataStreamsFlyoutTitle' });
+
+  const options = useMemo(
+    () => (catalog.data?.dataStreams ?? []).map((dataStream) => ({ label: dataStream })),
+    [catalog.data?.dataStreams]
+  );
+
+  const canSubmit = name.trim().length > 0 && selected.length > 0;
+  const previewQuery = selected.length > 0 ? toFromQuery(selected) : '';
+
+  return (
+    <EuiFlyout
+      onClose={onClose}
+      size="m"
+      ownFocus
+      aria-labelledby={titleId}
+      data-test-subj="significantEventsAddDataStreamsFlyout"
+    >
+      <EuiFlyoutHeader hasBorder>
+        <EuiTitle size="s">
+          <h2 id={titleId}>{ADD_DATA_STREAMS_FLYOUT_TITLE}</h2>
+        </EuiTitle>
+      </EuiFlyoutHeader>
+      <EuiFlyoutBody>
+        <EuiFormRow label={VIEW_NAME_LABEL} fullWidth>
+          <EuiFieldText
+            data-test-subj="significantEventsAddDataStreamsName"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder={VIEW_NAME_PLACEHOLDER}
+            fullWidth
+          />
+        </EuiFormRow>
+        <EuiFormRow label={DATA_STREAMS_LABEL} helpText={DATA_STREAMS_HELP} fullWidth>
+          <EuiComboBox
+            data-test-subj="significantEventsAddDataStreamsCombo"
+            aria-label={DATA_STREAMS_LABEL}
+            placeholder={DATA_STREAMS_PLACEHOLDER}
+            options={options}
+            selectedOptions={selected.map((dataStream) => ({ label: dataStream }))}
+            onChange={(next) => setSelected(next.map((option) => option.label))}
+            isLoading={catalog.isLoading}
+            fullWidth
+          />
+        </EuiFormRow>
+        {previewQuery ? (
+          <EuiFormRow label={FROM_QUERY_PREVIEW_LABEL} fullWidth>
+            <EuiCodeBlock
+              data-test-subj="significantEventsAddDataStreamsQueryPreview"
+              language="sql"
+              fontSize="s"
+              paddingSize="s"
+              isCopyable={false}
+            >
+              {previewQuery}
+            </EuiCodeBlock>
+          </EuiFormRow>
+        ) : null}
+      </EuiFlyoutBody>
+      <EuiFlyoutFooter>
+        <EuiFlexGroup justifyContent="flexEnd">
+          <EuiFlexItem grow={false}>
+            <EuiButtonEmpty onClick={onClose}>{CANCEL_LABEL}</EuiButtonEmpty>
+          </EuiFlexItem>
+          <EuiFlexItem grow={false}>
+            <EuiButton
+              fill
+              isDisabled={!canSubmit}
+              isLoading={isLoading}
+              onClick={async () => {
+                await onCreate({ name: name.trim(), dataStreams: selected });
+                onClose();
+              }}
+              data-test-subj="significantEventsAddDataStreamsConfirm"
             >
               {CREATE_VIEW_CONFIRM}
             </EuiButton>

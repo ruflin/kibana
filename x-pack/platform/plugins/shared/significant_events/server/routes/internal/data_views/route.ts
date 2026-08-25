@@ -6,7 +6,7 @@
  */
 
 import { z } from '@kbn/zod/v4';
-import { MAX_ID_LENGTH, MAX_TEXT_LENGTH } from '@kbn/significant-events-schema';
+import { MAX_ARRAY_LENGTH, MAX_ID_LENGTH, MAX_TEXT_LENGTH } from '@kbn/significant-events-schema';
 import { STREAMS_API_PRIVILEGES } from '../../../../common/constants';
 import { createServerRoute } from '../../create_server_route';
 import { assertSignificantEventsAccess } from '../../utils/assert_significant_events_access';
@@ -72,13 +72,43 @@ const catalogViewsRoute = createServerRoute({
   },
 });
 
+const listDataStreamsRoute = createServerRoute({
+  endpoint: 'GET /internal/significant_events/views/_data_streams',
+  options: {
+    access: 'internal',
+    summary: 'List data streams available to create a view',
+    description:
+      'Returns Elasticsearch data stream names that can be selected when creating a Significant Events view. Hidden (dot-prefixed) data streams are omitted.',
+  },
+  security: {
+    authz: {
+      requiredPrivileges: [STREAMS_API_PRIVILEGES.read],
+    },
+  },
+  params: z.object({}),
+  handler: async ({ request, getScopedClients, server, logger }) => {
+    const { soClient, streamDataEsClient, licensing, getSignificantEventsAlertingContext } =
+      await getScopedClients({ request });
+    await assertSignificantEventsAccess({ server, licensing });
+    const { alertingV2RulesClient } = await getSignificantEventsAlertingContext();
+    const service = createDataViewsService({
+      soClient,
+      esClient: streamDataEsClient,
+      logger,
+      alertingV2RulesClient,
+    });
+    const dataStreams = await service.listDataStreams();
+    return { dataStreams };
+  },
+});
+
 const createViewRoute = createServerRoute({
   endpoint: 'POST /internal/significant_events/views',
   options: {
     access: 'internal',
     summary: 'Add or create a Significant Events view',
     description:
-      'Adds an existing ES|QL view by name, or creates an owned view from an ES|QL query. Newly added views are enabled.',
+      'Adds an existing ES|QL view by name, creates an owned view from an ES|QL query, or creates an owned view from selected data streams. Newly added views are enabled.',
   },
   security: {
     authz: {
@@ -95,6 +125,11 @@ const createViewRoute = createServerRoute({
         action: z.literal('create'),
         name: z.string().min(1).max(MAX_ID_LENGTH),
         query: z.string().min(1).max(MAX_TEXT_LENGTH),
+      }),
+      z.object({
+        action: z.literal('create_from_data_streams'),
+        name: z.string().min(1).max(MAX_ID_LENGTH),
+        dataStreams: z.array(z.string().min(1).max(MAX_ID_LENGTH)).min(1).max(MAX_ARRAY_LENGTH),
       }),
     ]),
   }),
@@ -116,6 +151,16 @@ const createViewRoute = createServerRoute({
     }
 
     const spaceId = await getSpaceId(request);
+
+    if (params.body.action === 'create_from_data_streams') {
+      const view = await service.createFromDataStreams({
+        name: params.body.name,
+        dataStreams: params.body.dataStreams,
+        spaceId,
+      });
+      return { view };
+    }
+
     const view = await service.createOwned({
       name: params.body.name,
       query: params.body.query,
@@ -199,6 +244,7 @@ const deleteViewRoute = createServerRoute({
 export const internalDataViewsRoutes = {
   ...listViewsRoute,
   ...catalogViewsRoute,
+  ...listDataStreamsRoute,
   ...createViewRoute,
   ...updateViewRoute,
   ...deleteViewRoute,

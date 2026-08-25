@@ -14,6 +14,11 @@ import { useKibana } from '../../../hooks/use_kibana';
 
 export const DATA_VIEWS_QUERY_KEY = ['significantEvents', 'dataViews'] as const;
 export const DATA_VIEWS_CATALOG_QUERY_KEY = ['significantEvents', 'dataViews', 'catalog'] as const;
+export const DATA_STREAMS_CATALOG_QUERY_KEY = [
+  'significantEvents',
+  'dataViews',
+  'dataStreams',
+] as const;
 
 export function useFetchDataViews() {
   const {
@@ -56,6 +61,30 @@ export function useFetchDataViewsCatalog(enabled: boolean) {
   });
 }
 
+export function useFetchDataStreamsCatalog(enabled: boolean) {
+  const {
+    dependencies: {
+      start: {
+        significantEvents: { significantEventsRepositoryClient },
+      },
+    },
+  } = useKibana();
+  const showFetchErrorToast = useFetchErrorToast();
+
+  return useQuery<{ dataStreams: string[] }, Error>({
+    queryKey: DATA_STREAMS_CATALOG_QUERY_KEY,
+    enabled,
+    queryFn: async ({ signal }: QueryFunctionContext) =>
+      significantEventsRepositoryClient.fetch(
+        'GET /internal/significant_events/views/_data_streams',
+        {
+          signal: signal ?? null,
+        }
+      ),
+    onError: showFetchErrorToast,
+  });
+}
+
 export function useDataViewsApi() {
   const {
     dependencies: {
@@ -92,6 +121,16 @@ export function useDataViewsApi() {
     onError: showFetchErrorToast,
   });
 
+  const createFromDataStreams = useMutation({
+    mutationFn: ({ name, dataStreams }: { name: string; dataStreams: string[] }) =>
+      significantEventsRepositoryClient.fetch('POST /internal/significant_events/views', {
+        params: { body: { action: 'create_from_data_streams', name, dataStreams } },
+        signal: null,
+      }),
+    onSuccess: () => invalidate(),
+    onError: showFetchErrorToast,
+  });
+
   const setEnabled = useMutation({
     mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
       significantEventsRepositoryClient.fetch('PUT /internal/significant_events/views/{name}', {
@@ -119,5 +158,5 @@ export function useDataViewsApi() {
     onError: showFetchErrorToast,
   });
 
-  return { addExisting, createOwned, setEnabled, remove };
+  return { addExisting, createOwned, createFromDataStreams, setEnabled, remove };
 }
