@@ -139,11 +139,11 @@ const deleteFeatureRoute = createServerRoute({
     await kiClient.bulk(params.path.name, [{ delete: { type: 'feature', id: params.path.id } }]);
 
     try {
-        const definition = await resolveAnalysisDefinition({
-          name: params.path.name,
-          streamsClient,
-          dataViewsService,
-        });
+      const definition = await resolveAnalysisDefinition({
+        name: params.path.name,
+        streamsClient,
+        dataViewsService,
+      });
       await kiClient.reconcileStream(definition);
     } catch (err) {
       logger.warn(

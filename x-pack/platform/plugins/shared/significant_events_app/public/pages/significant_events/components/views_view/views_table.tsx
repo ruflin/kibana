@@ -28,6 +28,7 @@ import {
   OWNED_BADGE,
   REMOVE_VIEW_LABEL,
   ENABLE_VIEW_LABEL,
+  VIEWS_TABLE_CAPTION,
 } from './translations';
 import {
   KNOWLEDGE_INDICATORS_COLUMN_HEADER,
@@ -66,7 +67,7 @@ export function ViewsTable({
       name: ENABLED_COLUMN_HEADER,
       width: '80px',
       render: (_enabled: boolean, view: SignificantEventsDataView) => (
-        <EuiToolTip content={ENABLE_VIEW_LABEL}>
+        <EuiToolTip content={ENABLE_VIEW_LABEL} disableScreenReaderOutput>
           <EuiSwitch
             compressed
             label={ENABLE_VIEW_LABEL}
@@ -108,10 +109,7 @@ export function ViewsTable({
       name: QUERIES_COLUMN_HEADER,
       width: '120px',
       render: (view: SignificantEventsDataView) => (
-        <QueriesColumn
-          streamName={view.name}
-          streamOnboardingResult={streamStatusMap[view.name]}
-        />
+        <QueriesColumn streamName={view.name} streamOnboardingResult={streamStatusMap[view.name]} />
       ),
     },
     {
@@ -125,13 +123,15 @@ export function ViewsTable({
       width: '40px',
       render: (view: SignificantEventsDataView) =>
         canManage ? (
-          <EuiButtonIcon
-            iconType="trash"
-            color="danger"
-            aria-label={REMOVE_VIEW_LABEL}
-            onClick={() => onRemove(view.name)}
-            data-test-subj={`significantEventsViewRemove-${view.name}`}
-          />
+          <EuiToolTip content={REMOVE_VIEW_LABEL} disableScreenReaderOutput>
+            <EuiButtonIcon
+              iconType="trash"
+              color="danger"
+              aria-label={REMOVE_VIEW_LABEL}
+              onClick={() => onRemove(view.name)}
+              data-test-subj={`significantEventsViewRemove-${view.name}`}
+            />
+          </EuiToolTip>
         ) : null,
     },
   ];
@@ -144,6 +144,7 @@ export function ViewsTable({
       loading={loading}
       noItemsMessage={NO_VIEWS_MESSAGE}
       rowHeader="name"
+      tableCaption={VIEWS_TABLE_CAPTION}
     />
   );
 }

@@ -20,19 +20,16 @@ export const SYSTEM_ESQL_VIEW_NAMES = new Set([
 export const isSystemEsqlView = (name: string): boolean => SYSTEM_ESQL_VIEW_NAMES.has(name);
 
 export const sanitizeViewSlug = (value: string): string =>
-  value.trim().replace(VIEW_NAME_SLUG, '-').replace(/^-+|-+$/g, '');
+  value
+    .trim()
+    .replace(VIEW_NAME_SLUG, '-')
+    .replace(/^-+|-+$/g, '');
 
 /**
  * Names owned views as `$.nightshift.{spaceId}.{id}` so they do not shadow data
  * streams and stay unique across spaces.
  */
-export const toOwnedViewName = ({
-  id,
-  spaceId,
-}: {
-  id: string;
-  spaceId: string;
-}): string => {
+export const toOwnedViewName = ({ id, spaceId }: { id: string; spaceId: string }): string => {
   const unprefixed = id.trim().startsWith(ESQL_VIEW_PREFIX)
     ? id.trim().slice(ESQL_VIEW_PREFIX.length)
     : id.trim();

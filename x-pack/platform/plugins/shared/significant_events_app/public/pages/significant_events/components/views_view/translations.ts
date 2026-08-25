@@ -63,9 +63,12 @@ export const CREATE_FLYOUT_TITLE = i18n.translate(
   { defaultMessage: 'Create ES|QL view' }
 );
 
-export const VIEW_NAME_LABEL = i18n.translate('xpack.significantEventsApp.viewsView.viewNameLabel', {
-  defaultMessage: 'Name',
-});
+export const VIEW_NAME_LABEL = i18n.translate(
+  'xpack.significantEventsApp.viewsView.viewNameLabel',
+  {
+    defaultMessage: 'Name',
+  }
+);
 
 export const VIEW_QUERY_LABEL = i18n.translate(
   'xpack.significantEventsApp.viewsView.viewQueryLabel',
@@ -86,17 +89,20 @@ export const CANCEL_LABEL = i18n.translate('xpack.significantEventsApp.viewsView
   defaultMessage: 'Cancel',
 });
 
-export const REMOVE_VIEW_LABEL = i18n.translate(
-  'xpack.significantEventsApp.viewsView.removeView',
-  { defaultMessage: 'Remove' }
-);
+export const REMOVE_VIEW_LABEL = i18n.translate('xpack.significantEventsApp.viewsView.removeView', {
+  defaultMessage: 'Remove',
+});
 
-export const ENABLE_VIEW_LABEL = i18n.translate(
-  'xpack.significantEventsApp.viewsView.enableView',
-  { defaultMessage: 'Use this view' }
-);
+export const ENABLE_VIEW_LABEL = i18n.translate('xpack.significantEventsApp.viewsView.enableView', {
+  defaultMessage: 'Use this view',
+});
 
 export const GENERATE_DISABLED_TOOLTIP = i18n.translate(
   'xpack.significantEventsApp.viewsView.generateDisabledTooltip',
   { defaultMessage: 'Enable the view before generating knowledge indicators.' }
+);
+
+export const VIEWS_TABLE_CAPTION = i18n.translate(
+  'xpack.significantEventsApp.viewsView.tableCaption',
+  { defaultMessage: 'Configured ES|QL views' }
 );

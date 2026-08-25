@@ -45,7 +45,7 @@ export function ViewsView() {
   const [flyout, setFlyout] = useState<FlyoutMode>(null);
 
   const viewsQuery = useFetchDataViews();
-  const views = viewsQuery.data?.views ?? [];
+  const views = useMemo(() => viewsQuery.data?.views ?? [], [viewsQuery.data?.views]);
   const { addExisting, createOwned, setEnabled, remove } = useDataViewsApi();
 
   const {

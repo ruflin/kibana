@@ -10,14 +10,20 @@ import { SignificantEventsAppLocatorDefinition } from './significant_events_app_
 describe('SignificantEventsAppLocatorDefinition', () => {
   const locator = new SignificantEventsAppLocatorDefinition();
 
-  it('defaults to the streams tab with no query params', async () => {
+  it('defaults to the views tab with no query params', async () => {
     const location = await locator.getLocation({});
 
     expect(location).toEqual({
       app: 'significantEvents',
-      path: '/streams',
+      path: '/views',
       state: {},
     });
+  });
+
+  it('still builds a path for the legacy streams tab', async () => {
+    const { path } = await locator.getLocation({ tab: 'streams' });
+
+    expect(path).toBe('/streams');
   });
 
   it('builds a path for a specific tab', async () => {

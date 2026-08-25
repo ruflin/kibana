@@ -34,6 +34,8 @@ describe('toOwnedViewName', () => {
   });
 
   it('throws when the slug is empty', () => {
-    expect(() => toOwnedViewName({ id: '   ', spaceId: 'default' })).toThrow('View name is required');
+    expect(() => toOwnedViewName({ id: '   ', spaceId: 'default' })).toThrow(
+      'View name is required'
+    );
   });
 });

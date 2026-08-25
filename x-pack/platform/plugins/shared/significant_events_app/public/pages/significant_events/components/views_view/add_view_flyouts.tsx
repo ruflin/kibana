@@ -19,6 +19,7 @@ import {
   EuiFormRow,
   EuiTextArea,
   EuiTitle,
+  useGeneratedHtmlId,
 } from '@elastic/eui';
 import React, { useMemo, useState } from 'react';
 import { useFetchDataViewsCatalog } from '../../hooks/use_data_views';
@@ -47,6 +48,7 @@ export function AddExistingViewFlyout({
 }: AddExistingViewFlyoutProps) {
   const catalog = useFetchDataViewsCatalog(true);
   const [selected, setSelected] = useState<string | undefined>();
+  const titleId = useGeneratedHtmlId({ prefix: 'addExistingViewFlyoutTitle' });
 
   const options = useMemo(
     () =>
@@ -57,16 +59,23 @@ export function AddExistingViewFlyout({
   );
 
   return (
-    <EuiFlyout onClose={onClose} size="s" ownFocus data-test-subj="significantEventsAddExistingViewFlyout">
+    <EuiFlyout
+      onClose={onClose}
+      size="s"
+      ownFocus
+      aria-labelledby={titleId}
+      data-test-subj="significantEventsAddExistingViewFlyout"
+    >
       <EuiFlyoutHeader hasBorder>
         <EuiTitle size="s">
-          <h2>{ADD_EXISTING_FLYOUT_TITLE}</h2>
+          <h2 id={titleId}>{ADD_EXISTING_FLYOUT_TITLE}</h2>
         </EuiTitle>
       </EuiFlyoutHeader>
       <EuiFlyoutBody>
         <EuiFormRow label={VIEW_NAME_LABEL} fullWidth>
           <EuiComboBox
             data-test-subj="significantEventsAddExistingViewCombo"
+            aria-label={VIEW_NAME_LABEL}
             singleSelection={{ asPlainText: true }}
             options={options}
             selectedOptions={selected ? [{ label: selected }] : []}
@@ -111,14 +120,21 @@ interface CreateViewFlyoutProps {
 export function CreateViewFlyout({ isLoading, onClose, onCreate }: CreateViewFlyoutProps) {
   const [name, setName] = useState('');
   const [query, setQuery] = useState('FROM logs-*');
+  const titleId = useGeneratedHtmlId({ prefix: 'createViewFlyoutTitle' });
 
   const canSubmit = name.trim().length > 0 && query.trim().length > 0;
 
   return (
-    <EuiFlyout onClose={onClose} size="m" ownFocus data-test-subj="significantEventsCreateViewFlyout">
+    <EuiFlyout
+      onClose={onClose}
+      size="m"
+      ownFocus
+      aria-labelledby={titleId}
+      data-test-subj="significantEventsCreateViewFlyout"
+    >
       <EuiFlyoutHeader hasBorder>
         <EuiTitle size="s">
-          <h2>{CREATE_FLYOUT_TITLE}</h2>
+          <h2 id={titleId}>{CREATE_FLYOUT_TITLE}</h2>
         </EuiTitle>
       </EuiFlyoutHeader>
       <EuiFlyoutBody>

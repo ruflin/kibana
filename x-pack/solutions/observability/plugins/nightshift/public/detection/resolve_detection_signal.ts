@@ -12,10 +12,7 @@ import {
   type SignalEntry,
 } from '@kbn/significant-events-schema';
 
-const viewsAlign = (
-  detectionView: string | undefined,
-  signalView: string | undefined
-): boolean => {
+const viewsAlign = (detectionView: string | undefined, signalView: string | undefined): boolean => {
   if (detectionView == null && signalView == null) {
     return true;
   }

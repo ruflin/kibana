@@ -16,8 +16,7 @@ export const listConfiguredViewNames = async (
 
 export const listConfiguredViewDefinitions = async (
   dataViewsService: DataViewsService
-): Promise<Streams.all.Definition[]> =>
-  (await dataViewsService.list()).map(toSyntheticQueryStream);
+): Promise<Streams.all.Definition[]> => (await dataViewsService.list()).map(toSyntheticQueryStream);
 
 /**
  * Allows feature/query routes to accept configured views without requiring a

@@ -7,7 +7,7 @@
   "tests": [
     {
       "id": "618d200f59238fb-4976b6ba39021f6",
-      "title": "Significant Events app loads and redirects / to /streams tab by default",
+      "title": "Significant Events app loads and redirects / to /views tab by default",
       "expectedStatus": "passed",
       "tags": [
         "@local-stateful-classic",
@@ -17,7 +17,7 @@
       ],
       "location": {
         "file": "x-pack/platform/plugins/shared/significant_events_app/test/scout/ui/tests/significant_events.spec.ts",
-        "line": 45,
+        "line": 54,
         "column": 9
       }
     },
@@ -33,8 +33,8 @@
       ],
       "location": {
         "file": "x-pack/platform/plugins/shared/significant_events_app/test/scout/ui/tests/significant_events.spec.ts",
-        "line": 54,
-        "column": 82
+        "line": 71,
+        "column": 9
       }
     },
     {
@@ -49,8 +49,8 @@
       ],
       "location": {
         "file": "x-pack/platform/plugins/shared/significant_events_app/test/scout/ui/tests/significant_events.spec.ts",
-        "line": 80,
-        "column": 54
+        "line": 89,
+        "column": 9
       }
     }
   ]
