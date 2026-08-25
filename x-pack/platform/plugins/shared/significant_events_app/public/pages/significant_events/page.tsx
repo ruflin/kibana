@@ -29,14 +29,14 @@ import {
 import { SignificantEventsPageProvider } from './context/significant_events_page_context';
 import { ONBOARDING_FAILURE_TITLE } from './components/streams_view/translations';
 import { QueriesTable } from './components/queries_table/queries_table';
-import { StreamsView } from './components/streams_view/streams_view';
+import { ViewsView } from './components/views_view/views_view';
 import { SettingsTab } from './components/settings/tab';
 import { MemoryTab } from './components/memory/tab';
 import { DetectionsTab } from './components/detections_tab';
 import { SignificantEventsTab } from './components/significant_events_tab';
 
 const significantEventsTabs = [
-  'streams',
+  'views',
   'knowledge_indicators',
   'queries',
   'detections',
@@ -158,12 +158,12 @@ export function SignificantEventsPage() {
   const tabs = useMemo(
     () => [
       {
-        id: 'streams',
-        label: i18n.translate('xpack.significantEventsApp.streamsTab', {
-          defaultMessage: 'Streams',
+        id: 'views',
+        label: i18n.translate('xpack.significantEventsApp.viewsTab', {
+          defaultMessage: 'Views',
         }),
-        href: router.link('/{tab}', { path: { tab: 'streams' } }),
-        isSelected: tab === 'streams',
+        href: router.link('/{tab}', { path: { tab: 'views' } }),
+        isSelected: tab === 'views',
       },
       {
         id: 'knowledge_indicators',
@@ -237,8 +237,12 @@ export function SignificantEventsPage() {
     return <RedirectTo path="/{tab}" params={{ path: { tab: 'significant_events' } }} />;
   }
 
+  if (tab === 'streams') {
+    return <RedirectTo path="/{tab}" params={{ path: { tab: 'views' } }} />;
+  }
+
   if (!isValidSignificantEventsTab(tab)) {
-    return <RedirectTo path="/{tab}" params={{ path: { tab: 'streams' } }} />;
+    return <RedirectTo path="/{tab}" params={{ path: { tab: 'views' } }} />;
   }
 
   return (
@@ -348,7 +352,7 @@ export function SignificantEventsPage() {
                 <EuiSpacer />
               </>
             )}
-            {tab === 'streams' && <StreamsView />}
+            {tab === 'views' && <ViewsView />}
             {tab === 'knowledge_indicators' && <KnowledgeIndicatorsTable />}
             {tab === 'queries' && <QueriesTable />}
             {tab === 'detections' && <DetectionsTab />}

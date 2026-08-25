@@ -53,6 +53,7 @@ export const detectionSchema = z.object({
     .optional()
     .describe('Human-readable name of the alerting rule.'),
   stream_name: z.string().max(MAX_ID_LENGTH),
+  view_name: z.string().max(MAX_ID_LENGTH).optional(),
   change_point_type: z.enum(CHANGE_POINT_TYPES).describe(
     dedent`
         "spike" = Sudden increase in alert volume. May reflect increased failures, higher traffic or load, or a noisy rule.

@@ -26,7 +26,7 @@ import {
   useGeneratedHtmlId,
 } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
-import type { Detection } from '@kbn/significant-events-schema';
+import { getViewName, type Detection } from '@kbn/significant-events-schema';
 import { FlyoutMetadataCard } from '../../../../components/flyout_components/flyout_metadata_card';
 import { FlyoutToolbarHeader } from '../../../../components/flyout_components/flyout_toolbar_header';
 import { InfoPanel } from '../../../../components/info_panel';
@@ -71,6 +71,7 @@ export const DetectionFlyout = ({ detection, onClose }: DetectionFlyoutProps) =>
         : { label: STATUS_PENDING_LABEL, color: 'hollow' as const },
     [detection.processed]
   );
+  const viewName = getViewName(detection);
 
   const generalInfoItems = useMemo(() => {
     const changeType = detection.change_point_type;
@@ -139,11 +140,11 @@ export const DetectionFlyout = ({ detection, onClose }: DetectionFlyoutProps) =>
               </EuiToolTip>
             </FlyoutMetadataCard>
           </EuiFlexItem>
-          {detection.stream_name && (
+          {viewName && (
             <EuiFlexItem>
               <FlyoutMetadataCard title={STREAM_LABEL}>
                 <EuiBadge color="hollow" iconType="productStreamsClassic" iconSide="left">
-                  {detection.stream_name}
+                  {viewName}
                 </EuiBadge>
               </FlyoutMetadataCard>
             </EuiFlexItem>
@@ -250,7 +251,7 @@ const STATUS_TOOLTIP = i18n.translate('xpack.significantEventsApp.detectionFlyou
 });
 
 const STREAM_LABEL = i18n.translate('xpack.significantEventsApp.detectionFlyout.streamLabel', {
-  defaultMessage: 'Stream',
+  defaultMessage: 'View',
 });
 
 const TIMESTAMP_LABEL = i18n.translate(

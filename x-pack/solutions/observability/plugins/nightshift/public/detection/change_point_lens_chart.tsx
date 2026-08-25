@@ -14,7 +14,7 @@ import {
   type LensConfig,
   type LensESQLDataset,
 } from '@kbn/lens-embeddable-utils';
-import type { LifecycleDetection } from '@kbn/significant-events-schema';
+import { getViewName, type LifecycleDetection } from '@kbn/significant-events-schema';
 import React, { useMemo } from 'react';
 import useAsync from 'react-use/lib/useAsync';
 import { useKibana } from '../hooks/use_kibana';
@@ -32,10 +32,15 @@ const OCCURRENCE_QUERY_LIMIT = 100;
 
 type LensESQLConfig = LensConfig & { dataset: LensESQLDataset };
 
-const getStreamTypeLabel = (streamName?: string): string => {
-  if (streamName?.startsWith('metrics')) {
+const getViewTypeLabel = (viewName?: string): string => {
+  if (viewName?.startsWith('metrics')) {
     return i18n.translate('xpack.nightshift.detectionFlyout.trend.metricsLabel', {
       defaultMessage: '[Metrics]',
+    });
+  }
+  if (viewName?.startsWith('$.')) {
+    return i18n.translate('xpack.nightshift.detectionFlyout.trend.viewLabel', {
+      defaultMessage: '[View]',
     });
   }
   return i18n.translate('xpack.nightshift.detectionFlyout.trend.logsLabel', {
@@ -138,7 +143,7 @@ export function ChangePointLensChart({
   const { euiTheme } = useEuiTheme();
   const { dataViews, lens, spaces } = useKibana().services;
   const changePointLabel = getChangePointLabel(detection.change_point_type);
-  const title = `${getStreamTypeLabel(detection.stream_name)} ${changePointLabel}`;
+  const title = `${getViewTypeLabel(getViewName(detection))} ${changePointLabel}`;
   const timeRange = useMemo(() => {
     const range = getDetectionOccurrenceTimeRange(detection['@timestamp']);
     return range

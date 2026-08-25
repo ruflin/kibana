@@ -6,16 +6,16 @@
  */
 
 /**
- * `findQueries` / `findIndicators` early-return on an empty stream list, while
- * `getQueryLinks` treats empty as "all streams". Resolve accessible stream names
+ * `findQueries` / `findIndicators` early-return on an empty name list, while
+ * `getQueryLinks` treats empty as "all streams". Resolve configured view names
  * (same pattern as `listAllFeaturesRoute`) so search and list stay aligned.
  */
 export async function resolveStreamNames(
   streamNames: string[] | undefined,
-  listStreams: () => Promise<Array<{ name: string }>>
+  listNames: () => Promise<string[]>
 ): Promise<string[]> {
   if (streamNames?.length) {
     return streamNames;
   }
-  return (await listStreams()).map((stream) => stream.name);
+  return listNames();
 }

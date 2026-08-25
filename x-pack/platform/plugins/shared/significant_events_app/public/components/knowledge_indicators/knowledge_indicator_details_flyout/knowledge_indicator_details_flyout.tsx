@@ -465,7 +465,7 @@ const TYPE_LABEL = i18n.translate(
 const STREAM_LABEL = i18n.translate(
   'xpack.significantEventsApp.knowledgeIndicatorDetailsFlyout.streamLabel',
   {
-    defaultMessage: 'Stream',
+    defaultMessage: 'View',
   }
 );
 

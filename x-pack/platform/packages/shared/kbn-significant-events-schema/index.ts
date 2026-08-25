@@ -127,6 +127,7 @@ export {
   investigationStateSchema,
   MAX_SHORT_STRING_LENGTH,
   MAX_MEDIUM_STRING_LENGTH,
+  MAX_ARRAY_LENGTH,
   MAX_ID_LENGTH,
   MAX_RULE_NAME_LENGTH,
   MAX_TEXT_LENGTH,
@@ -164,3 +165,13 @@ export {
 } from './src/inference_feature_ids';
 
 export type { KnowledgeIndicatorClientContract } from './src/knowledge_indicator_client';
+
+export {
+  type SignificantEventsDataView,
+  type SignificantEventsDataViewsState,
+  MAX_SIGNIFICANT_EVENTS_DATA_VIEWS,
+  getViewName,
+  getViewNames,
+  significantEventsDataViewSchema,
+  significantEventsDataViewsStateSchema,
+} from './src/data_views';

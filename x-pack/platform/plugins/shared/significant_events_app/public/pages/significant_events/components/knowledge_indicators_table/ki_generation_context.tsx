@@ -6,7 +6,6 @@
  */
 
 import type { ListStreamDetail } from '@kbn/streams-plugin/server/routes/internal/streams/crud/route';
-import { Streams, streamMatchesIndexPatterns } from '@kbn/streams-schema';
 import {
   KIsOnboardingStep,
   SignificantEventsWorkflowStatus,
@@ -25,10 +24,10 @@ import React, {
   useState,
 } from 'react';
 import { useInferenceFeatureConnectors } from '../../../../hooks/use_inference_feature_connectors';
-import { useIndexPatternsConfig } from '../../../../hooks/use_index_patterns_config';
 import type { ScheduleOnboardingOptions } from '../../../../hooks/use_onboarding_api';
 import { useBulkOnboarding } from '../../hooks/use_bulk_onboarding';
-import { useFetchStreams } from '../../hooks/use_fetch_streams';
+import { useFetchDataViews } from '../../hooks/use_data_views';
+import { toSyntheticQueryStream } from '../views_view/to_synthetic_query_stream';
 import type { OnboardingConfig } from '../shared/types';
 
 interface ConnectorState {
@@ -82,7 +81,7 @@ export function KiGenerationProvider({
   // network calls.
   const enqueuedStreamNamesRef = useRef<Set<string>>(new Set());
 
-  const { indexPatterns } = useIndexPatternsConfig();
+  const { data: viewsData, isLoading: isStreamsLoading } = useFetchDataViews();
 
   const featuresConnectors = useInferenceFeatureConnectors(
     SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID
@@ -107,19 +106,17 @@ export function KiGenerationProvider({
     });
   }, [featuresConnectors.resolvedConnectorId, queriesConnectors.resolvedConnectorId]);
 
-  const streamsListFetch = useFetchStreams({
-    select: (result) => ({
-      ...result,
-      // Query streams are always included; other stream types are filtered by index patterns.
-      streams: result.streams.filter(
-        (item) =>
-          Streams.QueryStream.Definition.is(item.stream) ||
-          streamMatchesIndexPatterns(item.stream.name, indexPatterns)
-      ),
-    }),
-  });
-  const filteredStreams = streamsListFetch.data?.streams;
-  const isStreamsLoading = streamsListFetch.isLoading;
+  const filteredStreams = useMemo<ListStreamDetail[] | undefined>(() => {
+    if (!viewsData) {
+      return undefined;
+    }
+    return viewsData.views
+      .filter((view) => view.enabled)
+      .map((view) => ({
+        stream: toSyntheticQueryStream(view),
+        privileges: { read_failure_store: false },
+      }));
+  }, [viewsData]);
 
   // Adds streams discovered as InProgress (e.g. on initial status fetch after
   // page refresh) and removes streams that reach a terminal state. Callback

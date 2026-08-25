@@ -44,21 +44,21 @@ export function StreamFilter({
       onSelectedChange={onSelectedStreamsChange}
       labels={{
         button: i18n.translate('xpack.significantEventsApp.knowledgeIndicators.streamFilterLabel', {
-          defaultMessage: 'Stream',
+          defaultMessage: 'View',
         }),
         groupLabel: i18n.translate(
           'xpack.significantEventsApp.knowledgeIndicators.streamFilterGroupLabel',
           {
-            defaultMessage: 'Filter by stream',
+            defaultMessage: 'Filter by view',
           }
         ),
         popoverAriaLabel: i18n.translate(
           'xpack.significantEventsApp.knowledgeIndicators.streamFilterPopoverLabel',
-          { defaultMessage: 'Stream filter' }
+          { defaultMessage: 'View filter' }
         ),
         selectableAriaLabel: i18n.translate(
           'xpack.significantEventsApp.knowledgeIndicators.streamFilterSelectableAriaLabel',
-          { defaultMessage: 'Filter knowledge indicators by stream' }
+          { defaultMessage: 'Filter knowledge indicators by view' }
         ),
       }}
       filterCriteria={filterCriteria}

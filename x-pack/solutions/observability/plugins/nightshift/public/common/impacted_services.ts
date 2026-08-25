@@ -5,7 +5,12 @@
  * 2.0.
  */
 
-import type { BlastRadiusEntry, Feature, SignificantEvent } from '@kbn/significant-events-schema';
+import {
+  getViewName,
+  type BlastRadiusEntry,
+  type Feature,
+  type SignificantEvent,
+} from '@kbn/significant-events-schema';
 
 /**
  * Knowledge-indicator subtype that qualifies a blast radius entry as an impacted service.
@@ -51,7 +56,12 @@ export const getImpactedServiceKey = (entry: ImpactedServiceCandidate, name: str
 /** Streams whose knowledge indicators must be loaded before impacted services can be resolved. */
 export const getImpactedServiceStreamNames = (events: SignificantEvent[]): string[] => [
   ...new Set(
-    events.flatMap((event) => getCandidateEntries(event).map(({ stream_name }) => stream_name))
+    events.flatMap((event) =>
+      getCandidateEntries(event).flatMap((entry) => {
+        const viewName = getViewName(entry);
+        return viewName ? [viewName] : [];
+      })
+    )
   ),
 ];
 
@@ -104,7 +114,12 @@ export const getImpactedServices = (
     const name = getEntryName(entry, feature);
     const key = getImpactedServiceKey(entry, name);
     if (!byKey.has(key)) {
-      byKey.set(key, { key, name, streamName: feature.stream_name, feature });
+      byKey.set(key, {
+        key,
+        name,
+        streamName: getViewName(feature) ?? feature.stream_name,
+        feature,
+      });
     }
   }
 

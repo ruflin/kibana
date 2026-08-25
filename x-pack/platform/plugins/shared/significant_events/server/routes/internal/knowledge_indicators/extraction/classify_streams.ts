@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import { Streams, streamMatchesIndexPatterns } from '@kbn/streams-schema';
+import { Streams } from '@kbn/streams-schema';
 import type { WorkflowExecutionListItemDto } from '@kbn/workflows';
 import { isTerminalStatus } from '@kbn/workflows';
 import { parseStreamNameFromConcurrencyKey } from '../../../../lib/workflows/onboarding_workflow_client';
@@ -31,35 +31,10 @@ export const isSupportedStream = (stream: Streams.all.Definition): boolean =>
   Streams.QueryStream.Definition.is(stream);
 
 /**
- * Selects the streams eligible for continuous knowledge indicator onboarding.
- *
- * Query streams are selected when the query-streams feature flag is enabled; every
- * other supported type is selected when its name matches the configured significant
- * events index patterns. This mirrors the discovery Streams list, so onboarding and
- * the list stay aligned by construction.
- */
-export const filterEligibleStreams = ({
-  allStreams,
-  isQueryStreamsEnabled,
-  indexPatterns,
-}: {
-  allStreams: Streams.all.Definition[];
-  isQueryStreamsEnabled: boolean;
-  indexPatterns: string[];
-}): Streams.all.Definition[] =>
-  allStreams.filter((stream) => {
-    if (Streams.QueryStream.Definition.is(stream)) {
-      return isQueryStreamsEnabled;
-    }
-    return streamMatchesIndexPatterns(stream.name, indexPatterns);
-  });
-
-/**
  * Classifies streams into buckets (already-running, candidates, up-to-date, unsupported)
  * by examining the latest onboarding workflow execution for each stream
  * and comparing the finish time against the configured extraction interval.
- * Stream selection has already happened in `filterEligibleStreams`; this only drops
- * unsupported types and buckets the rest by execution recency.
+ * Stream selection has already happened in `eligible_streams_route` (enabled views).
  */
 export const classifyStreams = ({
   allStreams,

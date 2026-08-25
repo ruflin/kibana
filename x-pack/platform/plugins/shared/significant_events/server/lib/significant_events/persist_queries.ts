@@ -13,6 +13,8 @@ import type { StreamsClient } from '@kbn/streams-plugin/server';
 import type { KnowledgeIndicatorClient, KIBulkOperation } from '../knowledge_indicators';
 import { queryFromLink } from '../knowledge_indicators/knowledge_indicator_client/serializers';
 import { canQueryBeRuleBacked } from './alerting/significant_events_alerting_context';
+import type { DataViewsService } from '../data_views/data_views_service';
+import { resolveAnalysisDefinition } from '../data_views/resolve_analysis_definition';
 
 type PersistedQuery = GeneratedSignificantEventQuery & { id: string };
 
@@ -34,15 +36,22 @@ export async function persistQueries(
   deps: {
     kiClient: KnowledgeIndicatorClient;
     streamsClient: StreamsClient;
+    dataViewsService?: DataViewsService;
   }
 ): Promise<PersistQueriesResult> {
-  const { kiClient, streamsClient } = deps;
+  const { kiClient, streamsClient, dataViewsService } = deps;
 
   if (queries.length === 0) {
     return { persistedQueries: [], skippedQueries: [] };
   }
 
-  const definition = await streamsClient.getStream(streamName);
+  const definition = dataViewsService
+    ? await resolveAnalysisDefinition({
+        name: streamName,
+        streamsClient,
+        dataViewsService,
+      })
+    : await streamsClient.getStream(streamName);
 
   // A stored and an incoming query can be identical apart from their FROM (a classic stream
   // accepts both `FROM name` and `FROM name, name.*`), so canonicalize the sources on both sides

@@ -38,6 +38,12 @@ import { searchModeSchema } from '../../../utils/search_mode';
 import { assertValidDateRange, makeIsoDateFromString } from '../../../utils/iso_date_param';
 import { resolveStreamNames } from '../../../utils/resolve_stream_names';
 import type { PersistQueriesResult } from '../../../../lib/significant_events/persist_queries';
+import { createDataViewsServiceFromClients } from '../../../../lib/data_views/from_scoped_clients';
+import {
+  listConfiguredViewDefinitions,
+  listConfiguredViewNames,
+  resolveAnalysisDefinition,
+} from '../../../../lib/data_views/resolve_analysis_definition';
 import { persistQueries } from '../../../../lib/significant_events/persist_queries';
 import { queryFromLink } from '../../../../lib/knowledge_indicators/knowledge_indicator_client/serializers';
 import type { PromoteQueriesResult } from '../../../../lib/knowledge_indicators';
@@ -109,14 +115,21 @@ const promoteUnbackedQueriesRoute = createServerRoute({
     maintenanceService,
   }): Promise<PromoteQueriesResult> => {
     const scopedClients = await getScopedClients({ request });
-    const { streamsClient, licensing } = scopedClients;
+    const { licensing } = scopedClients;
 
     await assertSignificantEventsAccess({ server, licensing });
     await assertNotPaused({ maintenanceService, request });
 
     const kiClient = await scopedClients.getKnowledgeIndicatorClient();
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger: server.logger,
+    });
     const streamDefinitions = new Map(
-      (await streamsClient.listStreams()).map((definition) => [definition.name, definition])
+      (await listConfiguredViewDefinitions(dataViewsService)).map((definition) => [
+        definition.name,
+        definition,
+      ])
     );
 
     return kiClient.promoteUnbackedQueries({
@@ -154,7 +167,7 @@ const demoteBackedQueriesRoute = createServerRoute({
     logger,
   }): Promise<{ demoted: number }> => {
     const scopedClients = await getScopedClients({ request });
-    const { streamsClient, licensing } = scopedClients;
+    const { licensing } = scopedClients;
 
     await assertSignificantEventsAccess({ server, licensing });
     await assertNotPaused({ maintenanceService, request });
@@ -178,7 +191,11 @@ const demoteBackedQueriesRoute = createServerRoute({
       return acc;
     }, {});
 
-    const streamDefinitions = await streamsClient.listStreams();
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger,
+    });
+    const streamDefinitions = await listConfiguredViewDefinitions(dataViewsService);
     const streamDefinitionsByName = new Map(
       streamDefinitions.map((streamDefinition) => [streamDefinition.name, streamDefinition])
     );
@@ -263,9 +280,15 @@ const bulkDeleteQueriesRoute = createServerRoute({
     // stream definition no longer exists) are treated the same way as the old
     // `listStreams() + Map.get === undefined` check: that stream's batch is
     // counted as failed below.
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger,
+    });
     const streamNames = Array.from(byStream.keys());
     const streamDefinitionResults = await Promise.allSettled(
-      streamNames.map((name) => streamsClient.getStream(name))
+      streamNames.map((name) =>
+        resolveAnalysisDefinition({ name, streamsClient, dataViewsService })
+      )
     );
     const streamDefinitionsByName = new Map<
       string,
@@ -358,9 +381,19 @@ const reconcileQueriesRoute = createServerRoute({
     await assertNotPaused({ maintenanceService, request });
 
     const kiClient = await scopedClients.getKnowledgeIndicatorClient();
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger,
+    });
     const { streamNames } = params.body;
     const definitions = await Promise.allSettled(
-      streamNames.map((streamName) => streamsClient.getStream(streamName))
+      streamNames.map((streamName) =>
+        resolveAnalysisDefinition({
+          name: streamName,
+          streamsClient,
+          dataViewsService,
+        })
+      )
     );
     const limiter = pLimit(RECONCILE_STREAM_CONCURRENCY);
 
@@ -461,9 +494,13 @@ const getDiscoveryQueriesRoute = createServerRoute({
     } = params.query;
     assertValidDateRange(from, to);
 
-    const resolvedStreamNames = await resolveStreamNames(streamNames, () =>
-      scopedClients.streamsClient.listStreams()
-    );
+    const resolvedStreamNames = await resolveStreamNames(streamNames, async () => {
+      const dataViewsService = await createDataViewsServiceFromClients({
+        scopedClients,
+        logger,
+      });
+      return listConfiguredViewNames(dataViewsService);
+    });
 
     const [kiClient, { alertsReader }] = await Promise.all([
       scopedClients.getKnowledgeIndicatorClient(),
@@ -539,9 +576,13 @@ const getDiscoveryQueriesOccurrencesRoute = createServerRoute({
     const { from, to, bucketSize, query, streamNames } = params.query;
     assertValidDateRange(from, to);
 
-    const resolvedStreamNames = await resolveStreamNames(streamNames, () =>
-      scopedClients.streamsClient.listStreams()
-    );
+    const resolvedStreamNames = await resolveStreamNames(streamNames, async () => {
+      const dataViewsService = await createDataViewsServiceFromClients({
+        scopedClients,
+        logger,
+      });
+      return listConfiguredViewNames(dataViewsService);
+    });
 
     const [kiClient, { alertsReader }] = await Promise.all([
       scopedClients.getKnowledgeIndicatorClient(),
@@ -651,11 +692,16 @@ const generateQueriesRoute = createServerRoute({
     } = params.body ?? {};
 
     const kiClient = await scopedClients.getKnowledgeIndicatorClient();
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger,
+    });
 
     const result = await generateKIQueries(
       { streamName, connectorId, maxExistingQueriesForContext, queryValidationTimeoutMs },
       {
         streamsClient,
+        dataViewsService,
         inferenceClient,
         soClient,
         kiClient,
@@ -721,10 +767,15 @@ const persistQueriesRoute = createServerRoute({
     const { streamName } = params.path;
     const { queries } = params.body;
     const kiClient = await scopedClients.getKnowledgeIndicatorClient();
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger: server.logger,
+    });
 
     return persistQueries(streamName, queries, {
       kiClient,
       streamsClient,
+      dataViewsService,
     });
   },
 });

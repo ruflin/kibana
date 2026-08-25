@@ -25,7 +25,7 @@ import {
 } from '@elastic/eui';
 import { getEbtProps } from '@kbn/ebt-click';
 import { i18n } from '@kbn/i18n';
-import type { Feature } from '@kbn/significant-events-schema';
+import { getViewName, type Feature } from '@kbn/significant-events-schema';
 import {
   encodeFeatureAttachmentOrigin,
   KI_FEATURE_ATTACHMENT_TYPE,
@@ -151,6 +151,7 @@ export function EntityFlyout({
   const title = feature.title ?? feature.id;
   const evidence = feature.evidence ?? [];
   const isServiceEntity = feature.subtype === 'service';
+  const viewName = getViewName(feature) ?? feature.stream_name;
 
   const handleOpenInChat = useCallback(() => {
     agentBuilder?.openChat({
@@ -164,13 +165,13 @@ export function EntityFlyout({
         {
           id: feature.uuid,
           type: KI_FEATURE_ATTACHMENT_TYPE,
-          origin: encodeFeatureAttachmentOrigin(feature.stream_name, feature.id),
+          origin: encodeFeatureAttachmentOrigin(viewName, feature.id),
           description: formatChatAttachmentDescription('Entity', title),
           data: feature,
         },
       ],
     });
-  }, [agentBuilder, feature, title]);
+  }, [agentBuilder, feature, title, viewName]);
 
   return (
     <EuiFlyout
@@ -219,7 +220,7 @@ export function EntityFlyout({
           )}
           <EuiFlexItem grow={false}>
             <EuiBadge color="hollow" iconType="productStreamsClassic" iconSide="left">
-              {feature.stream_name}
+              {viewName}
             </EuiBadge>
           </EuiFlexItem>
         </EuiFlexGroup>

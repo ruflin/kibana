@@ -51,9 +51,9 @@ test.describe(
       });
     });
 
-    test('loads and redirects / to /streams tab by default', async ({ page }) => {
+    test('loads and redirects / to /views tab by default', async ({ page }) => {
       await page.gotoApp('significant_events');
-      await expect(page).toHaveURL(/\/app\/significant_events\/streams/, { timeout: 60_000 });
+      await expect(page).toHaveURL(/\/app\/significant_events\/views/, { timeout: 60_000 });
 
       await expect(page.testSubj.locator(APP_HEADER_TEST_SUBJECTS.root)).toBeVisible({
         timeout: 60_000,
@@ -63,13 +63,18 @@ test.describe(
       );
     });
 
-    test('renders all 7 navigation tabs', async ({ page }) => {
+    test('redirects the legacy /streams path to /views', async ({ page }) => {
       await page.gotoApp('significant_events/streams');
+      await expect(page).toHaveURL(/\/app\/significant_events\/views/, { timeout: 60_000 });
+    });
+
+    test('renders all 7 navigation tabs', async ({ page }) => {
+      await page.gotoApp('significant_events/views');
       const tabBar = page.testSubj.locator(APP_HEADER_TEST_SUBJECTS.tabs);
       await expect(tabBar).toBeVisible({ timeout: 60_000 });
 
       for (const label of [
-        'Streams',
+        'Views',
         'Knowledge Indicators',
         'Rules',
         'Detections',
@@ -90,7 +95,7 @@ test.describe(
           [STREAMS_SIGNIFICANT_EVENTS_AVAILABLE_FLAG]: false,
         },
       });
-      await page.gotoApp('significant_events/streams');
+      await page.gotoApp('significant_events/views');
       await expect(page).toHaveURL(/\/app\/significant_events/, { timeout: 60_000 });
       await expect(page.testSubj.locator('significantEventsNotEnabledPrompt')).toBeVisible({
         timeout: 60_000,

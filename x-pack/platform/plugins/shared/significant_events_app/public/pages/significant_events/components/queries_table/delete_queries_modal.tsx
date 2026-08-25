@@ -158,7 +158,7 @@ const SEVERITY_COLUMN_LABEL = i18n.translate(
 
 const STREAM_COLUMN_LABEL = i18n.translate(
   'xpack.significantEventsApp.deleteQueriesModal.streamColumn',
-  { defaultMessage: 'Stream' }
+  { defaultMessage: 'View' }
 );
 
 const TYPE_COLUMN_LABEL = i18n.translate(

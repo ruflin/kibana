@@ -552,12 +552,12 @@ export const SignificantEventsTab = () => {
       },
       {
         label: i18n.translate('xpack.significantEventsApp.significantEventsTab.filter.stream', {
-          defaultMessage: 'Stream',
+          defaultMessage: 'View',
         }),
         ariaLabel: i18n.translate(
           'xpack.significantEventsApp.significantEventsTab.filter.streamAriaLabel',
           {
-            defaultMessage: 'Filter by stream',
+            defaultMessage: 'Filter by view',
           }
         ),
         options: buildSelectableOptions({

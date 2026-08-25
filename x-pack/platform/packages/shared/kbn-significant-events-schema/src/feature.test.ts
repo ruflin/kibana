@@ -80,6 +80,19 @@ describe('normalizeFeatureSlugForMatching', () => {
     expect(normalizeFeatureSlugForMatching(versioned.id)).toBe(canonical.id);
     expect(computeFeatureUuid(versioned)).not.toBe(computeFeatureUuid(canonical));
   });
+
+  it('uses view_name when present without changing stream_name-only UUIDs', () => {
+    const fromStream = { id: 'okta', stream_name: 'logs.test' };
+    const fromView = { id: 'okta', stream_name: 'logs.test', view_name: 'logs.test' };
+    const renamed = {
+      id: 'okta',
+      stream_name: 'logs.test',
+      view_name: '$.nightshift.default.okta',
+    };
+
+    expect(computeFeatureUuid(fromView)).toBe(computeFeatureUuid(fromStream));
+    expect(computeFeatureUuid(renamed)).not.toBe(computeFeatureUuid(fromStream));
+  });
 });
 
 describe('mergeFeature version history', () => {

@@ -11,6 +11,7 @@ import objectHash from 'object-hash';
 import { v5 } from 'uuid';
 import { conditionSchema, type Condition } from '@kbn/streamlang';
 import { MAX_ID_LENGTH, MAX_TEXT_LENGTH, MAX_TITLE_LENGTH } from './significant_events/constants';
+import { getViewName } from './data_views';
 
 export const DATASET_ANALYSIS_FEATURE_TYPE = 'dataset_analysis' as const;
 export const LOG_SAMPLES_FEATURE_TYPE = 'log_samples' as const;
@@ -38,6 +39,7 @@ export const INFERRED_FEATURE_TYPES = [
 export const baseFeatureSchema = z.object({
   id: z.string().max(MAX_ID_LENGTH),
   stream_name: z.string().max(MAX_ID_LENGTH),
+  view_name: z.string().max(MAX_ID_LENGTH).optional(),
   type: z.string().max(MAX_ID_LENGTH),
   subtype: z.string().max(MAX_ID_LENGTH).optional(),
   title: z.string().max(MAX_TITLE_LENGTH).optional(),
@@ -144,12 +146,14 @@ export function normalizeFeatureSlugForMatching(id: string): string {
 
 /**
  * Computes a deterministic, stable uuid for a feature from its identifying
- * pair (slug, stream_name). The slug is normalized via `normalizeFeatureSlug`.
- * Used as the storage document id and for delete/exclude/restore operations.
+ * pair (slug, view name). Stored documents still use `stream_name`; `view_name`
+ * is preferred when present so Nightshift can dual-read.
  */
-export function computeFeatureUuid(feature: Pick<BaseFeature, 'id' | 'stream_name'>): string {
+export function computeFeatureUuid(
+  feature: Pick<BaseFeature, 'id' | 'stream_name'> & { view_name?: string }
+): string {
   const slug = normalizeFeatureSlug(feature.id);
-  return v5(objectHash([feature.stream_name, slug]), v5.DNS);
+  return v5(objectHash([getViewName(feature) ?? feature.stream_name, slug]), v5.DNS);
 }
 
 export function isFeatureWithFilter(feature: unknown): feature is FeatureWithFilter {
@@ -195,6 +199,7 @@ export function toBaseFeature(feature: Feature): BaseFeature {
   return {
     id: feature.id,
     stream_name: feature.stream_name,
+    view_name: feature.view_name,
     type: feature.type,
     subtype: feature.subtype,
     title: feature.title,
@@ -247,6 +252,7 @@ export function mergeFeature(existing: BaseFeature, incoming: BaseFeature): Base
   return {
     id: existing.id,
     stream_name: existing.stream_name,
+    view_name: incoming.view_name ?? existing.view_name,
     type: existing.type,
     subtype: existing.subtype,
     title: incoming.title,

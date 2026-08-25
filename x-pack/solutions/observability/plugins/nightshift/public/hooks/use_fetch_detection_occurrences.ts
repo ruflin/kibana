@@ -7,7 +7,7 @@
 
 import { useMemo } from 'react';
 import { useQuery, type UseQueryResult } from '@kbn/react-query';
-import type { LifecycleDetection } from '@kbn/significant-events-schema';
+import { getViewName, type LifecycleDetection } from '@kbn/significant-events-schema';
 import {
   DETECTION_OCCURRENCE_BUCKET_SIZE,
   getDetectionOccurrenceTimeRange,
@@ -44,8 +44,8 @@ export const buildDetectionOccurrencesRequest = (
     streamNames: [
       ...new Set(
         fetchableDetections
-          .map(({ detection }) => detection.stream_name)
-          .filter((streamName): streamName is string => Boolean(streamName))
+          .map(({ detection }) => getViewName(detection))
+          .filter((viewName): viewName is string => Boolean(viewName))
       ),
     ].sort(),
   };

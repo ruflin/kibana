@@ -9,10 +9,7 @@ import { z } from '@kbn/zod/v4';
 import {
   OBSERVABILITY_STREAMS_CONTINUOUS_KI_EXTRACTION_ENABLED,
   OBSERVABILITY_STREAMS_CONTINUOUS_KI_EXTRACTION_INTERVAL_HOURS,
-  OBSERVABILITY_STREAMS_ENABLE_QUERY_STREAMS,
-  OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_INDEX_PATTERNS,
 } from '@kbn/management-settings-ids';
-import { parseIndexPatterns } from '@kbn/streams-schema';
 import {
   MAX_ID_LENGTH,
   SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID,
@@ -28,11 +25,12 @@ import { StatusError } from '../../../../lib/errors/status_error';
 import { FeatureNotEnabledError } from '../../../../lib/errors/feature_not_enabled_error';
 import {
   classifyStreams,
-  filterEligibleStreams,
   type StreamCandidate,
   type StreamClassificationResult,
 } from './classify_streams';
 import { resolveConnectorForFeature } from '../../../utils/resolve_connector_for_feature';
+import { createDataViewsServiceFromClients } from '../../../../lib/data_views/from_scoped_clients';
+import { toSyntheticQueryStream } from '../../../../lib/data_views/synthetic_stream';
 
 const DEFAULT_LOOKBACK_HOURS = 24;
 
@@ -100,8 +98,8 @@ const eligibleStreamsRoute = createServerRoute({
       throw new FeatureNotEnabledError('Workflows management is not available');
     }
 
-    const { streamsClient, globalUiSettingsClient, uiSettingsClient, licensing } =
-      await getScopedClients({ request });
+    const scopedClients = await getScopedClients({ request });
+    const { globalUiSettingsClient, licensing } = scopedClients;
 
     await assertSignificantEventsAccess({ server, licensing });
 
@@ -122,27 +120,22 @@ const eligibleStreamsRoute = createServerRoute({
     const maxStreams = query.maxScheduledStreams ?? MAX_SCHEDULED_STREAMS;
     const lookbackHours = query.lookbackHours ?? DEFAULT_LOOKBACK_HOURS;
 
-    const [connectorId, executions, allStreams, isQueryStreamsEnabled, rawIndexPatterns] =
-      await Promise.all([
-        resolveConnectorForFeature({
-          searchInferenceEndpoints: server.searchInferenceEndpoints,
-          featureId: SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID,
-          featureName: 'knowledge indicator extraction',
-          request,
-        }),
-        streamsKIsOnboardingClient.getRecentExecutions(),
-        streamsClient.listStreams(),
-        uiSettingsClient.get<boolean>(OBSERVABILITY_STREAMS_ENABLE_QUERY_STREAMS),
-        uiSettingsClient.get<string>(OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_INDEX_PATTERNS),
-      ]);
+    const [connectorId, executions, dataViewsService] = await Promise.all([
+      resolveConnectorForFeature({
+        searchInferenceEndpoints: server.searchInferenceEndpoints,
+        featureId: SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID,
+        featureName: 'knowledge indicator extraction',
+        request,
+      }),
+      streamsKIsOnboardingClient.getRecentExecutions(),
+      createDataViewsServiceFromClients({
+        scopedClients,
+        logger: server.logger,
+      }),
+    ]);
 
-    const indexPatterns = parseIndexPatterns(rawIndexPatterns);
-
-    const eligibleStreams = filterEligibleStreams({
-      allStreams,
-      isQueryStreamsEnabled,
-      indexPatterns,
-    });
+    const enabledViews = await dataViewsService.getEnabled();
+    const eligibleStreams = enabledViews.map(toSyntheticQueryStream);
 
     const intervalHours =
       query.extractionIntervalHours ?? intervalHoursSetting ?? DEFAULT_EXTRACTION_INTERVAL_HOURS;

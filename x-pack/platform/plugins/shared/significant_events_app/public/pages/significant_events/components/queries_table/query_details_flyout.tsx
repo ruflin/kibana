@@ -306,7 +306,7 @@ function getQueryInputValue(item: StreamQueryStats) {
 }
 
 const STREAM_LABEL = i18n.translate('xpack.significantEventsApp.queryDetailsFlyout.streamLabel', {
-  defaultMessage: 'Stream',
+  defaultMessage: 'View',
 });
 
 const GENERAL_INFORMATION_TITLE = i18n.translate(

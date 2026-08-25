@@ -73,13 +73,13 @@ export const StreamPicker = ({
 const STREAM_PICKER_ARIA_LABEL = i18n.translate(
   'xpack.significantEventsApp.knowledgeIndicators.streamPickerAriaLabel',
   {
-    defaultMessage: 'Select streams to generate knowledge indicators for',
+    defaultMessage: 'Select views to generate knowledge indicators for',
   }
 );
 
 const STREAM_PICKER_PLACEHOLDER = i18n.translate(
   'xpack.significantEventsApp.knowledgeIndicators.streamPickerPlaceholder',
   {
-    defaultMessage: 'Select streams...',
+    defaultMessage: 'Select views...',
   }
 );

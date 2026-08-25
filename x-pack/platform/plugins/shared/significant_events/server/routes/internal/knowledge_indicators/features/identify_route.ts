@@ -31,6 +31,8 @@ import { isSignificantEventsSemanticCodeSearchGroundingEnabled } from '../../../
 import type { SyncWorkflowService } from '../../../../lib/workflows/sync_workflow';
 import type { SignificantEventsMaintenanceService } from '../../../../lib/maintenance/maintenance_service';
 import { stateBlocksNewActivity } from '../../../../../common/maintenance/state_machine';
+import { createDataViewsServiceFromClients } from '../../../../lib/data_views/from_scoped_clients';
+import { resolveAnalysisDefinition } from '../../../../lib/data_views/resolve_analysis_definition';
 
 // Best-effort bootstrap of the standalone KI sync (groundedness) sweep workflow,
 // which runs under a request whose API key can schedule the workflow trigger.
@@ -143,6 +145,11 @@ const identifyInferredFeaturesRoute = createServerRoute({
       samplingTimeoutMs = tuningConfig.sampling_timeout_ms,
     } = params.body ?? {};
 
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger: routeLogger,
+    });
+
     const [connectorId, stream, kiClient] = await Promise.all([
       connectorIdOverride
         ? Promise.resolve(connectorIdOverride)
@@ -152,7 +159,11 @@ const identifyInferredFeaturesRoute = createServerRoute({
             featureName: 'knowledge indicator extraction',
             request,
           }),
-      streamsClient.getStream(streamName),
+      resolveAnalysisDefinition({
+        name: streamName,
+        streamsClient,
+        dataViewsService,
+      }),
       scopedClients.getKnowledgeIndicatorClient(),
     ]);
 
@@ -292,9 +303,18 @@ const identifyComputedFeaturesRoute = createServerRoute({
       computedFeaturesTimeoutMs = tuningConfig.computed_features_timeout_ms,
     } = params.body ?? {};
 
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger: routeLogger,
+    });
+
     const [kiClient, stream] = await Promise.all([
       scopedClients.getKnowledgeIndicatorClient(),
-      streamsClient.getStream(streamName),
+      resolveAnalysisDefinition({
+        name: streamName,
+        streamsClient,
+        dataViewsService,
+      }),
     ]);
 
     // Enable code_analysis grounding only when the feature flag is on and Agent

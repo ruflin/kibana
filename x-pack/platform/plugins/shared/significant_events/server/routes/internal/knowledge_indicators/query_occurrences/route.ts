@@ -13,6 +13,8 @@ import { fetchQueryOccurrencesFromAlerts } from '../../../../lib/significant_eve
 import { STREAMS_API_PRIVILEGES } from '../../../../../common/constants';
 import { searchModeSchema } from '../../../utils/search_mode';
 import { assertValidDateRange, makeIsoDateFromString } from '../../../utils/iso_date_param';
+import { createDataViewsServiceFromClients } from '../../../../lib/data_views/from_scoped_clients';
+import { listConfiguredViewNames } from '../../../../lib/data_views/resolve_analysis_definition';
 import { resolveStreamNames } from '../../../utils/resolve_stream_names';
 import { createServerRoute } from '../../../create_server_route';
 import { assertSignificantEventsAccess } from '../../../utils/assert_significant_events_access';
@@ -91,9 +93,13 @@ const readQueryOccurrencesRoute = createServerRoute({
     } = params.query;
     assertValidDateRange(from, to);
 
-    const resolvedStreamNames = await resolveStreamNames(streamNames, () =>
-      scopedClients.streamsClient.listStreams()
-    );
+    const resolvedStreamNames = await resolveStreamNames(streamNames, async () => {
+      const dataViewsService = await createDataViewsServiceFromClients({
+        scopedClients,
+        logger,
+      });
+      return listConfiguredViewNames(dataViewsService);
+    });
 
     const [kiClient, { alertsReader }] = await Promise.all([
       scopedClients.getKnowledgeIndicatorClient(),

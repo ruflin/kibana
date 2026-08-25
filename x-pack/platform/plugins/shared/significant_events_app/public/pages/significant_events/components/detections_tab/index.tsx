@@ -21,7 +21,7 @@ import {
 import type { EuiBasicTableColumn } from '@elastic/eui';
 import { css } from '@emotion/react';
 import { i18n } from '@kbn/i18n';
-import type { Detection } from '@kbn/significant-events-schema';
+import { getViewName, type Detection } from '@kbn/significant-events-schema';
 import { RUNNING_POLL_INTERVAL_MS } from '../../../../constants';
 import { useFetchDetections } from '../../../../hooks/use_fetch_detections';
 import { useTimefilter } from '../../../../hooks/use_timefilter';
@@ -154,11 +154,13 @@ export const DetectionsTab = () => {
       {
         field: 'stream_name',
         name: i18n.translate('xpack.significantEventsApp.detectionsTab.streamColumn', {
-          defaultMessage: 'Stream',
+          defaultMessage: 'View',
         }),
         width: '140px',
-        render: (streamName?: string) =>
-          streamName ? <EuiBadge color="hollow">{streamName}</EuiBadge> : null,
+        render: (_streamName: string | undefined, detection: Detection) => {
+          const viewName = getViewName(detection);
+          return viewName ? <EuiBadge color="hollow">{viewName}</EuiBadge> : null;
+        },
       },
       {
         name: (
