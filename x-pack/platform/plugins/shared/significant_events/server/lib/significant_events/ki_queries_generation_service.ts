@@ -24,6 +24,8 @@ import type { SearchInferenceEndpointsPluginStart } from '@kbn/search-inference-
 import type { SignificantEventsToolUsage } from '@kbn/streams-ai';
 import type { StreamsClient } from '@kbn/streams-plugin/server';
 import { PromptsConfigService } from '@kbn/streams-plugin/server';
+import type { DataViewsService } from '../data_views/data_views_service';
+import { resolveAnalysisDefinition } from '../data_views/resolve_analysis_definition';
 import { isSignificantEventsSemanticCodeSearchGroundingEnabled } from '../semantic_code_search_grounding/is_significant_events_semantic_code_search_grounding_enabled';
 import { isSignificantEventsFeatureFlagEnabled } from '../feature_flags/is_significant_events_feature_flag_enabled';
 import { createSemanticCodeSearchTools } from '../semantic_code_search_grounding/semantic_code_search_tools';
@@ -45,6 +47,7 @@ export interface GenerateKIQueriesParams {
 
 export interface GenerateKIQueriesDependencies {
   streamsClient: StreamsClient;
+  dataViewsService?: DataViewsService;
   inferenceClient: InferenceClient;
   soClient: SavedObjectsClientContract;
   kiClient: KnowledgeIndicatorClient;
@@ -81,6 +84,7 @@ export async function generateKIQueries(
   } = params;
   const {
     streamsClient,
+    dataViewsService,
     inferenceClient,
     soClient,
     kiClient,
@@ -112,7 +116,13 @@ export async function generateKIQueries(
     significantEventsAvailable,
     useSemanticCodeSearchGrounding,
   ] = await Promise.all([
-    streamsClient.getStream(streamName),
+    dataViewsService
+      ? resolveAnalysisDefinition({
+          name: streamName,
+          streamsClient,
+          dataViewsService,
+        })
+      : streamsClient.getStream(streamName),
     new PromptsConfigService({ soClient, logger }).getPrompt(),
     isSignificantEventsFeatureFlagEnabled(featureFlags),
     isSignificantEventsSemanticCodeSearchGroundingEnabled(featureFlags),

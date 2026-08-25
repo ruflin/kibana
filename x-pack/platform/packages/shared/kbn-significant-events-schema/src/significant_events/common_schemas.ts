@@ -55,7 +55,8 @@ const blastRadiusDependencySchema = z.object({
   stream_name: z
     .string()
     .max(MAX_ID_LENGTH)
-    .describe('Data stream associated with this dependency.'),
+    .describe('ES|QL view (or legacy stream) associated with this dependency.'),
+  view_name: z.string().max(MAX_ID_LENGTH).optional(),
 });
 
 const blastRadiusInfrastructureSchema = z.object({
@@ -88,7 +89,8 @@ const blastRadiusInfrastructureSchema = z.object({
   stream_name: z
     .string()
     .max(MAX_ID_LENGTH)
-    .describe('Data stream associated with this infrastructure component.'),
+    .describe('ES|QL view (or legacy stream) associated with this infrastructure component.'),
+  view_name: z.string().max(MAX_ID_LENGTH).optional(),
 });
 
 const blastRadiusEntitySchema = z.object({
@@ -105,7 +107,11 @@ const blastRadiusEntitySchema = z.object({
       "The subtype of the Knowledge Indicator named by feature_id above, copied verbatim from that indicator's own subtype field. A point-in-time snapshot taken when this entry was written; it is never re-synced if the Knowledge Indicator is later reclassified."
     ),
   name: z.string().max(MAX_TITLE_LENGTH).describe('Human-readable name of the affected entity.'),
-  stream_name: z.string().max(MAX_ID_LENGTH).describe('Data stream associated with this entity.'),
+  stream_name: z
+    .string()
+    .max(MAX_ID_LENGTH)
+    .describe('ES|QL view (or legacy stream) associated with this entity.'),
+  view_name: z.string().max(MAX_ID_LENGTH).optional(),
 });
 
 export const blastRadiusEntrySchema = z.discriminatedUnion('type', [
@@ -157,7 +163,8 @@ export const causalFeatureSchema = z.object({
     .string()
     .max(MAX_ID_LENGTH)
     .optional()
-    .describe('Data stream associated with this causal feature.'),
+    .describe('ES|QL view (or legacy stream) associated with this causal feature.'),
+  view_name: z.string().max(MAX_ID_LENGTH).optional(),
 });
 export type CausalFeature = z.infer<typeof causalFeatureSchema>;
 
@@ -184,7 +191,8 @@ const signalBaseSchema = z.object({
   stream_name: z
     .string()
     .max(MAX_ID_LENGTH)
-    .describe('Data stream this signal was collected from.'),
+    .describe('ES|QL view (or legacy stream) this signal was collected from.'),
+  view_name: z.string().max(MAX_ID_LENGTH).optional(),
   description: z
     .string()
     .max(MAX_TEXT_LENGTH)
@@ -388,7 +396,8 @@ export const significantEventBaseSchema = z.object({
   stream_names: z
     .array(z.string().max(MAX_ID_LENGTH))
     .max(MAX_ARRAY_LENGTH)
-    .describe('Data streams associated with this event.'),
+    .describe('ES|QL views (or legacy streams) associated with this event.'),
+  view_names: z.array(z.string().max(MAX_ID_LENGTH)).max(MAX_ARRAY_LENGTH).optional(),
 
   // entities that may contribute to the incident
   causal_features: z

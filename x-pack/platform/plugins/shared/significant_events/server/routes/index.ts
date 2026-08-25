@@ -6,6 +6,7 @@
  */
 
 import { internalAvailabilityRoutes } from './internal/availability/route';
+import { internalDataViewsRoutes } from './internal/data_views/route';
 import { internalSlackAppRoutes } from './internal/apps/slack/route';
 import { internalDetectionsRoutes } from './internal/detections/route';
 import { internalDetectionsWorkflowRoutes } from './internal/detections/workflow_route';
@@ -32,6 +33,7 @@ import { significantEventsRoutes } from './significant_events/route';
 export const significantEventsRouteRepository = {
   // internal APIs
   ...internalAvailabilityRoutes,
+  ...internalDataViewsRoutes,
   ...internalSlackAppRoutes,
   ...internalDetectionsRoutes,
   ...internalDetectionsWorkflowRoutes,

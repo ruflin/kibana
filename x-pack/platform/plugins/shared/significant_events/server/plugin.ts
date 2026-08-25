@@ -22,6 +22,7 @@ import type { StreamsServer } from '@kbn/streams-plugin/server/types';
 import { PROJECT_ROUTING_ALL } from '@kbn/cps-server-utils';
 import { getRelayAppConnectionSavedObjectType } from './lib/slack_app/saved_object';
 import { getSignificantEventsMaintenanceStateSavedObjectType } from './lib/maintenance/saved_object';
+import { getSignificantEventsDataViewsSavedObjectType } from './lib/data_views/saved_object';
 import {
   createSignificantEventsMaintenanceService,
   type SignificantEventsMaintenanceService,
@@ -125,6 +126,7 @@ export class SignificantEventsPlugin
 
     core.savedObjects.registerType(getRelayAppConnectionSavedObjectType());
     core.savedObjects.registerType(getSignificantEventsMaintenanceStateSavedObjectType());
+    core.savedObjects.registerType(getSignificantEventsDataViewsSavedObjectType());
 
     this.ebtTelemetryService.setup(core.analytics);
 

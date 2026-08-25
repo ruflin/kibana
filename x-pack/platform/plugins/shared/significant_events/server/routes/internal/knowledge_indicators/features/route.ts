@@ -20,6 +20,12 @@ import { assertSignificantEventsAccess } from '../../../utils/assert_significant
 import { STREAMS_API_PRIVILEGES } from '../../../../../common/constants';
 import { StatusError } from '../../../../lib/errors/status_error';
 import type { KIBulkOperation } from '../../../../lib/knowledge_indicators';
+import { createDataViewsServiceFromClients } from '../../../../lib/data_views/from_scoped_clients';
+import {
+  assertAnalysisUnit,
+  listConfiguredViewNames,
+  resolveAnalysisDefinition,
+} from '../../../../lib/data_views/resolve_analysis_definition';
 
 const MAX_INPUT_STRING_LENGTH = 255;
 
@@ -49,7 +55,15 @@ const upsertFeatureRoute = createServerRoute({
     const { licensing, streamsClient } = scopedClients;
 
     await assertSignificantEventsAccess({ server, licensing });
-    await streamsClient.ensureStream(params.path.name);
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger: server.logger,
+    });
+    await assertAnalysisUnit({
+      name: params.path.name,
+      streamsClient,
+      dataViewsService,
+    });
 
     const kiClient = await scopedClients.getKnowledgeIndicatorClient();
     const { id, expires_at, ...baseBody } = params.body;
@@ -111,13 +125,25 @@ const deleteFeatureRoute = createServerRoute({
     const { licensing, streamsClient } = scopedClients;
 
     await assertSignificantEventsAccess({ server, licensing });
-    await streamsClient.ensureStream(params.path.name);
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger: server.logger,
+    });
+    await assertAnalysisUnit({
+      name: params.path.name,
+      streamsClient,
+      dataViewsService,
+    });
 
     const kiClient = await scopedClients.getKnowledgeIndicatorClient();
     await kiClient.bulk(params.path.name, [{ delete: { type: 'feature', id: params.path.id } }]);
 
     try {
-      const definition = await streamsClient.getStream(params.path.name);
+        const definition = await resolveAnalysisDefinition({
+          name: params.path.name,
+          streamsClient,
+          dataViewsService,
+        });
       await kiClient.reconcileStream(definition);
     } catch (err) {
       logger.warn(
@@ -163,7 +189,15 @@ const listFeaturesRoute = createServerRoute({
     const { licensing, streamsClient } = scopedClients;
 
     await assertSignificantEventsAccess({ server, licensing });
-    await streamsClient.ensureStream(params.path.name);
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger: server.logger,
+    });
+    await assertAnalysisUnit({
+      name: params.path.name,
+      streamsClient,
+      dataViewsService,
+    });
 
     const kiClient = await scopedClients.getKnowledgeIndicatorClient();
     const {
@@ -219,8 +253,11 @@ export const listAllFeaturesRoute = createServerRoute({
       licensing: scopedClients.licensing,
     });
 
-    const streams = await scopedClients.streamsClient.listStreams();
-    const streamNames = streams.map((stream) => stream.name);
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger: server.logger,
+    });
+    const streamNames = await listConfiguredViewNames(dataViewsService);
 
     const kiClient = await scopedClients.getKnowledgeIndicatorClient();
     const {
@@ -296,7 +333,11 @@ const bulkFeaturesRoute = createServerRoute({
       body: { operations },
     } = params;
 
-    await streamsClient.ensureStream(name);
+    const dataViewsService = await createDataViewsServiceFromClients({
+      scopedClients,
+      logger: server.logger,
+    });
+    await assertAnalysisUnit({ name, streamsClient, dataViewsService });
 
     const kiClient = await scopedClients.getKnowledgeIndicatorClient();
     const kiOps: KIBulkOperation[] = operations.map((op) =>
@@ -307,7 +348,11 @@ const bulkFeaturesRoute = createServerRoute({
     const hasShrinkingOp = operations.some((op) => 'delete' in op || 'exclude' in op);
     if (hasShrinkingOp) {
       try {
-        const definition = await streamsClient.getStream(name);
+        const definition = await resolveAnalysisDefinition({
+          name,
+          streamsClient,
+          dataViewsService,
+        });
         await kiClient.reconcileStream(definition);
       } catch (err) {
         logger.warn(

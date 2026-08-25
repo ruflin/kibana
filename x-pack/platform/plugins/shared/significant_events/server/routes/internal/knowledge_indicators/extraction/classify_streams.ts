@@ -31,12 +31,8 @@ export const isSupportedStream = (stream: Streams.all.Definition): boolean =>
   Streams.QueryStream.Definition.is(stream);
 
 /**
- * Selects the streams eligible for continuous knowledge indicator onboarding.
- *
- * Query streams are selected when the query-streams feature flag is enabled; every
- * other supported type is selected when its name matches the configured significant
- * events index patterns. This mirrors the discovery Streams list, so onboarding and
- * the list stay aligned by construction.
+ * Legacy index-pattern filter. Continuous onboarding now selects enabled
+ * ES|QL views in `eligible_streams_route` instead of calling this helper.
  */
 export const filterEligibleStreams = ({
   allStreams,

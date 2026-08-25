@@ -5,23 +5,24 @@
  * 2.0.
  */
 
-import type {
-  LifecycleDetection,
-  SignificantEvent,
-  SignalEntry,
+import {
+  getViewName,
+  type LifecycleDetection,
+  type SignificantEvent,
+  type SignalEntry,
 } from '@kbn/significant-events-schema';
 
-const streamsAlign = (
-  detectionStream: string | undefined,
-  signalStream: string | undefined
+const viewsAlign = (
+  detectionView: string | undefined,
+  signalView: string | undefined
 ): boolean => {
-  if (detectionStream == null && signalStream == null) {
+  if (detectionView == null && signalView == null) {
     return true;
   }
-  if (detectionStream == null || signalStream == null) {
+  if (detectionView == null || signalView == null) {
     return false;
   }
-  return detectionStream === signalStream;
+  return detectionView === signalView;
 };
 
 const signalMatchesDetection = (signal: SignalEntry, detection: LifecycleDetection): boolean => {
@@ -34,7 +35,7 @@ const signalMatchesDetection = (signal: SignalEntry, detection: LifecycleDetecti
   if (metadata.detection_id != null && detection.detection_id != null) {
     return (
       metadata.detection_id === detection.detection_id &&
-      streamsAlign(detection.stream_name, signal.stream_name)
+      viewsAlign(getViewName(detection), getViewName(signal))
     );
   }
 
@@ -45,7 +46,7 @@ const signalMatchesDetection = (signal: SignalEntry, detection: LifecycleDetecti
   if (
     detection.rule_uuid != null &&
     metadata.rule_uuid === detection.rule_uuid &&
-    streamsAlign(detection.stream_name, signal.stream_name)
+    viewsAlign(getViewName(detection), getViewName(signal))
   ) {
     return true;
   }
@@ -53,7 +54,7 @@ const signalMatchesDetection = (signal: SignalEntry, detection: LifecycleDetecti
   if (
     detection.rule_name != null &&
     metadata.rule_name === detection.rule_name &&
-    streamsAlign(detection.stream_name, signal.stream_name)
+    viewsAlign(getViewName(detection), getViewName(signal))
   ) {
     return true;
   }

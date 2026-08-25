@@ -62,6 +62,13 @@ describe('findDetectionSignal', () => {
     expect(findDetectionSignal(mockDetection(), [mockEvent([signal])])).toBeUndefined();
   });
 
+  it('matches when view_name aliases the stored stream_name', () => {
+    const signal = mockSignal({ view_name: 'logs.web-frontend' });
+    expect(
+      findDetectionSignal(mockDetection({ view_name: 'logs.web-frontend' }), [mockEvent([signal])])
+    ).toEqual(signal);
+  });
+
   it('uses the matching signal from the newest event version', () => {
     const latestSignal = mockSignal({ description: 'latest event version' });
     const olderSignal = mockSignal({ description: 'older event version' });

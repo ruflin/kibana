@@ -41,6 +41,18 @@ describe('buildDetectionOccurrencesRequest', () => {
     });
   });
 
+  it('prefers view_name when present', () => {
+    expect(
+      buildDetectionOccurrencesRequest([
+        detection({ view_name: '$.nightshift.default.api', stream_name: 'logs.api' }),
+      ])
+    ).toEqual(
+      expect.objectContaining({
+        streamNames: ['$.nightshift.default.api'],
+      })
+    );
+  });
+
   it('returns undefined when no detection has a rule UUID', () => {
     expect(buildDetectionOccurrencesRequest([detection({ rule_uuid: undefined })])).toBeUndefined();
   });

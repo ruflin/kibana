@@ -164,3 +164,13 @@ export {
 } from './src/inference_feature_ids';
 
 export type { KnowledgeIndicatorClientContract } from './src/knowledge_indicator_client';
+
+export {
+  type SignificantEventsDataView,
+  type SignificantEventsDataViewsState,
+  MAX_SIGNIFICANT_EVENTS_DATA_VIEWS,
+  getViewName,
+  getViewNames,
+  significantEventsDataViewSchema,
+  significantEventsDataViewsStateSchema,
+} from './src/data_views';

@@ -13,6 +13,26 @@ jest.mock('../../../utils/assert_significant_events_access', () => ({
   assertSignificantEventsAccess: jest.fn().mockResolvedValue(undefined),
 }));
 
+const mockListConfiguredViewNames = jest.fn().mockResolvedValue(['logs.a', 'logs.b']);
+
+jest.mock('../../../../lib/data_views/from_scoped_clients', () => ({
+  createDataViewsServiceFromClients: jest.fn().mockResolvedValue({}),
+}));
+
+jest.mock('../../../../lib/data_views/resolve_analysis_definition', () => ({
+  listConfiguredViewNames: (...args: unknown[]) => mockListConfiguredViewNames(...args),
+  listConfiguredViewDefinitions: jest.fn().mockResolvedValue([]),
+  resolveAnalysisDefinition: jest.fn(
+    async ({
+      name,
+      streamsClient,
+    }: {
+      name: string;
+      streamsClient: { getStream: (streamName: string) => Promise<unknown> };
+    }) => streamsClient.getStream(name)
+  ),
+}));
+
 const mockFetchQueryLinks = jest.fn();
 const mockComputeOccurrences = jest.fn();
 const mockGetQueryOccurrences = jest.fn();
@@ -220,12 +240,11 @@ describe('pause guard on rule-touching query routes', () => {
 });
 
 describe('getDiscoveryQueriesRoute stream resolution', () => {
-  const listStreams = jest.fn().mockResolvedValue([{ name: 'logs.a' }, { name: 'logs.b' }]);
   const kiClient = {};
 
   beforeEach(() => {
     jest.clearAllMocks();
-    listStreams.mockResolvedValue([{ name: 'logs.a' }, { name: 'logs.b' }]);
+    mockListConfiguredViewNames.mockResolvedValue(['logs.a', 'logs.b']);
     mockFetchQueryLinks.mockResolvedValue([makeQueryLink('q1', 80)]);
     mockComputeOccurrences.mockResolvedValue({
       sparseByRule: new Map(),
@@ -239,7 +258,7 @@ describe('getDiscoveryQueriesRoute stream resolution', () => {
       params: { query },
       request: {},
       getScopedClients: jest.fn().mockResolvedValue({
-        streamsClient: { listStreams },
+        streamsClient: {},
         licensing: {},
         scopedClusterClient: { asCurrentUser: {} },
         getKnowledgeIndicatorClient: jest.fn().mockResolvedValue(kiClient),
@@ -255,7 +274,7 @@ describe('getDiscoveryQueriesRoute stream resolution', () => {
       makeDiscoveryHandlerParams({ ...discoveryBaseQuery, query: 'checkout' })
     );
 
-    expect(listStreams).toHaveBeenCalled();
+    expect(mockListConfiguredViewNames).toHaveBeenCalled();
     expect(mockFetchQueryLinks).toHaveBeenCalledWith(
       expect.objectContaining({
         streamNames: ['logs.a', 'logs.b'],
@@ -274,7 +293,7 @@ describe('getDiscoveryQueriesRoute stream resolution', () => {
       })
     );
 
-    expect(listStreams).not.toHaveBeenCalled();
+    expect(mockListConfiguredViewNames).not.toHaveBeenCalled();
     expect(mockFetchQueryLinks).toHaveBeenCalledWith(
       expect.objectContaining({
         streamNames: ['logs.only'],
@@ -287,7 +306,7 @@ describe('getDiscoveryQueriesRoute stream resolution', () => {
   it('resolves streams for the unfiltered list path when streamNames is omitted', async () => {
     await discoveryQueriesRoute.handler(makeDiscoveryHandlerParams({ ...discoveryBaseQuery }));
 
-    expect(listStreams).toHaveBeenCalled();
+    expect(mockListConfiguredViewNames).toHaveBeenCalled();
     expect(mockFetchQueryLinks).toHaveBeenCalledWith(
       expect.objectContaining({
         streamNames: ['logs.a', 'logs.b'],
@@ -299,12 +318,11 @@ describe('getDiscoveryQueriesRoute stream resolution', () => {
 });
 
 describe('getDiscoveryQueriesOccurrencesRoute stream resolution', () => {
-  const listStreams = jest.fn().mockResolvedValue([{ name: 'logs.a' }, { name: 'logs.b' }]);
   const kiClient = {};
 
   beforeEach(() => {
     jest.clearAllMocks();
-    listStreams.mockResolvedValue([{ name: 'logs.a' }, { name: 'logs.b' }]);
+    mockListConfiguredViewNames.mockResolvedValue(['logs.a', 'logs.b']);
     mockGetQueryOccurrences.mockResolvedValue({
       queryLinks: [],
       sparseByRule: new Map(),
@@ -318,7 +336,7 @@ describe('getDiscoveryQueriesOccurrencesRoute stream resolution', () => {
       params: { query: { ...discoveryBaseQuery, query: 'checkout' } },
       request: {},
       getScopedClients: jest.fn().mockResolvedValue({
-        streamsClient: { listStreams },
+        streamsClient: {},
         licensing: {},
         scopedClusterClient: { asCurrentUser: {} },
         getKnowledgeIndicatorClient: jest.fn().mockResolvedValue(kiClient),
@@ -331,7 +349,7 @@ describe('getDiscoveryQueriesOccurrencesRoute stream resolution', () => {
 
     await discoveryOccurrencesRoute.handler(handlerParams);
 
-    expect(listStreams).toHaveBeenCalled();
+    expect(mockListConfiguredViewNames).toHaveBeenCalled();
     expect(mockGetQueryOccurrences).toHaveBeenCalledWith(
       expect.objectContaining({
         streamNames: ['logs.a', 'logs.b'],
