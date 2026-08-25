@@ -28,10 +28,10 @@ jest.mock('../esql_views/manage_esql_views', () => ({
 }));
 
 const soGet = jest.fn();
-const soUpdate = jest.fn();
+const soCreate = jest.fn();
 const soClient = {
   get: soGet,
-  update: soUpdate,
+  create: soCreate,
 };
 const esClient = {} as never;
 const logger = { warn: jest.fn(), debug: jest.fn() } as unknown as Logger;
@@ -65,7 +65,7 @@ describe('createDataViewsService', () => {
         SIGNIFICANT_EVENTS_DATA_VIEWS_SO_ID
       )
     );
-    soUpdate.mockResolvedValue({});
+    soCreate.mockResolvedValue({});
     findRules.mockResolvedValue({ items: [], total: 0 });
     (listEsqlViews as jest.Mock).mockResolvedValue([existingView]);
     (getEsqlView as jest.Mock).mockResolvedValue(existingView);
@@ -85,11 +85,10 @@ describe('createDataViewsService', () => {
     });
     expect(upsertEsqlView).not.toHaveBeenCalled();
     expect(deleteEsqlView).not.toHaveBeenCalled();
-    expect(soUpdate).toHaveBeenCalledWith(
+    expect(soCreate).toHaveBeenCalledWith(
       SIGNIFICANT_EVENTS_DATA_VIEWS_SO_TYPE,
-      SIGNIFICANT_EVENTS_DATA_VIEWS_SO_ID,
       { views: [view] },
-      { upsert: { views: [view] } }
+      { id: SIGNIFICANT_EVENTS_DATA_VIEWS_SO_ID, overwrite: true }
     );
   });
 

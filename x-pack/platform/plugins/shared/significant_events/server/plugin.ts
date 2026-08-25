@@ -22,7 +22,10 @@ import type { StreamsServer } from '@kbn/streams-plugin/server/types';
 import { PROJECT_ROUTING_ALL } from '@kbn/cps-server-utils';
 import { getRelayAppConnectionSavedObjectType } from './lib/slack_app/saved_object';
 import { getSignificantEventsMaintenanceStateSavedObjectType } from './lib/maintenance/saved_object';
-import { getSignificantEventsDataViewsSavedObjectType } from './lib/data_views/saved_object';
+import {
+  getSignificantEventsDataViewsSavedObjectType,
+  SIGNIFICANT_EVENTS_DATA_VIEWS_SO_TYPE,
+} from './lib/data_views/saved_object';
 import {
   createSignificantEventsMaintenanceService,
   type SignificantEventsMaintenanceService,
@@ -148,7 +151,9 @@ export class SignificantEventsPlugin
     }): Promise<RouteHandlerScopedClients> => {
       const [coreStart, pluginsStart] = await core.getStartServices();
 
-      const scopedSoClient = coreStart.savedObjects.getScopedClient(request);
+      const scopedSoClient = coreStart.savedObjects.getScopedClient(request, {
+        includedHiddenTypes: [SIGNIFICANT_EVENTS_DATA_VIEWS_SO_TYPE],
+      });
       const uiSettingsClient = coreStart.uiSettings.asScopedToClient(scopedSoClient);
       const globalUiSettingsClient = coreStart.uiSettings.globalAsScopedToClient(scopedSoClient);
 

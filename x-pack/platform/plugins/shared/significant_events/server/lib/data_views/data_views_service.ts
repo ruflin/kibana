@@ -77,11 +77,10 @@ export const createDataViewsService = ({
   const writeAttributes = async (
     attributes: SignificantEventsDataViewsAttributes
   ): Promise<void> => {
-    await soClient.update<SignificantEventsDataViewsAttributes>(
+    await soClient.create<SignificantEventsDataViewsAttributes>(
       SIGNIFICANT_EVENTS_DATA_VIEWS_SO_TYPE,
-      SIGNIFICANT_EVENTS_DATA_VIEWS_SO_ID,
       attributes,
-      { upsert: attributes }
+      { id: SIGNIFICANT_EVENTS_DATA_VIEWS_SO_ID, overwrite: true }
     );
   };
 

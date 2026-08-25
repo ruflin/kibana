@@ -108,7 +108,7 @@ export function ViewsView() {
           <EuiFlexItem grow={false}>
             <EuiButton
               size="s"
-              iconType="plusInCircle"
+              iconType="plusCircle"
               onClick={() => setFlyout('add')}
               isDisabled={!canManage}
               data-test-subj="significantEventsAddExistingViewButton"
@@ -119,7 +119,7 @@ export function ViewsView() {
           <EuiFlexItem grow={false}>
             <EuiButton
               size="s"
-              iconType="plusInCircleFilled"
+              iconType="plusCircle"
               fill
               onClick={() => setFlyout('create')}
               isDisabled={!canManage}
