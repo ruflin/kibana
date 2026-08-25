@@ -73,6 +73,7 @@ interface LifecycleDetection {
   /** Alerting rule that produced the detection; used to match event evidence. */
   rule_uuid?: string;
   stream_name: string;
+  view_name?: string;
   change_point_type: ChangePointType;
   '@timestamp': string;
 }

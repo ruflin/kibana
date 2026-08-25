@@ -67,7 +67,7 @@ export const createDataViewsService = ({
       );
       return savedObject.attributes;
     } catch (error) {
-      if (SavedObjectsErrorHelpers.isNotFoundError(error)) {
+      if (SavedObjectsErrorHelpers.isNotFoundError(error as Error)) {
         return emptyAttributes();
       }
       throw error;
