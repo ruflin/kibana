@@ -122,7 +122,7 @@ export const WORKFLOW_EXAMPLES: WorkflowExampleEntry[] = [
     id: 'service_entity_kis',
     name: 'Service entity KIs from logs',
     description:
-      'Extracts unique service.name values from logs and creates or updates a Knowledge Indicator for each one in an AI index',
+      'Extracts unique service.name values from logs and creates or merges a Knowledge Indicator for each one in an AI index using a stable ki_id',
     category: 'observability',
     tags: ['manual', 'esql', 'foreach', 'ai', 'knowledge-indicators', 'context-engine'],
     filename: 'service_entity_kis.yml',

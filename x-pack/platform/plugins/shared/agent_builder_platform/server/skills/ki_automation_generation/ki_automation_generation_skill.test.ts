@@ -51,11 +51,14 @@ describe('kiAutomationGenerationSkill', () => {
     expect(serviceEntityYaml).toContain('STATS doc_count = COUNT(*) BY `service.name`');
     expect(serviceEntityYaml).toContain('foreach: "{{ steps.list_services.output.values }}"');
     expect(serviceEntityYaml).toContain('name: get_existing_ki');
+    expect(serviceEntityYaml).toContain('name: build_ki');
     expect(serviceEntityYaml).toContain('type: context-engine.createKi');
     expect(serviceEntityYaml).toContain('type: context-engine.updateKi');
     expect(serviceEntityYaml).toContain('type: context-engine.verifyKi');
     expect(serviceEntityYaml).toContain('ai_index_id: "{{ consts.ai_index_id }}"');
-    expect(serviceEntityYaml).toContain('"attributes.entity_name"');
+    expect(serviceEntityYaml).toContain('ki_id: "{{ variables.ki_id }}"');
+    expect(serviceEntityYaml).toContain('logs/service/');
+    expect(serviceEntityYaml).toContain('ids:');
     expect(serviceEntityYaml).toContain('type: entity');
     expect(serviceEntityYaml).toContain('entity_type: service');
     expect(serviceEntityYaml).toContain('type: ai.prompt');
@@ -64,6 +67,7 @@ describe('kiAutomationGenerationSkill', () => {
     expect(kiAutomationGenerationSkill.content).toContain('context-engine.createKi');
     expect(kiAutomationGenerationSkill.content).toContain('context-engine.updateKi');
     expect(kiAutomationGenerationSkill.content).toContain('context-engine.verifyKi');
+    expect(kiAutomationGenerationSkill.content).toContain('logs/service/<slug>');
   });
 
   it('binds all required registry tools including getConnectors', async () => {
