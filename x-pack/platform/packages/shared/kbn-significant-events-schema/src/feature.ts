@@ -17,6 +17,7 @@ export const LOG_SAMPLES_FEATURE_TYPE = 'log_samples' as const;
 export const LOG_PATTERNS_FEATURE_TYPE = 'log_patterns' as const;
 export const ERROR_LOGS_FEATURE_TYPE = 'error_logs' as const;
 export const CODE_ANALYSIS_FEATURE_TYPE = 'code_analysis' as const;
+export const EXTRACTION_CYCLE_FEATURE_TYPE = 'extraction_cycle' as const;
 
 export const COMPUTED_FEATURE_TYPES = [
   DATASET_ANALYSIS_FEATURE_TYPE,
@@ -24,6 +25,17 @@ export const COMPUTED_FEATURE_TYPES = [
   LOG_PATTERNS_FEATURE_TYPE,
   ERROR_LOGS_FEATURE_TYPE,
   CODE_ANALYSIS_FEATURE_TYPE,
+] as const;
+
+/**
+ * Feature types whose timestamps drive `_should_identify` recency.
+ * Includes generated computed types plus the keep-alive-immune extraction-cycle
+ * heartbeat. The heartbeat is intentionally **not** in `COMPUTED_FEATURE_TYPES`
+ * so it is not advertised as an LLM/tool feature type.
+ */
+export const RECENCY_FEATURE_TYPES = [
+  ...COMPUTED_FEATURE_TYPES,
+  EXTRACTION_CYCLE_FEATURE_TYPE,
 ] as const;
 
 export const INFERRED_FEATURE_TYPES = [
@@ -158,7 +170,10 @@ export function isFeatureWithFilter(feature: unknown): feature is FeatureWithFil
 }
 
 export function isComputedFeature(feature: BaseFeature): boolean {
-  return (COMPUTED_FEATURE_TYPES as unknown as string[]).includes(feature.type);
+  return (
+    (COMPUTED_FEATURE_TYPES as unknown as string[]).includes(feature.type) ||
+    feature.type === EXTRACTION_CYCLE_FEATURE_TYPE
+  );
 }
 
 export function hasSameFingerprint(feature: BaseFeature, other: BaseFeature): boolean {

@@ -5,7 +5,12 @@
  * 2.0.
  */
 
-import { COMPUTED_FEATURE_TYPES, INFERRED_FEATURE_TYPES } from '@kbn/significant-events-schema';
+import {
+  COMPUTED_FEATURE_TYPES,
+  EXTRACTION_CYCLE_FEATURE_TYPE,
+  INFERRED_FEATURE_TYPES,
+  RECENCY_FEATURE_TYPES,
+} from '@kbn/significant-events-schema';
 import type { KnowledgeIndicatorClient } from '../../knowledge_indicators';
 import { shouldIdentifyFeatures } from './should_identify_features';
 
@@ -61,7 +66,7 @@ describe('shouldIdentifyFeatures', () => {
     expect(kiClient.getLatestRevisionTimestamp).toHaveBeenCalledTimes(1);
   });
 
-  it('gates recency on COMPUTED_FEATURE_TYPES once inferred features exist', async () => {
+  it('gates recency on RECENCY_FEATURE_TYPES once inferred features exist', async () => {
     const kiClient = createMockKiClient({
       inferred: { '@timestamp': recent() },
       computed: { '@timestamp': recent() },
@@ -71,8 +76,12 @@ describe('shouldIdentifyFeatures', () => {
 
     expect(kiClient.getLatestRevisionTimestamp).toHaveBeenCalledWith(
       streamName,
-      expect.objectContaining({ types: [...COMPUTED_FEATURE_TYPES] })
+      expect.objectContaining({ types: [...RECENCY_FEATURE_TYPES] })
     );
+    expect(RECENCY_FEATURE_TYPES).toEqual([
+      ...COMPUTED_FEATURE_TYPES,
+      EXTRACTION_CYCLE_FEATURE_TYPE,
+    ]);
   });
 
   it('returns shouldIdentify: true when inferred features exist but no computed features do', async () => {
@@ -81,6 +90,23 @@ describe('shouldIdentifyFeatures', () => {
     const result = await shouldIdentifyFeatures({ kiClient, streamName, thresholdHours });
 
     expect(result).toEqual({ shouldIdentify: true });
+  });
+
+  it('returns shouldIdentify: false when only the extraction-cycle heartbeat is recent', async () => {
+    const kiClient = createMockKiClient({
+      inferred: { '@timestamp': recent() },
+      computed: { '@timestamp': recent() },
+    });
+
+    const result = await shouldIdentifyFeatures({ kiClient, streamName, thresholdHours });
+
+    expect(result).toEqual({ shouldIdentify: false });
+    expect(kiClient.getLatestRevisionTimestamp).toHaveBeenCalledWith(
+      streamName,
+      expect.objectContaining({
+        types: expect.arrayContaining([EXTRACTION_CYCLE_FEATURE_TYPE]),
+      })
+    );
   });
 
   it('returns shouldIdentify: false when newest computed feature is within threshold', async () => {

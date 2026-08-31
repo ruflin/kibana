@@ -8,9 +8,12 @@
 import type { BaseFeature } from './feature';
 import {
   computeFeatureUuid,
+  isComputedFeature,
   MAX_FEATURE_ARRAY_ITEMS,
   mergeFeature,
   normalizeFeatureSlugForMatching,
+  DATASET_ANALYSIS_FEATURE_TYPE,
+  EXTRACTION_CYCLE_FEATURE_TYPE,
 } from './feature';
 import { MAX_ID_LENGTH } from './significant_events/constants';
 
@@ -183,4 +186,16 @@ it('evidence does not grow unbounded across repeated merges with distinct values
   expect(feature.evidence?.length ?? 0).toBeLessThanOrEqual(MAX_FEATURE_ARRAY_ITEMS);
   expect(feature.evidence).toContain('iter-19-4');
   expect(feature.evidence).not.toContain('iter-0-0');
+});
+
+describe('isComputedFeature', () => {
+  it('treats generated computed types and the extraction-cycle heartbeat as computed', () => {
+    expect(
+      isComputedFeature({ ...createFeature(), type: DATASET_ANALYSIS_FEATURE_TYPE })
+    ).toBe(true);
+    expect(
+      isComputedFeature({ ...createFeature(), type: EXTRACTION_CYCLE_FEATURE_TYPE })
+    ).toBe(true);
+    expect(isComputedFeature(createFeature())).toBe(false);
+  });
 });

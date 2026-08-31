@@ -41,7 +41,7 @@ import {
   type KiExtractionContextTools,
 } from '../ki_extraction_context_tools';
 import { fetchSampleDocuments } from './fetch_sample_documents';
-
+import { createExtractionCycleHeartbeat } from './persist_extraction_cycle';
 import {
   reconcileInferredFeatures,
   toFeatureSummary,
@@ -833,17 +833,23 @@ export async function identifyInferredFeatures({
   } = outcome;
 
   const allChanged = [...newFeatures, ...updatedFeatures];
-  if (allChanged.length > 0) {
-    const priorBySlug = new Map(allFeatures.map((f) => [normalizeFeatureSlug(f.id), f]));
-    await kiClient.bulk(
-      streamName,
-      allChanged.map((feature) => {
-        const prior = priorBySlug.get(normalizeFeatureSlug(feature.id));
-        const expiresAt = !prior || prior.expires_at ? kiClient.getDefaultExpiresAt() : undefined;
-        return { index: { feature: { ...feature, expires_at: expiresAt } } };
-      })
-    );
-  }
+  const priorBySlug = new Map(allFeatures.map((f) => [normalizeFeatureSlug(f.id), f]));
+  await kiClient.bulk(streamName, [
+    ...allChanged.map((feature) => {
+      const prior = priorBySlug.get(normalizeFeatureSlug(feature.id));
+      const expiresAt = !prior || prior.expires_at ? kiClient.getDefaultExpiresAt() : undefined;
+      return { index: { feature: { ...feature, expires_at: expiresAt } } };
+    }),
+    {
+      index: {
+        feature: createExtractionCycleHeartbeat({
+          streamName,
+          runId,
+          expiresAt: kiClient.getDefaultExpiresAt(),
+        }),
+      },
+    },
+  ]);
 
   const discoveredMap = new Map<string, FeatureUpsert>(discoveredFeatures.map((f) => [f.id, f]));
   for (const feature of allChanged) {

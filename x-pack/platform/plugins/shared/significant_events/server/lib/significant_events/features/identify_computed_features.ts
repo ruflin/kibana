@@ -19,6 +19,7 @@ import type { KnowledgeIndicatorClient } from '../../knowledge_indicators';
 import { createCodeAnalysisProvider } from '../../semantic_code_search_grounding/compute_code_analysis';
 import type { EbtTelemetryClient } from '../../telemetry/ebt';
 import { reconcileComputedFeatures } from './reconcile_features';
+import { persistExtractionCycleHeartbeat } from './persist_extraction_cycle';
 
 export interface IdentifyComputedFeaturesOptions {
   stream: Streams.all.Definition;
@@ -62,6 +63,10 @@ export async function identifyComputedFeatures({
   signal,
   timeoutMs,
 }: IdentifyComputedFeaturesOptions): Promise<IdentifyComputedFeaturesResult> {
+  // Stamp recency before generators run so a later computed failure cannot leave
+  // inferred features without a keep-alive-immune clock.
+  await persistExtractionCycleHeartbeat({ kiClient, streamName, runId });
+
   const providers: Record<string, ComputedFeatureProvider> | undefined =
     agentBuilderTools && request
       ? {
