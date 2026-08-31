@@ -14,6 +14,7 @@ import {
   SIGNIFICANT_EVENTS_INVESTIGATION_INFERENCE_FEATURE_ID,
   SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID,
   SIGNIFICANT_EVENTS_KI_QUERY_GENERATION_INFERENCE_FEATURE_ID,
+  SIGNIFICANT_EVENTS_AI_INDEX_EXTRACTION_INFERENCE_FEATURE_ID,
   SIGNIFICANT_EVENTS_MEMORY_INFERENCE_FEATURE_ID,
 } from '@kbn/significant-events-schema';
 import { defaultInferenceEndpoints } from '@kbn/inference-common';
@@ -129,6 +130,24 @@ export function registerSignificantEventsInferenceFeatures(
         }
       ),
       recommendedEndpoints: KI_QUERY_GENERATION_RECOMMENDED_MODELS,
+      ignoreGlobalDefault: true,
+    },
+    {
+      featureId: SIGNIFICANT_EVENTS_AI_INDEX_EXTRACTION_INFERENCE_FEATURE_ID,
+      featureName: i18n.translate(
+        'xpack.significantEvents.inferenceFeature.aiIndexExtractionName',
+        {
+          defaultMessage: 'AI Index Knowledge Indicator extraction',
+        }
+      ),
+      featureDescription: i18n.translate(
+        'xpack.significantEvents.inferenceFeature.aiIndexExtractionDescription',
+        {
+          defaultMessage:
+            'Model used to extract Context Engine Knowledge Indicators from Streams into an AI Index.',
+        }
+      ),
+      recommendedEndpoints: KI_EXTRACTION_RECOMMENDED_MODELS,
       ignoreGlobalDefault: true,
     },
     {

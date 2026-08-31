@@ -34,6 +34,7 @@ import type {
   WorkflowsExtensionsServerPluginSetup,
   WorkflowsExtensionsServerPluginStart,
 } from '@kbn/workflows-extensions/server';
+import type { ContextEnginePluginSetup } from '@kbn/context-engine-plugin/server';
 import type {
   SearchInferenceEndpointsPluginSetup,
   SearchInferenceEndpointsPluginStart,
@@ -57,6 +58,7 @@ export interface SignificantEventsPluginSetupDependencies {
   workflowsManagement?: WorkflowsServerPluginSetup;
   searchInferenceEndpoints?: SearchInferenceEndpointsPluginSetup;
   streams: StreamsPluginSetup;
+  contextEngine?: ContextEnginePluginSetup;
 }
 
 export interface SignificantEventsPluginStartDependencies {

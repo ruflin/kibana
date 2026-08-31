@@ -70,6 +70,7 @@
     "@kbn/inference-plugin",
     "@kbn/security-plugin",
     "@kbn/cloud-plugin",
+    "@kbn/context-engine-plugin",
     "@kbn/scout",
     "@kbn/core-http-server-mocks",
     "@kbn/apm-utils",
