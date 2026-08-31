@@ -99,7 +99,7 @@ const onboardingExecuteRoute = createServerRoute({
       throw new FeatureNotEnabledError('Workflows management is not available');
     }
 
-    const { licensing } = await getScopedClients({ request });
+    const { licensing, tuningConfig } = await getScopedClients({ request });
     await assertSignificantEventsAccess({ server, licensing });
 
     const {
@@ -117,6 +117,7 @@ const onboardingExecuteRoute = createServerRoute({
           skip: skipFeatures,
           start: body.from,
           end: body.to,
+          maxIterations: tuningConfig.max_iterations,
           ...(body.connectors?.features && { connectorId: body.connectors.features }),
         },
         queries: {

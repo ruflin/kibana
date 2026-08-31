@@ -58,9 +58,6 @@ triggers:
       - name: featuresSampleSize
         type: number
         description: "Number of documents sampled per features identification iteration."
-      - name: featuresTtlDays
-        type: number
-        description: "Days before a KI feature expires."
       - name: featuresEntityFilteredRatio
         type: number
         description: "Fraction (0–1) of sample for entity-filtered documents in features identification."
@@ -145,7 +142,6 @@ steps:
             maxIterations: "${{ inputs.featuresMaxIterations }}"
             convergencePatience: "${{ inputs.featuresConvergencePatience }}"
             sampleSize: "${{ inputs.featuresSampleSize }}"
-            featureTtlDays: "${{ inputs.featuresTtlDays }}"
             entityFilteredRatio: "${{ inputs.featuresEntityFilteredRatio }}"
             diverseRatio: "${{ inputs.featuresDiverseRatio }}"
             maxExcludedFeaturesInPrompt: "${{ inputs.featuresMaxExcludedInPrompt }}"
