@@ -430,58 +430,79 @@ describe('KnowledgeIndicatorClient.getFeatures', () => {
 });
 
 describe('KnowledgeIndicatorClient.getLatestRevisionTimestamp', () => {
-  const printedQueryFor = (runEsql: jest.Mock): string => {
-    const query = runEsql.mock.calls[0][1] as { print: () => string };
-    return query.print();
-  };
+  const runEsql = runEsqlQuery as jest.Mock;
 
-  it('returns the newest @timestamp among matching live revisions', async () => {
-    const { client, runEsql } = makeClient();
-    runEsql.mockResolvedValueOnce({
-      hits: [
-        createFeatureDoc({ id: 'a', '@timestamp': '2026-04-01T00:00:00.000Z' }),
-        createFeatureDoc({ id: 'b', '@timestamp': '2026-05-01T00:00:00.000Z' }),
-        createFeatureDoc({ id: 'c', '@timestamp': '2026-03-01T00:00:00.000Z' }),
-      ],
-    });
+  const maxTimestampResponse = (latest: unknown) => ({
+    columns: [{ name: 'latest', type: 'date' }],
+    values: [[latest]],
+  });
+
+  const printedQuery = (): string => runEsql.mock.calls[0][1] as string;
+
+  it('returns the STATS MAX(@timestamp) aggregate without fetching _source', async () => {
+    const { client } = makeClient();
+    runEsql.mockResolvedValueOnce(maxTimestampResponse('2026-05-01T00:00:00.000Z'));
 
     const result = await client.getLatestRevisionTimestamp(STREAM);
 
     expect(result).toEqual({ '@timestamp': '2026-05-01T00:00:00.000Z' });
+    const printed = printedQuery();
+    expect(printed).toContain('STATS');
+    expect(printed).toContain('MAX(@timestamp)');
+    expect(printed).not.toContain('_source');
   });
 
   it('returns null when no revisions match', async () => {
-    const { client, runEsql } = makeClient();
-    runEsql.mockResolvedValueOnce({ hits: [] });
+    const { client } = makeClient();
+    runEsql.mockResolvedValueOnce(maxTimestampResponse(null));
 
     const result = await client.getLatestRevisionTimestamp(STREAM);
 
     expect(result).toBeNull();
   });
 
-  it('filters tombstones and excluded revisions via the post-grouping WHERE', async () => {
-    const { client, runEsql } = makeClient();
-    runEsql.mockResolvedValueOnce({ hits: [] });
+  it('returns null when the data stream does not exist yet', async () => {
+    const { client } = makeClient();
+    runEsql.mockResolvedValueOnce(undefined);
+
+    const result = await client.getLatestRevisionTimestamp(STREAM);
+
+    expect(result).toBeNull();
+  });
+
+  it('normalizes epoch-millis STATS values to ISO timestamps', async () => {
+    const { client } = makeClient();
+    runEsql.mockResolvedValueOnce(maxTimestampResponse(Date.UTC(2026, 4, 1)));
+
+    const result = await client.getLatestRevisionTimestamp(STREAM);
+
+    expect(result).toEqual({ '@timestamp': '2026-05-01T00:00:00.000Z' });
+  });
+
+  it('filters tombstones, excluded, and expired revisions via the post-grouping WHERE', async () => {
+    const { client } = makeClient();
+    runEsql.mockResolvedValueOnce(maxTimestampResponse(null));
 
     await client.getLatestRevisionTimestamp(STREAM);
 
     expect(runEsql).toHaveBeenCalledTimes(1);
-    // The post-grouping filter must reference both `deleted` and
-    // `excluded` so groups whose latest revision is a tombstone or an
-    // exclusion drop out. Without this, user-driven bulk deletes or
-    // bulk excludes would extend the identification throttle.
-    const printed = printedQueryFor(runEsql);
+    // The post-grouping filter must reference `deleted`, `excluded`, and
+    // `expires_at` so groups whose latest revision is a tombstone, an
+    // exclusion, or an expired feature drop out. Without this, user-driven
+    // bulk deletes or bulk excludes would extend the identification throttle.
+    const printed = printedQuery();
     expect(printed).toContain('deleted');
     expect(printed).toContain('excluded');
+    expect(printed).toContain('expires_at');
   });
 
   it('passes the feature-type filter through to the WHERE clause', async () => {
-    const { client, runEsql } = makeClient();
-    runEsql.mockResolvedValueOnce({ hits: [] });
+    const { client } = makeClient();
+    runEsql.mockResolvedValueOnce(maxTimestampResponse(null));
 
     await client.getLatestRevisionTimestamp(STREAM, { types: ['entity', 'metric'] });
 
-    expect(printedQueryFor(runEsql)).toContain('feature.type');
+    expect(printedQuery()).toContain('feature.type');
   });
 });
 

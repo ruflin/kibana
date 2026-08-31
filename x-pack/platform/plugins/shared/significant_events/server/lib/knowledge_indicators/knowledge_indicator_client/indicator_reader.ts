@@ -137,17 +137,20 @@ export class IndicatorReader {
 
   /**
    * Pure ES|QL probe: returns the timestamp of the most recent **active**
-   * feature revision for a stream (neither tombstoned nor excluded), optionally
-   * scoped to a set of feature types.
+   * feature revision for a stream (neither tombstoned, excluded, nor expired),
+   * optionally scoped to a set of feature types.
    *
    * Only active revisions are counted on purpose, so a `null` result reliably
    * signals an empty active set for the requested types. `shouldIdentifyFeatures`
    * relies on this in two ways: a `null` inferred result forces re-identification
    * (empty or user-wiped set), while the computed-type timestamp drives the
-   * recency throttle. Note that this probe does **not** filter on `expires_at`,
-   * so it includes durable (`expires_at IS NULL`) revisions that keep-alive
-   * re-stamps — callers that need a keep-alive-immune signal must scope to types
-   * that are always expiring (e.g. `COMPUTED_FEATURE_TYPES`).
+   * recency throttle.
+   *
+   * The probe **does** apply `IS_NOT_EXPIRED` (`expires_at IS NULL OR expires_at >= NOW()`).
+   * Durable features (`expires_at IS NULL`) still match, which is why recency
+   * callers that need a keep-alive-immune signal must scope to types that are
+   * always expiring (e.g. `COMPUTED_FEATURE_TYPES`). Aggregation uses
+   * `STATS MAX(@timestamp)` after latest-per-group, so this does not fetch `_source`.
    */
   async getLatestRevisionTimestamp(
     stream: string,
@@ -161,16 +164,11 @@ export class IndicatorReader {
       inPredicate(STREAM_NAME, [stream])
     );
 
-    const docs = await this.revisionReader.fetchLatestRevisions(
+    const latest = await this.revisionReader.fetchMaxTimestamp(
       where,
       combineWhere(IS_NOT_DELETED, IS_NOT_EXCLUDED, IS_NOT_EXPIRED, featureTypesFilter)
     );
-    if (docs.length === 0) return null;
-
-    const latest = docs.reduce((best, current) =>
-      current['@timestamp'] > best['@timestamp'] ? current : best
-    );
-    return { '@timestamp': latest['@timestamp'] };
+    return latest ? { '@timestamp': latest } : null;
   }
 
   async getQueryLinks(
