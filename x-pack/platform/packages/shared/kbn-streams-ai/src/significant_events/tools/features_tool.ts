@@ -7,6 +7,7 @@
 
 import {
   COMPUTED_FEATURE_TYPES,
+  EXTRACTION_CYCLE_FEATURE_TYPE,
   INFERRED_FEATURE_TYPES,
   LOG_SAMPLES_FEATURE_TYPE,
 } from '@kbn/significant-events-schema';
@@ -19,9 +20,13 @@ import {
 /**
  * Feature types withheld from query generation. `log_samples` is redundant here
  * (covered by `dataset_analysis` and `log_patterns`) but large, so query
- * generation drops it while other consumers keep it.
+ * generation drops it while other consumers keep it. `extraction_cycle` is an
+ * internal recency heartbeat, not a query-generation feature.
  */
-export const QUERY_GENERATION_EXCLUDED_FEATURE_TYPES = [LOG_SAMPLES_FEATURE_TYPE] as const;
+export const QUERY_GENERATION_EXCLUDED_FEATURE_TYPES = [
+  LOG_SAMPLES_FEATURE_TYPE,
+  EXTRACTION_CYCLE_FEATURE_TYPE,
+] as const;
 
 const ALL_FEATURE_TOOL_TYPES = [...INFERRED_FEATURE_TYPES, ...COMPUTED_FEATURE_TYPES] as const;
 

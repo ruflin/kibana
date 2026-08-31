@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import { COMPUTED_FEATURE_TYPES, INFERRED_FEATURE_TYPES } from '@kbn/significant-events-schema';
+import { INFERRED_FEATURE_TYPES, RECENCY_FEATURE_TYPES } from '@kbn/significant-events-schema';
 import type { KnowledgeIndicatorClient } from '../../knowledge_indicators';
 
 export interface ShouldIdentifyFeaturesResult {
@@ -30,7 +30,7 @@ export async function shouldIdentifyFeatures({
   }
 
   const computed = await kiClient.getLatestRevisionTimestamp(streamName, {
-    types: [...COMPUTED_FEATURE_TYPES],
+    types: [...RECENCY_FEATURE_TYPES],
   });
 
   if (!computed) {
