@@ -342,7 +342,9 @@ const eventsUpdateRoute = createServerRoute({
     }),
   }),
   handler: async ({ params, request, getScopedClients, server }) => {
-    const { getEventClient, licensing } = await getScopedClients({ request });
+    const { getEventClient, licensing, promoteSignificantEventToEpisode } = await getScopedClients({
+      request,
+    });
 
     await assertSignificantEventsAccess({ server, licensing });
 
@@ -350,6 +352,7 @@ const eventsUpdateRoute = createServerRoute({
       eventClient: getEventClient(),
       eventUuid: params.path.id,
       status: params.body.status,
+      promoteToAlertingV2: promoteSignificantEventToEpisode,
     });
   },
 });

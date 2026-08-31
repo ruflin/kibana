@@ -12,6 +12,7 @@ import {
   type SignalEntry,
   MAX_SIGNAL_DESCRIPTION_LENGTH,
 } from '@kbn/significant-events-schema';
+import { extractAlertingV2EpisodeIds } from '../../../lib/significant_events/alerting/join_alerting_v2_episode';
 
 type EpisodeContextSource = Pick<SignificantEvent, '@timestamp'> &
   Partial<Pick<SignificantEvent, 'stream_names' | 'causal_features' | 'blast_radius'>>;
@@ -28,6 +29,19 @@ export const extractRuleUuids = (signals: SignalEntry[] | undefined): string[] =
 export const extractRuleUuidsFromEvents = (
   events: Array<Pick<SignificantEvent, 'signals'> | undefined>
 ): Set<string> => new Set(events.flatMap((event) => extractRuleUuids(event?.signals)));
+
+export const extractAlertingV2EpisodeIdsFromEvents = (
+  events: Array<Pick<SignificantEvent, 'signals'> | undefined>
+): Set<string> => new Set(events.flatMap((event) => extractAlertingV2EpisodeIds(event?.signals)));
+
+/** True when any submitted Alerting v2 episode id is absent from the known episode set. */
+export const addsNewAlertingV2Episodes = (
+  submittedEpisodeIds: string[],
+  knownEpisodeIds: Iterable<string>
+): boolean => {
+  const known = knownEpisodeIds instanceof Set ? knownEpisodeIds : new Set(knownEpisodeIds);
+  return submittedEpisodeIds.some((id) => !known.has(id));
+};
 
 /** True when any submitted detection UUID is absent from the known episode set. */
 export const addsNewDetectionRules = (
@@ -87,7 +101,15 @@ export const mergeSignalsLatestPerRule = (
       })),
       { timestamp: submittedTimestamp, values: submitted },
     ],
-    (signal) => (signal.type === 'detection' ? signal.metadata?.rule_uuid ?? undefined : undefined)
+    (signal) => {
+      if (signal.type === 'detection') {
+        return signal.metadata?.rule_uuid ?? undefined;
+      }
+      if (signal.type === 'alerting_v2_episode') {
+        return `alerting_v2_episode:${signal.metadata.episode_id}`;
+      }
+      return undefined;
+    }
   ).map((signal) =>
     signal.description.length <= MAX_SIGNAL_DESCRIPTION_LENGTH
       ? signal

@@ -16,6 +16,7 @@ import type {
 import { registerRoutes } from '@kbn/server-route-repository';
 import { DEFAULT_SPACE_ID } from '@kbn/core-spaces-common';
 import type { RulesClientCreateOptions } from '@kbn/alerting-plugin/server';
+import { ALERTING_V2_ENABLED_SETTING_ID } from '@kbn/alerting-v2-constants';
 import { combineLatest, distinctUntilChanged, filter, skip, switchMap } from 'rxjs';
 import type { Subscription } from 'rxjs';
 import type { StreamsServer } from '@kbn/streams-plugin/server/types';
@@ -37,6 +38,7 @@ import { deleteLegacyRules } from './lib/significant_events/rules/delete_legacy_
 
 import { createSignificantEventsAlertingContextResolver } from './lib/significant_events/alerting/significant_events_alerting_context';
 import type { SignificantEventsAlertingContext } from './lib/significant_events/alerting/significant_events_alerting_context';
+import { createPromoteSignificantEventToEpisode } from './lib/significant_events/alerting/promote_event_to_episode';
 import { EbtTelemetryService } from './lib/telemetry/ebt';
 import { significantEventsRouteRepository } from './routes';
 import type { GetScopedClients, RouteHandlerScopedClients } from './routes/types';
@@ -195,6 +197,14 @@ export class SignificantEventsPlugin
       const getAlertingV2RulesClient = async () =>
         pluginsStart.alertingVTwo.getRulesClientWithRequestInSpace(request, DEFAULT_SPACE_ID);
 
+      const promoteSignificantEventToEpisode = createPromoteSignificantEventToEpisode({
+        logger: this.logger,
+        isAlertingV2Enabled: async () =>
+          (await globalUiSettingsClient.get<boolean>(ALERTING_V2_ENABLED_SETTING_ID)) === true,
+        getAlertEventsClient: () =>
+          pluginsStart.alertingVTwo.getAlertEventsClientWithRequest(request),
+      });
+
       const deleteLegacyRulesById = async (ruleIds: string[]): Promise<void> => {
         if (ruleIds.length === 0) {
           return;
@@ -247,6 +257,7 @@ export class SignificantEventsPlugin
         globalUiSettingsClient,
         isSecurityEnabled,
         tuningConfig,
+        promoteSignificantEventToEpisode,
       };
     };
 

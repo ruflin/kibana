@@ -9,15 +9,18 @@ import { v4 as uuidv4 } from 'uuid';
 import type { SignificantEventStatus } from '@kbn/significant-events-schema';
 import type { EventClient } from './event_client';
 import { emitSignificantEventWriteTriggers } from '../../../workflows/triggers/emit_significant_event_triggers';
+import type { PromoteSignificantEventToEpisode } from '../alerting/promote_event_to_episode';
 
 export const updateSignificantEventStatus = async ({
   eventClient,
   eventUuid,
   status,
+  promoteToAlertingV2,
 }: {
   eventClient: EventClient;
   eventUuid: string;
   status: SignificantEventStatus;
+  promoteToAlertingV2?: PromoteSignificantEventToEpisode;
 }): Promise<{
   event_uuid: string;
   updated: number;
@@ -53,6 +56,17 @@ export const updateSignificantEventStatus = async ({
     previous_event_uuid: latest.event_uuid,
     status,
   };
+
+  if (promoteToAlertingV2 !== undefined) {
+    try {
+      const provenance = await promoteToAlertingV2(updatedEvent);
+      if (provenance !== undefined) {
+        updatedEvent.alerting_v2 = provenance;
+      }
+    } catch {
+      // Best-effort: Direction A must not fail the significant-event status write.
+    }
+  }
 
   // `wait_for` ensures the write is searchable before this resolves, so an immediate
   // re-fetch (e.g. the UI invalidating its query right after this route responds) sees it.

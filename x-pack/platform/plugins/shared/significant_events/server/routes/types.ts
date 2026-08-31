@@ -27,6 +27,7 @@ import type { SyncWorkflowService } from '../lib/workflows/sync_workflow';
 import type { SignificantEventsScheduledWorkflowsService } from '../lib/workflows/significant_events_scheduled_workflows';
 import type { WorkflowClients } from '../lib/workflows/create_workflow_clients';
 import type { SignificantEventsMaintenanceService } from '../lib/maintenance/maintenance_service';
+import type { PromoteSignificantEventToEpisode } from '../lib/significant_events/alerting/promote_event_to_episode';
 
 export type GetScopedClients = (params: {
   request: KibanaRequest;
@@ -55,6 +56,7 @@ export interface RouteHandlerScopedClients extends SignificantEventsClients {
   streamsClient: StreamsClient;
   isSecurityEnabled: boolean;
   tuningConfig: SignificantEventsTuningConfig;
+  promoteSignificantEventToEpisode: PromoteSignificantEventToEpisode;
 }
 
 export type SignificantEventsRouteHandlerResources = {

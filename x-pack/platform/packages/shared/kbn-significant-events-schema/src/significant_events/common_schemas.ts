@@ -17,6 +17,7 @@ import {
   MAX_SIGNAL_DESCRIPTION_LENGTH,
   MAX_SUMMARY_LENGTH,
   MAX_SYMPTOM_HYPOTHESIS_LENGTH,
+  MAX_RULE_NAME_LENGTH,
   SUMMARY_ROLE_RULE,
   SYMPTOM_HYPOTHESIS_ROLE_RULE,
 } from './constants';
@@ -275,9 +276,77 @@ const detectionSignalSchema = signalBaseSchema
     }
   });
 
+/** Alerting v2 episode lifecycle states copied onto Direction B signals and Direction A provenance. */
+export const ALERTING_V2_EPISODE_STATUSES = [
+  'inactive',
+  'pending',
+  'active',
+  'recovering',
+] as const;
+export type AlertingV2EpisodeStatus = (typeof ALERTING_V2_EPISODE_STATUSES)[number];
+
+/** Alerting v2 event severity vocabulary (not the SIG `80-critical` scale). */
+export const ALERTING_V2_EVENT_SEVERITIES = ['info', 'low', 'medium', 'high', 'critical'] as const;
+export type AlertingV2EventSeverity = (typeof ALERTING_V2_EVENT_SEVERITIES)[number];
+
+/**
+ * Source written onto Alerting v2 episodes created from a Significant Event (Direction A).
+ * Must not start with `elastic` — Alerting v2 reserves that prefix for Elastic-produced events.
+ */
+export const SIGNIFICANT_EVENTS_ALERTING_V2_SOURCE = 'significant_events' as const;
+
+const alertingV2EpisodeSignalMetadataSchema = z.object({
+  episode_id: z
+    .string()
+    .max(MAX_ID_LENGTH)
+    .describe('Alerting v2 episode id attached as evidence on this significant event.'),
+  group_hash: z
+    .string()
+    .max(MAX_ID_LENGTH)
+    .describe('Alerting v2 series identity (`group_hash`) for the attached episode.'),
+  rule_id: z
+    .string()
+    .max(MAX_ID_LENGTH)
+    .optional()
+    .describe(
+      'Alerting v2 rule id when the episode is rule-backed. Absent for ingested-without-rule episodes. Not a KI detection `rule_uuid`.'
+    ),
+  rule_name: z
+    .string()
+    .max(MAX_RULE_NAME_LENGTH)
+    .optional()
+    .describe('Human-readable name of the Alerting v2 rule, when known.'),
+  source: z
+    .string()
+    .max(MAX_ID_LENGTH)
+    .describe('Alerting v2 event `source` of the attached episode.'),
+  episode_status: z
+    .enum(ALERTING_V2_EPISODE_STATUSES)
+    .describe('Latest known Alerting v2 episode lifecycle status.'),
+  severity: z
+    .enum(ALERTING_V2_EVENT_SEVERITIES)
+    .optional()
+    .describe('Alerting v2 event severity, when present on the source episode.'),
+});
+
+/**
+ * User-authored Alerting v2 alert episode attached as evidence (Direction B).
+ * Verdict/evidence consistency rules from detection signals do not apply: these
+ * rows are not KI query checks and typically have no ES|QL evidence payload.
+ */
+const alertingV2EpisodeSignalSchema = signalBaseSchema.extend({
+  type: z.literal('alerting_v2_episode'),
+  metadata: alertingV2EpisodeSignalMetadataSchema,
+});
+
 /** Extensible discriminated union of signal sources accepted from agents. */
-export const signalEntrySchema = z.discriminatedUnion('type', [detectionSignalSchema]);
+export const signalEntrySchema = z.discriminatedUnion('type', [
+  detectionSignalSchema,
+  alertingV2EpisodeSignalSchema,
+]);
 export type SignalEntry = z.infer<typeof signalEntrySchema>;
+export type AlertingV2EpisodeSignal = Extract<SignalEntry, { type: 'alerting_v2_episode' }>;
+export type DetectionSignal = Extract<SignalEntry, { type: 'detection' }>;
 
 /** Canonical severity values in descending severity order (critical → low). */
 export const SEVERITY_OPTIONS = ['80-critical', '60-high', '40-medium', '20-low'] as const;
@@ -324,6 +393,32 @@ const SEVERITY_LABELS: Record<Severity, string> = {
 
 /** Convert canonical sortable severity to its human-readable label. */
 export const getSeverityLabel = (severity: Severity): string => SEVERITY_LABELS[severity];
+
+/** Direction A link from a Significant Event to its promoted Alerting v2 episode. */
+export const significantEventAlertingV2ProvenanceSchema = z.object({
+  source: z
+    .literal(SIGNIFICANT_EVENTS_ALERTING_V2_SOURCE)
+    .describe('Fixed source marker written onto the promoted Alerting v2 episode.'),
+  group_hash: z
+    .string()
+    .max(MAX_ID_LENGTH)
+    .describe('Alerting v2 series identity derived from space + source + fingerprint=event_id.'),
+  episode_id: z
+    .string()
+    .max(MAX_ID_LENGTH)
+    .describe('Current Alerting v2 episode id for this significant event_id.'),
+  last_alert_status: z
+    .enum(ALERTING_V2_EPISODE_STATUSES)
+    .optional()
+    .describe('Last Alerting v2 episode status successfully written by Direction A.'),
+  last_synced_at: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe('ISO timestamp of the last successful Direction A ingest.'),
+});
+export type SignificantEventAlertingV2Provenance = z.infer<
+  typeof significantEventAlertingV2ProvenanceSchema
+>;
 
 export const significantEventBaseSchema = z.object({
   event_id: z
@@ -427,4 +522,9 @@ export const significantEventBaseSchema = z.object({
     .max(MAX_ID_LENGTH)
     .optional()
     .describe('ID of the agent chat conversation this write originated from.'),
+  alerting_v2: significantEventAlertingV2ProvenanceSchema
+    .optional()
+    .describe(
+      'Direction A provenance: the Alerting v2 episode promoted from this significant event. Absent when promotion has not run or Alerting v2 is disabled.'
+    ),
 });

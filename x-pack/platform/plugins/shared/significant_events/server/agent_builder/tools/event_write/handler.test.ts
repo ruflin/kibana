@@ -1043,3 +1043,129 @@ describe('eventsWriteBulkHandler — narrative hijack guard', () => {
     );
   });
 });
+
+describe('eventsWriteBulkHandler — Direction A Alerting v2 promotion', () => {
+  it('promotes a newly written event with fingerprint=event_id and stores provenance', async () => {
+    const eventClient = makeEventClient();
+    const promoteToAlertingV2 = jest.fn().mockResolvedValue({
+      source: 'significant_events',
+      group_hash: 'hash-1',
+      episode_id: 'ep-1',
+      last_alert_status: 'active',
+      last_synced_at: '2026-08-31T12:00:00.000Z',
+    });
+
+    const [result] = await eventsWriteBulkHandler({
+      eventClient,
+      inputs: [{ ...baseInput, event_id: 'checkout-outage' }],
+      promoteToAlertingV2,
+    });
+
+    expect(result.written).toBe(true);
+    expect(promoteToAlertingV2).toHaveBeenCalledTimes(1);
+    expect(promoteToAlertingV2.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ event_id: 'checkout-outage', status: 'open' })
+    );
+    const writtenDoc = eventClient.bulkCreate.mock.calls[0][0][0] as Partial<SignificantEvent>;
+    expect(writtenDoc.alerting_v2).toEqual(
+      expect.objectContaining({
+        source: 'significant_events',
+        group_hash: 'hash-1',
+        episode_id: 'ep-1',
+      })
+    );
+  });
+
+  it('skips promotion on unchanged_outcome so Direction A does not spam .rule-events', async () => {
+    const stored = makeStoredEvent('checkout-stable', {
+      status: 'open',
+      severity: '60-high',
+    });
+    const eventClient = makeEventClient({
+      findByEventId: jest.fn().mockResolvedValue({ hits: [stored] }),
+    });
+    const promoteToAlertingV2 = jest.fn();
+
+    const [result] = await eventsWriteBulkHandler({
+      eventClient,
+      inputs: [
+        {
+          ...baseInput,
+          event_id: 'checkout-stable',
+          status: 'open',
+          severity: '60-high',
+        },
+      ],
+      promoteToAlertingV2,
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({ written: false, skipped: true, reason: 'unchanged_outcome' })
+    );
+    expect(promoteToAlertingV2).not.toHaveBeenCalled();
+    expect(eventClient.bulkCreate).not.toHaveBeenCalled();
+  });
+
+  it('writes the SIG event even when promotion fails', async () => {
+    const eventClient = makeEventClient();
+    const promoteToAlertingV2 = jest.fn().mockRejectedValue(new Error('ingest failed'));
+
+    const [result] = await eventsWriteBulkHandler({
+      eventClient,
+      inputs: [{ ...baseInput, event_id: 'checkout-outage' }],
+      promoteToAlertingV2,
+    });
+
+    expect(result.written).toBe(true);
+    expect(eventClient.bulkCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not skip a continuation that only adds an alerting_v2_episode signal', async () => {
+    const stored = makeStoredEvent('checkout-stable', {
+      status: 'open',
+      severity: '60-high',
+      signals: [],
+    });
+    const eventClient = makeEventClient({
+      findByEventId: jest.fn().mockResolvedValue({ hits: [stored] }),
+    });
+
+    const [result] = await eventsWriteBulkHandler({
+      eventClient,
+      inputs: [
+        {
+          ...baseInput,
+          event_id: 'checkout-stable',
+          status: 'open',
+          severity: '60-high',
+          signals: [
+            {
+              type: 'alerting_v2_episode',
+              stream_name: 'logs.checkout',
+              description: 'User alert episode joined this open significant event.',
+              verdict: 'confirms',
+              metadata: {
+                episode_id: 'ep-user-1',
+                group_hash: 'gh-user-1',
+                source: 'datadog',
+                episode_status: 'active',
+                rule_id: 'user-rule-1',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.written).toBe(true);
+    const writtenDoc = eventClient.bulkCreate.mock.calls[0][0][0] as Partial<SignificantEvent>;
+    expect(writtenDoc.signals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'alerting_v2_episode',
+          metadata: expect.objectContaining({ episode_id: 'ep-user-1' }),
+        }),
+      ])
+    );
+  });
+});

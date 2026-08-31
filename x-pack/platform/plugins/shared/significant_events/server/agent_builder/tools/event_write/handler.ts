@@ -21,10 +21,13 @@ import {
   toCompactBulkError,
 } from '../bulk_write';
 import { emitSignificantEventWriteTriggers } from '../../../workflows/triggers/emit_significant_event_triggers';
+import type { PromoteSignificantEventToEpisode } from '../../../lib/significant_events/alerting/promote_event_to_episode';
 import {
   addsNewDetectionRules,
   extractRuleUuids,
   extractRuleUuidsFromEvents,
+  extractAlertingV2EpisodeIdsFromEvents,
+  addsNewAlertingV2Episodes,
   makeIdentity,
   mergeEpisodeContext,
   mergeSignalsLatestPerRule,
@@ -129,12 +132,18 @@ const shouldSkipAsNoOp = (
   if (latestEvent === undefined) return false;
 
   const knownRuleUuids = extractRuleUuidsFromEvents([...priorDocs, latestEvent]);
+  const knownEpisodeIds = extractAlertingV2EpisodeIdsFromEvents([...priorDocs, latestEvent]);
   const addsRule = addsNewDetectionRules(extractRuleUuids(candidate.input.signals), knownRuleUuids);
+  const addsEpisode = addsNewAlertingV2Episodes(
+    extractAlertingV2EpisodeIdsFromEvents([candidate.input]),
+    knownEpisodeIds
+  );
 
   return (
     latestEvent.status === candidate.input.status &&
     latestEvent.severity === candidate.input.severity &&
-    !addsRule
+    !addsRule &&
+    !addsEpisode
   );
 };
 
@@ -349,7 +358,12 @@ const buildPendingWrite = (
   timestamp: string,
   latestByEventId: Map<string, SignificantEvent>,
   priorDocsByEventId: Map<string, SignificantEvent[]>
-) => {
+): {
+  candidate: WriteCandidate;
+  status: SignificantEvent['status'];
+  narrativePreserved: true | undefined;
+  document: SignificantEvent;
+} => {
   const { event_id: _explicitId, ...rest } = candidate.input;
   const priorDocs = priorDocsByEventId.get(candidate.eventId) ?? [];
   const latestEvent = latestByEventId.get(candidate.eventId);
@@ -400,6 +414,7 @@ const buildPendingWrite = (
       event_id: candidate.eventId,
       previous_event_uuid: latestEvent?.event_uuid,
       investigations: latestEvent?.investigations,
+      alerting_v2: latestEvent?.alerting_v2,
       signals,
       stream_names: episodeContext.streamNames,
       causal_features: episodeContext.causalFeatures,
@@ -464,9 +479,11 @@ const applyBulkResults = (
 export async function eventsWriteBulkHandler({
   eventClient,
   inputs,
+  promoteToAlertingV2,
 }: {
   eventClient: EventClient;
   inputs: EventsWriteInput[];
+  promoteToAlertingV2?: PromoteSignificantEventToEpisode;
 }): Promise<EventsWriteBulkResult[]> {
   const timestamp = new Date().toISOString();
 
@@ -514,6 +531,24 @@ export async function eventsWriteBulkHandler({
     buildPendingWrite(candidate, timestamp, latestByEventId, priorDocsByEventId)
   );
 
+  // Direction A: best-effort promote before the ES write so the stored version can
+  // carry group_hash / episode_id. Failures leave `alerting_v2` unset (or keep the
+  // prior provenance on continuations) and never fail the SIG write.
+  if (promoteToAlertingV2 !== undefined) {
+    await Promise.all(
+      pendingToWrite.map(async (pending) => {
+        try {
+          const provenance = await promoteToAlertingV2(pending.document);
+          if (provenance !== undefined) {
+            pending.document.alerting_v2 = provenance;
+          }
+        } catch {
+          // Best-effort: Direction A must not fail the significant-event write.
+        }
+      })
+    );
+  }
+
   let response;
   try {
     response = await eventClient.bulkCreate(
@@ -555,11 +590,17 @@ export async function eventsWriteBulkHandler({
 export async function eventsWriteHandler({
   eventClient,
   input,
+  promoteToAlertingV2,
 }: {
   eventClient: EventClient;
   input: EventsWriteInput;
+  promoteToAlertingV2?: PromoteSignificantEventToEpisode;
 }): Promise<EventsWriteResult | EventsWriteNoOpResult> {
-  const [result] = await eventsWriteBulkHandler({ eventClient, inputs: [input] });
+  const [result] = await eventsWriteBulkHandler({
+    eventClient,
+    inputs: [input],
+    promoteToAlertingV2,
+  });
   if (result === undefined) {
     throw createBulkWriteOutcomeUnknownError('Event bulk write did not return a result');
   }

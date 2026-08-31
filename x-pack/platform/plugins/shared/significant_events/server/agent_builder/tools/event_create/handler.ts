@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { EventClient } from '../../../lib/significant_events/events';
 import { eventsWriteHandler, type EventsWriteInput } from '../event_write/handler';
 import { createBulkWriteOutcomeUnknownError } from '../bulk_write';
+import type { PromoteSignificantEventToEpisode } from '../../../lib/significant_events/alerting/promote_event_to_episode';
 
 /**
  * Chat-initiated event input — a minimal subset of EventsWriteInput.
@@ -26,12 +27,15 @@ export type EventCreateInput = Pick<
 export async function createEventToolHandler({
   eventClient,
   eventInput,
+  promoteToAlertingV2,
 }: {
   eventClient: EventClient;
   eventInput: EventCreateInput;
+  promoteToAlertingV2?: PromoteSignificantEventToEpisode;
 }): Promise<{ event_uuid: string; acknowledged: true }> {
   const result = await eventsWriteHandler({
     eventClient,
+    promoteToAlertingV2,
     input: {
       ...eventInput,
       event_id: uuidv4(),

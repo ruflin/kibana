@@ -155,6 +155,47 @@ describe('mergeSignalsLatestPerRule', () => {
 
     expect(result[0].description).toHaveLength(MAX_SIGNAL_DESCRIPTION_LENGTH);
   });
+
+  it('merges alerting_v2_episode signals by episode_id independently of detection rule_uuid', () => {
+    const priorEpisode: SignalEntry = {
+      type: 'alerting_v2_episode',
+      stream_name: 'logs.test',
+      description: 'Older episode snapshot',
+      verdict: 'confirms',
+      metadata: {
+        episode_id: 'ep-1',
+        group_hash: 'gh-1',
+        source: 'datadog',
+        episode_status: 'active',
+      },
+    };
+    const submittedEpisode: SignalEntry = {
+      type: 'alerting_v2_episode',
+      stream_name: 'logs.test',
+      description: 'Newer episode snapshot',
+      verdict: 'refutes',
+      metadata: {
+        episode_id: 'ep-1',
+        group_hash: 'gh-1',
+        source: 'datadog',
+        episode_status: 'inactive',
+      },
+    };
+    const detection = makeSignal('rule-1');
+    const result = mergeSignalsLatestPerRule(
+      [{ '@timestamp': TS_EARLIER, signals: [priorEpisode, detection] }],
+      [submittedEpisode],
+      TS_SUBMITTED
+    );
+
+    expect(result).toHaveLength(2);
+    const episode = result.find(
+      (signal): signal is Extract<SignalEntry, { type: 'alerting_v2_episode' }> =>
+        signal.type === 'alerting_v2_episode'
+    );
+    expect(episode?.metadata.episode_status).toBe('inactive');
+    expect(episode?.description).toBe('Newer episode snapshot');
+  });
 });
 
 describe('mergeEpisodeContext', () => {

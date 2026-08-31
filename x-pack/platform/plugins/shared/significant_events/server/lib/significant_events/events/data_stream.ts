@@ -38,11 +38,25 @@ export const eventsMappings = {
     }),
     signals: mappings.object({
       properties: {
+        type: mappings.keyword(),
         metadata: mappings.object({
           properties: {
             rule_uuid: mappings.keyword(),
+            episode_id: mappings.keyword(),
+            group_hash: mappings.keyword(),
+            rule_id: mappings.keyword(),
+            source: mappings.keyword(),
           },
         }),
+      },
+    }),
+    alerting_v2: mappings.object({
+      properties: {
+        source: mappings.keyword(),
+        group_hash: mappings.keyword(),
+        episode_id: mappings.keyword(),
+        last_alert_status: mappings.keyword(),
+        last_synced_at: mappings.date({ format: 'strict_date_optional_time' }),
       },
     }),
     // Mapped so discovery can gate re-investigation with a server-side `exists` filter.
@@ -74,7 +88,7 @@ export const storedEventSchema = significantEventSchema.transform((doc) => ({
 
 export const eventsDataStream: DataStreamDefinition<typeof eventsMappings, StoredEvent> = {
   name: EVENTS_DATA_STREAM,
-  version: 12,
+  version: 13,
   hidden: true,
   template: {
     priority: 500,

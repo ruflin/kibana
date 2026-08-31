@@ -5,7 +5,13 @@
  * 2.0.
  */
 
-import { blastRadiusEntrySchema, causalFeatureSchema, signalEntrySchema } from './common_schemas';
+import {
+  blastRadiusEntrySchema,
+  causalFeatureSchema,
+  signalEntrySchema,
+  significantEventAlertingV2ProvenanceSchema,
+  SIGNIFICANT_EVENTS_ALERTING_V2_SOURCE,
+} from './common_schemas';
 
 const metadata = {
   detection_id: 'det-1',
@@ -115,5 +121,73 @@ describe('topology classification compatibility', () => {
         stream_name: 'logs.orders',
       }).success
     ).toBe(true);
+  });
+});
+
+describe('alerting_v2_episode signal type', () => {
+  const episodeSignal = {
+    type: 'alerting_v2_episode' as const,
+    stream_name: 'logs.checkout',
+    description: 'User alert episode joined this open significant event.',
+    verdict: 'confirms' as const,
+    collected_at: '2026-08-31T12:00:00.000Z',
+    metadata: {
+      episode_id: 'ep-1',
+      group_hash: 'abc123',
+      rule_id: 'user-rule-1',
+      rule_name: 'Checkout error rate',
+      source: 'datadog',
+      episode_status: 'active' as const,
+      severity: 'high' as const,
+    },
+  };
+
+  it('accepts an alerting_v2_episode signal without ES|QL evidence', () => {
+    expect(signalEntrySchema.safeParse(episodeSignal).success).toBe(true);
+  });
+
+  it('rejects a detection-shaped payload tagged as alerting_v2_episode', () => {
+    expect(
+      signalEntrySchema.safeParse({
+        ...episodeSignal,
+        type: 'alerting_v2_episode',
+        metadata: {
+          detection_id: 'det-1',
+          rule_uuid: 'rule-1',
+          change_point_type: 'spike',
+          p_value: 0.01,
+        },
+      }).success
+    ).toBe(false);
+  });
+
+  it('still accepts detection signals after the union grew', () => {
+    expect(
+      parseSignal({ verdict: 'confirms', evidence: evidence('found') }).success
+    ).toBe(true);
+  });
+});
+
+describe('significantEventAlertingV2ProvenanceSchema', () => {
+  it('accepts Direction A provenance with the significant_events source', () => {
+    expect(
+      significantEventAlertingV2ProvenanceSchema.safeParse({
+        source: SIGNIFICANT_EVENTS_ALERTING_V2_SOURCE,
+        group_hash: 'deadbeef',
+        episode_id: 'ep-1',
+        last_alert_status: 'active',
+        last_synced_at: '2026-08-31T12:00:00.000Z',
+      }).success
+    ).toBe(true);
+  });
+
+  it('rejects a reserved elastic-* source on SIG provenance', () => {
+    expect(
+      significantEventAlertingV2ProvenanceSchema.safeParse({
+        source: 'elastic-significant-events',
+        group_hash: 'deadbeef',
+        episode_id: 'ep-1',
+      }).success
+    ).toBe(false);
   });
 });

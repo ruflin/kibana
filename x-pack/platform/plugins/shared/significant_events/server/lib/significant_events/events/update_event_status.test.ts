@@ -174,3 +174,50 @@ describe('updateSignificantEventStatus', () => {
     expect(written.status).toBe('closed');
   });
 });
+
+describe('updateSignificantEventStatus — Direction A promotion', () => {
+  it('attaches Alerting v2 provenance when promotion succeeds', async () => {
+    const existing = createSignificantEvent({ event_uuid: 'event-1', status: 'open' });
+    const { client, dataStreamClient } = createEventClient([existing]);
+    const promoteToAlertingV2 = jest.fn().mockResolvedValue({
+      source: 'significant_events',
+      group_hash: 'hash-1',
+      episode_id: 'ep-1',
+      last_alert_status: 'inactive',
+      last_synced_at: '2026-08-31T12:00:00.000Z',
+    });
+
+    await updateSignificantEventStatus({
+      eventClient: client,
+      eventUuid: 'event-1',
+      status: 'closed',
+      promoteToAlertingV2,
+    });
+
+    expect(promoteToAlertingV2).toHaveBeenCalledWith(
+      expect.objectContaining({ event_id: 'agent-event-1', status: 'closed' })
+    );
+    const [[callArg]] = dataStreamClient.create.mock.calls;
+    const written: SignificantEvent = callArg.documents[0];
+    expect(written.alerting_v2?.episode_id).toBe('ep-1');
+    expect(written.alerting_v2?.last_alert_status).toBe('inactive');
+  });
+
+  it('still writes the status change when promotion fails', async () => {
+    const existing = createSignificantEvent({ event_uuid: 'event-1', status: 'open' });
+    const { client, dataStreamClient } = createEventClient([existing]);
+
+    await updateSignificantEventStatus({
+      eventClient: client,
+      eventUuid: 'event-1',
+      status: 'closed',
+      promoteToAlertingV2: jest.fn().mockRejectedValue(new Error('ingest failed')),
+    });
+
+    expect(dataStreamClient.create).toHaveBeenCalledTimes(1);
+    const [[callArg]] = dataStreamClient.create.mock.calls;
+    const written: SignificantEvent = callArg.documents[0];
+    expect(written.status).toBe('closed');
+    expect(written.alerting_v2).toBeUndefined();
+  });
+});

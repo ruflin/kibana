@@ -96,12 +96,14 @@ export function createEventTool({
     handler: async (toolParams, context) => {
       const { request } = context;
       try {
-        const { getEventClient, licensing } = await getScopedClients({ request });
+        const { getEventClient, licensing, promoteSignificantEventToEpisode } =
+          await getScopedClients({ request });
         await assertSignificantEventsAccess({ server, licensing });
 
         const data = await createEventToolHandler({
           eventClient: getEventClient(),
           eventInput: toolParams,
+          promoteToAlertingV2: promoteSignificantEventToEpisode,
         });
 
         telemetry.trackAgentToolEventCreate({

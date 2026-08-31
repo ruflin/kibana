@@ -177,12 +177,14 @@ export function createEventsWriteTool({
     handler: async (toolParams, context) => {
       const { request } = context;
       try {
-        const { getEventClient, licensing } = await getScopedClients({ request });
+        const { getEventClient, licensing, promoteSignificantEventToEpisode } =
+          await getScopedClients({ request });
         await assertSignificantEventsAccess({ server, licensing });
 
         const data = await eventsWriteBulkHandler({
           eventClient: getEventClient(),
           inputs: toolParams.items,
+          promoteToAlertingV2: promoteSignificantEventToEpisode,
         });
 
         data.forEach((result) => {
