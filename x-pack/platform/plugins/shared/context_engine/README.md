@@ -80,3 +80,15 @@ user against the current space's signals index):
 Both routes are gated by the same `contextEngine:enabled` advanced setting as
 the AI index API (they return 404 while it is off).
 
+## Local scripts
+
+- `scripts/seed_ki_sample_data.ts` — bulk-index sample KIs and register an AI index.
+- `scripts/setup_obs_services_ai_index.py` — enable Context Engine, create the
+  `obs-services` AI index, and load a workflow that `STATS BY service.name` and
+  upserts one entity KI per service.
+
+```
+python3 x-pack/platform/plugins/shared/context_engine/scripts/setup_obs_services_ai_index.py
+python3 .../setup_obs_services_ai_index.py --source 'traces-apm*' --limit 20 --run
+```
+
