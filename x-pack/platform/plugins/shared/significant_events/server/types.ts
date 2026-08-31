@@ -38,6 +38,7 @@ import type {
   SearchInferenceEndpointsPluginSetup,
   SearchInferenceEndpointsPluginStart,
 } from '@kbn/search-inference-endpoints/server';
+import type { ContextEnginePluginSetup } from '@kbn/context-engine-plugin/server';
 
 export interface SignificantEventsPluginSetupDependencies {
   agentBuilder?: AgentBuilderPluginSetup;
@@ -57,6 +58,7 @@ export interface SignificantEventsPluginSetupDependencies {
   workflowsManagement?: WorkflowsServerPluginSetup;
   searchInferenceEndpoints?: SearchInferenceEndpointsPluginSetup;
   streams: StreamsPluginSetup;
+  contextEngine?: ContextEnginePluginSetup;
 }
 
 export interface SignificantEventsPluginStartDependencies {

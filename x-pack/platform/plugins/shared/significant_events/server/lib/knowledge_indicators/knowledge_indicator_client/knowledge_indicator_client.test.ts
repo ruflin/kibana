@@ -98,7 +98,7 @@ function createAlertingContext(
   };
 }
 
-function makeClient(): {
+function makeClient(overrides: Partial<KnowledgeIndicatorClientDeps> = {}): {
   client: KnowledgeIndicatorClient;
   create: jest.Mock;
   runEsql: jest.Mock;
@@ -115,6 +115,7 @@ function makeClient(): {
     esClient: {} as KnowledgeIndicatorClientDeps['esClient'],
     soClient: {} as KnowledgeIndicatorClientDeps['soClient'],
     logger,
+    ...overrides,
   };
   const findStreamNamesWithOwnedRules = jest.fn().mockResolvedValue([]);
   const rulesManagementClient = {
@@ -625,6 +626,53 @@ describe('KnowledgeIndicatorClient.bulk — lifecycle (expires_at)', () => {
     const written = documents[0] as StoredFeatureKnowledgeIndicator;
     expect(written.excluded).toBeUndefined();
     expect(written.expires_at).toBeUndefined();
+  });
+});
+
+describe('KnowledgeIndicatorClient.bulk — AI index projection', () => {
+  it('upserts indexed features onto the AI index writer and ignores projection failures', async () => {
+    const project = jest.fn().mockRejectedValue(new Error('dest mapping'));
+    const projectDeletes = jest.fn().mockResolvedValue(undefined);
+    const { client, create } = makeClient({
+      aiIndexWriter: { project, projectDeletes },
+    });
+
+    const result = await client.bulk(STREAM, [
+      {
+        index: {
+          feature: {
+            id: 'checkout',
+            stream_name: STREAM,
+            type: 'entity',
+            description: 'desc',
+            properties: {},
+            confidence: 80,
+          },
+        },
+      },
+    ]);
+
+    expect(result).toEqual({ applied: 1, skipped: 0 });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(project).toHaveBeenCalledTimes(1);
+    const projected = project.mock.calls[0][0] as StoredFeatureKnowledgeIndicator[];
+    expect(projected).toHaveLength(1);
+    expect(projected[0].feature.slug).toBe('checkout');
+    expect(projectDeletes).not.toHaveBeenCalled();
+  });
+
+  it('deletes the dest document using the pre-delete revision', async () => {
+    const project = jest.fn().mockResolvedValue(undefined);
+    const projectDeletes = jest.fn().mockResolvedValue(undefined);
+    const { client, runEsql } = makeClient({
+      aiIndexWriter: { project, projectDeletes },
+    });
+    const latest = createFeatureDoc({ slug: 'checkout' });
+    runEsql.mockResolvedValueOnce({ hits: [latest] });
+
+    await client.bulk(STREAM, [{ delete: { type: KI_TYPE_FEATURE, id: latest.id } }]);
+
+    expect(projectDeletes).toHaveBeenCalledWith([latest]);
   });
 });
 

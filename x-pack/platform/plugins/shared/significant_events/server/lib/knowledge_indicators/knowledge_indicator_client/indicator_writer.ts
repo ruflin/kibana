@@ -37,13 +37,15 @@ import {
 import { StatusError } from '../../errors/status_error';
 import type { RevisionReader } from './revision_reader';
 import type { KIBulkOperation, KnowledgeIndicatorDataStreamClient } from './types';
+import type { AiIndexWriter } from '../ai_index';
 
 export class IndicatorWriter {
   constructor(
     private readonly dataStreamClient: KnowledgeIndicatorDataStreamClient,
     private readonly logger: Logger,
     private readonly revisionReader: RevisionReader,
-    private readonly ttlDays: number
+    private readonly ttlDays: number,
+    private readonly aiIndexWriter?: AiIndexWriter
   ) {}
 
   async bulk(
@@ -61,7 +63,7 @@ export class IndicatorWriter {
     const [
       { excludableLatest, skipped: excludeSkipped },
       { restorableLatest, skipped: restoreSkipped },
-      { deletableOps, skipped: deleteSkipped },
+      { deletableOps, deletableLatest, skipped: deleteSkipped },
     ] = await Promise.all([
       this.prepareExcludes(stream, operations),
       this.prepareRestores(stream, operations),
@@ -89,6 +91,17 @@ export class IndicatorWriter {
         }) as Array<StoredKnowledgeIndicator & Record<string, unknown>>,
       })
     );
+
+    await this.projectAiIndex({
+      upserts: this.buildBulkDocs(stream, operations, {
+        excludableLatest,
+        restorableLatest,
+        deletableOps: [],
+        includeEmbedding: false,
+        now,
+      }),
+      deletes: deletableLatest,
+    });
 
     return { applied: totalApplied, skipped: totalSkipped };
   }
@@ -203,6 +216,7 @@ export class IndicatorWriter {
     operations: KIBulkOperation[]
   ): Promise<{
     deletableOps: Array<Extract<KIBulkOperation, { delete: unknown }>>;
+    deletableLatest: StoredKnowledgeIndicator[];
     skipped: number;
   }> {
     const deleteOps = operations.filter(
@@ -210,7 +224,7 @@ export class IndicatorWriter {
     );
     const deleteIds = new Set(deleteOps.map((op) => op.delete.id));
     if (deleteIds.size === 0) {
-      return { deletableOps: [], skipped: 0 };
+      return { deletableOps: [], deletableLatest: [], skipped: 0 };
     }
 
     const deleteLatest = await this.revisionReader.fetchLatestRevisions(
@@ -227,7 +241,11 @@ export class IndicatorWriter {
         skipped += 1;
       }
     }
-    return { deletableOps, skipped };
+    const deletableKeys = new Set(deletableOps.map((op) => `${op.delete.type}:${op.delete.id}`));
+    const deletableLatest = deleteLatest.filter((doc) =>
+      deletableKeys.has(`${doc.type}:${doc.id}`)
+    );
+    return { deletableOps, deletableLatest, skipped };
   }
 
   /**
@@ -337,6 +355,26 @@ export class IndicatorWriter {
       });
     });
 
+    const projected: StoredKnowledgeIndicator[] = [];
+    for (const doc of latest) {
+      if (isStoredFeatureKnowledgeIndicator(doc)) {
+        projected.push(
+          toStoredFeature(stream, fromStoredFeature(doc), false, rollExpiresAt(doc.expires_at))
+        );
+      } else if (isStoredQueryKnowledgeIndicator(doc)) {
+        const link = fromStoredQuery(doc);
+        projected.push(
+          toStoredQuery(
+            stream,
+            { ...link.query, rule_backed: link.rule_backed, rule_id: link.rule_id },
+            false,
+            rollExpiresAt(doc.expires_at)
+          )
+        );
+      }
+    }
+    await this.projectAiIndex({ upserts: projected, deletes: [] });
+
     return { refreshed: latest.length };
   }
 
@@ -361,6 +399,31 @@ export class IndicatorWriter {
         `Failed to delete indicators for stream "${stream}": ${inference + other}/${
           tombstones.length
         } tombstone writes errored`
+      );
+    }
+    await this.projectAiIndex({ upserts: [], deletes: latest });
+  }
+
+  private async projectAiIndex({
+    upserts,
+    deletes,
+  }: {
+    upserts: StoredKnowledgeIndicator[];
+    deletes: StoredKnowledgeIndicator[];
+  }): Promise<void> {
+    if (!this.aiIndexWriter) {
+      return;
+    }
+    try {
+      if (upserts.length > 0) {
+        await this.aiIndexWriter.project(upserts);
+      }
+      if (deletes.length > 0) {
+        await this.aiIndexWriter.projectDeletes(deletes);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `AI index projection failed: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }

@@ -76,6 +76,7 @@ import {
   registerSignificantEventsDiscoveryAgentTypes,
 } from './agent_builder/agents/discovery';
 import { createSignificantEventsAvailability } from './agent_builder/tools/significant_events_availability';
+import { registerNightshiftAiIndex } from './lib/knowledge_indicators/ai_index';
 import { SIGNIFICANT_EVENT_TIERED_FEATURES } from '../common/constants';
 import { STREAMS_SIGNIFICANT_EVENTS_AVAILABLE_FLAG } from '../common/feature_flags';
 import { isSignificantEventsAvailable } from './routes/utils/assert_significant_events_access';
@@ -125,6 +126,8 @@ export class SignificantEventsPlugin
     core.savedObjects.registerType(getSignificantEventsMaintenanceStateSavedObjectType());
 
     this.ebtTelemetryService.setup(core.analytics);
+
+    registerNightshiftAiIndex(plugins.contextEngine);
 
     registerSignificantEventsInferenceFeatures(
       plugins.searchInferenceEndpoints,
