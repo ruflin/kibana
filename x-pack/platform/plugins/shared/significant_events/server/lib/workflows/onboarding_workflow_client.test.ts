@@ -12,6 +12,7 @@ import { ExecutionStatus } from '@kbn/workflows';
 import {
   getManagedWorkflowDefinition,
   SIGNIFICANT_EVENTS_KI_ONBOARDING_WORKFLOW_ID,
+  SIGNIFICANT_EVENTS_KI_FEATURES_IDENTIFICATION_WORKFLOW_ID,
 } from '@kbn/workflows/managed';
 import {
   SignificantEventsKIsOnboardingClient,
@@ -83,6 +84,17 @@ describe('StreamsKIsOnboardingClient', () => {
 
       expect(buildConcurrencyKey(streamName)).toBe(expectedKey);
     });
+
+    it('does not declare the unused feature TTL pass-through', () => {
+      const onboarding = getManagedWorkflowDefinition(SIGNIFICANT_EVENTS_KI_ONBOARDING_WORKFLOW_ID);
+      expect(onboarding!.yaml).not.toContain('featuresTtlDays');
+      expect(onboarding!.yaml).not.toContain('featureTtlDays');
+
+      const identification = getManagedWorkflowDefinition(
+        SIGNIFICANT_EVENTS_KI_FEATURES_IDENTIFICATION_WORKFLOW_ID
+      );
+      expect(identification!.yaml).not.toContain('featureTtlDays');
+    });
   });
 
   describe('run', () => {
@@ -110,6 +122,32 @@ describe('StreamsKIsOnboardingClient', () => {
         expect.objectContaining({ streamName: 'logs.nginx' }),
         request
       );
+    });
+
+    it('forwards maxIterations as featuresMaxIterations and does not pass a TTL override', async () => {
+      const { client, managementApi } = createClient();
+      const request = httpServerMock.createKibanaRequest();
+
+      await client.run({
+        inputs: {
+          streamName: 'logs.nginx',
+          features: { skip: false, start: 1000, end: 2000, maxIterations: 8 },
+          queries: { skip: false },
+        },
+        request,
+      });
+
+      expect(managementApi.runWorkflow).toHaveBeenCalledWith(
+        expect.objectContaining({ id: SIGNIFICANT_EVENTS_KI_ONBOARDING_WORKFLOW_ID }),
+        'default',
+        expect.objectContaining({
+          streamName: 'logs.nginx',
+          featuresMaxIterations: 8,
+        }),
+        request
+      );
+      const payload = managementApi.runWorkflow.mock.calls[0][2] as Record<string, unknown>;
+      expect(payload).not.toHaveProperty('featuresTtlDays');
     });
 
     it('throws when the workflow is not found', async () => {

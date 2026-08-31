@@ -55,9 +55,6 @@ triggers:
       - name: sampleSize
         type: number
         description: "Number of documents sampled per iteration."
-      - name: featureTtlDays
-        type: number
-        description: "Number of days before a KI feature expires and is cleaned up."
       - name: entityFilteredRatio
         type: number
         description: "Fraction (0–1) of sample allocated to entity-filtered (must_not) documents."
@@ -112,7 +109,6 @@ steps:
             end: "${{ inputs.end }}"
             runId: "${{ execution.id }}"
             iteration: "${{ variables.iterationResults.size | plus: 1 }}"
-            featureTtlDays: "${{ inputs.featureTtlDays }}"
             sampleSize: "${{ inputs.sampleSize }}"
             entityFilteredRatio: "${{ inputs.entityFilteredRatio }}"
             diverseRatio: "${{ inputs.diverseRatio }}"
@@ -209,7 +205,6 @@ steps:
         start: "${{ inputs.start }}"
         end: "${{ inputs.end }}"
         runId: "${{ execution.id }}"
-        featureTtlDays: "${{ inputs.featureTtlDays }}"
 
   # -----------------------------------------------------------------------
   # Step 5: Output results.

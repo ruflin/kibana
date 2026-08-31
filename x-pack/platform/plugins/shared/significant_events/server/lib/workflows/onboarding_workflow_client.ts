@@ -43,7 +43,6 @@ export interface SignificantEventsKIsOnboardingInputs {
     connectorId?: string;
     maxIterations?: number;
     sampleSize?: number;
-    ttlDays?: number;
     entityFilteredRatio?: number;
     diverseRatio?: number;
     maxExcludedInPrompt?: number;
@@ -72,7 +71,6 @@ interface OnboardingWorkflowInputPayload {
   queriesConnectorId?: string;
   featuresMaxIterations?: number;
   featuresSampleSize?: number;
-  featuresTtlDays?: number;
   featuresEntityFilteredRatio?: number;
   featuresDiverseRatio?: number;
   featuresMaxExcludedInPrompt?: number;
@@ -122,7 +120,6 @@ const toWorkflowInputPayload = (
     ...(queries.connectorId !== undefined && { queriesConnectorId: queries.connectorId }),
     ...(features.maxIterations !== undefined && { featuresMaxIterations: features.maxIterations }),
     ...(features.sampleSize !== undefined && { featuresSampleSize: features.sampleSize }),
-    ...(features.ttlDays !== undefined && { featuresTtlDays: features.ttlDays }),
     ...(features.entityFilteredRatio !== undefined && {
       featuresEntityFilteredRatio: features.entityFilteredRatio,
     }),
