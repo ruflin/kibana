@@ -186,7 +186,7 @@ describe('fetchSampleDocuments', () => {
       index: 'logs.test-default',
       start: 100,
       end: 200,
-      size: 6,
+      size: 2,
       iteration: 1,
       logger,
     });

@@ -196,7 +196,7 @@ export async function fetchSampleDocuments({
               labels: {
                 stream: index,
                 strategy: 'diverse',
-                sampleSize: String(diverseSize + entityFilteredSize),
+                sampleSize: String(diverseSize),
               },
             },
             () =>
@@ -205,7 +205,7 @@ export async function fetchSampleDocuments({
                 index,
                 start,
                 end,
-                size: diverseSize + entityFilteredSize,
+                size: diverseSize,
                 iteration,
                 logger,
               })
