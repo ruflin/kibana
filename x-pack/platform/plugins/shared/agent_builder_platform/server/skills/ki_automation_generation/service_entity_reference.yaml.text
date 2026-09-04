@@ -1,0 +1,290 @@
+version: "1"
+name: Service entity KIs from logs
+description: >
+  Discovers every unique service.name in log data, then creates or merges a
+  Cumulative / Wiki-style entity Knowledge Indicator for each name in an AI Index.
+  Dedup is by stable ki_id (logs/service/<slug>); re-runs merge via updateKi.
+enabled: true
+tags:
+  - cumulative
+  - entity
+  - knowledge-indicators
+  - logs
+  - services
+consts:
+  # AI index id (not the backing dest). createKi lazily creates this index with
+  # dest ai-index-idx-<id> when it does not exist yet. Index-backed only: ki_id is
+  # rejected on data-stream dests.
+  ai_index_id: services
+triggers:
+  - type: manual
+    inputs:
+      - name: sourceIndex
+        type: string
+        default: "logs-*"
+        description: "Log index pattern to scan for service.name values."
+      - name: lookback
+        type: string
+        default: "90 days"
+        description: "ES|QL interval passed to NOW() - <lookback>, e.g. 90 days or 24 hours."
+      - name: maxServices
+        type: number
+        default: 1000
+        description: "Cap on unique service.name values (corpus filter). Lower to 3 for a pilot."
+steps:
+  # Distinct service.name values, most common first. The name itself is the
+  # natural key; doc_count is only used as grounding evidence, never as a live fact.
+  - name: list_services
+    type: elasticsearch.esql.query
+    with:
+      query: |
+        FROM {{ inputs.sourceIndex }}
+        | WHERE @timestamp >= NOW() - {{ inputs.lookback }}
+        | WHERE `service.name` IS NOT NULL
+        | STATS doc_count = COUNT(*) BY `service.name`
+        | SORT doc_count DESC
+        | LIMIT {{ inputs.maxServices }}
+
+  - name: loop_services
+    type: foreach
+    foreach: "{{ steps.list_services.output.values }}"
+    steps:
+      # Natural key = exact STATS value (service_name). Document id = normalized slug.
+      # Cosmetic case/spacing collapses onto one ki_id so re-runs cannot duplicate.
+      - name: set_service_context
+        type: data.set
+        with:
+          service_name: "{{ foreach.item[0] }}"
+          doc_count: "{{ foreach.item[1] }}"
+          slug: "{{ foreach.item[0] | downcase | replace: ' ', '-' }}"
+          ki_id: "logs/service/{{ foreach.item[0] | downcase | replace: ' ', '-' }}"
+
+      # Lookup by document id, not fingerprint. ids + ignore_unavailable returns
+      # empty hits (not an error) before the backing index exists on the first run.
+      # If this AI index already exists with a custom dest, point `index` at that dest.
+      - name: get_existing_ki
+        type: elasticsearch.search
+        with:
+          index: "ai-index-idx-{{ consts.ai_index_id }}"
+          ignore_unavailable: true
+          allow_no_indices: true
+          size: 1
+          query:
+            ids:
+              values:
+                - "{{ variables.ki_id }}"
+        on-failure:
+          continue: true
+
+      - name: sample_service_docs
+        type: elasticsearch.esql.query
+        with:
+          query: |
+            FROM {{ inputs.sourceIndex }}
+            | WHERE @timestamp >= NOW() - {{ inputs.lookback }}
+            | WHERE `service.name` == "{{ variables.service_name | replace: '"', '' }}"
+            | SORT @timestamp DESC
+            | LIMIT 20
+
+      - name: profile_service
+        type: ai.prompt
+        connector-id: YOUR_AI_CONNECTOR_ID
+        with:
+          prompt: |
+            You are a data steward building an ENTITY PROFILE Knowledge Indicator
+            for a service observed in logs. Downstream, an AI agent uses the profile
+            to decide when this service is relevant and to reach live logs with
+            minimal ES|QL authoring.
+
+            Service name (authoritative, from STATS BY service.name): {{ variables.service_name }}
+            Observed document count in the lookback window (evidence only, NOT a live fact): {{ variables.doc_count }}
+            Source index pattern: {{ inputs.sourceIndex }}
+            Lookback: {{ inputs.lookback }}
+
+            Existing KI for this service (JSON, empty if this is the first run):
+            {{ steps.get_existing_ki.output.hits.hits[0]._source | default: '{}' | json }}
+
+            Recent sample documents (JSON):
+            {{ steps.sample_service_docs.output | json }}
+
+            Rules:
+            - Ground everything ONLY in the service name, the observed count, the samples,
+              and the existing KI. Never invent field names, hosts, errors, or dependencies.
+            - If an existing KI is present, MERGE: union evidence and tags, keep the richer
+              description, average confidence, and shallow-merge attributes. Do not drop
+              previously grounded facts that the new sample simply did not re-observe.
+            - Do NOT copy literal PII (names, emails, tokens) into the output.
+            - Do NOT materialize volatile facts (current error rate, live host count, last
+              seen timestamp) as answers. Put those behind access patterns that read live data.
+            - The service name is an explicit, unambiguous observation — include
+              `service.name={{ variables.service_name }}` as the first evidence string.
+            - Add 1-4 more evidence strings in field.path=value notation quoting real
+              sample values (e.g. `error.type=timeout`, `log.level=error`).
+            - Calibrate confidence: 0.9-1.0 explicit; 0.7-0.89 strong pattern; 0.5-0.69
+              some ambiguity; 0.3-0.49 inferred (also tag `inferred`); below 0.3 do not emit
+              (set emit to false).
+            - Access patterns must use the real source index and `service.name == "{{ variables.service_name }}"`.
+              End every example with a small `| LIMIT n`. Prefer `WHERE @timestamp >= NOW() - 24 hours`
+              over absolute datetimes. DATE literals must be ISO-8601 with a `T`, never a space.
+            - description MUST differentiate this service from siblings: include the service
+              name and one discriminator from the samples (environment, error class, or role).
+
+            Produce a profile for this one service only.
+          schema:
+            type: object
+            properties:
+              emit:
+                type: boolean
+                description: false only when confidence would be below 0.3.
+              display_name:
+                type: string
+                description: Short display name, typically the service name (<= 8 words).
+              summary:
+                type: string
+                description: 2-4 sentences on what this service does in the observed logs.
+              answers_questions:
+                type: array
+                items: { type: string }
+                description: 3-5 questions this entity KI can authoritatively route.
+              key_fields:
+                type: array
+                items: { type: string }
+                description: Query-relevant fields observed in samples as "field — what it is".
+              related_indices:
+                type: array
+                items: { type: string }
+                description: Other indices/patterns that also mention this service, if observed.
+              when_to_use:
+                type: string
+                description: One routing heuristic (<= 30 words) that includes the service name.
+              tags:
+                type: array
+                items: { type: string }
+                description: Filter facets (e.g. logs, service, observability). Include inferred if weakly grounded.
+              confidence:
+                type: number
+                description: Calibrated 0-1 correctness score.
+              evidence:
+                type: array
+                items: { type: string }
+                description: 2-5 field.path=value strings. First MUST be service.name=<name>.
+              access_patterns:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    question_type: { type: string }
+                    esql_template:
+                      type: string
+                      description: Runnable ES|QL. The service name may be inlined; other variables use ?param.
+                    esql_example:
+                      type: string
+                      description: Same query with example values and a small LIMIT.
+                    params:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name: { type: string }
+                          type: { type: string }
+                          example: { type: string }
+                    returns: { type: string }
+            required:
+              - emit
+              - display_name
+              - summary
+              - answers_questions
+              - when_to_use
+              - confidence
+              - evidence
+              - access_patterns
+        timeout: 120s
+
+      # Persist only when the model is willing to emit. Build the KI once so verify
+      # and create/update see the same document. createKi sets @timestamp; updateKi
+      # does not, so last_profiled_at is the merge-flow recency field.
+      - name: maybe_persist
+        type: if
+        condition: "${{ steps.profile_service.output.content.emit }}"
+        steps:
+          - name: build_ki
+            type: data.set
+            with:
+              ki:
+                type: entity
+                title: "{{ steps.profile_service.output.content.display_name | default: variables.service_name }}"
+                tags:
+                  - service
+                  - logs
+                  - entity
+                attributes:
+                  entity_name: "{{ variables.service_name }}"
+                  entity_type: service
+                  slug: "{{ variables.slug }}"
+                  source_index: "{{ inputs.sourceIndex }}"
+                  when_to_use: "{{ steps.profile_service.output.content.when_to_use }}"
+                  last_profiled_at: '{{ "now" | date: "%Y-%m-%dT%H:%M:%S.000Z" }}'
+                  key_fields: '${{ steps.profile_service.output.content.key_fields }}'
+                  related_indices: '${{ steps.profile_service.output.content.related_indices }}'
+                  confidence: '${{ steps.profile_service.output.content.confidence }}'
+                  evidence: '${{ steps.profile_service.output.content.evidence }}'
+                  esql: '${{ steps.profile_service.output.content.access_patterns | map: "esql_example" }}'
+                content: |
+                  Entity: service {{ variables.service_name }}. {{ steps.profile_service.output.content.summary }}
+                  Questions answered: {{ steps.profile_service.output.content.answers_questions | join: " | " }}
+                  When to use: {{ steps.profile_service.output.content.when_to_use }}
+                  Key fields: {{ steps.profile_service.output.content.key_fields | join: ", " }}
+                  Related indices: {{ steps.profile_service.output.content.related_indices | join: ", " }}
+
+                  Access patterns:
+                  {% for pattern in steps.profile_service.output.content.access_patterns %}
+                  Q: {{ pattern.question_type }}
+                  ESQL: {{ pattern.esql_template }}
+                  Example: {{ pattern.esql_example }}
+                  {% endfor %}
+                description: |
+                  Service entity {{ variables.service_name }}. {{ steps.profile_service.output.content.when_to_use }}
+
+          - name: verify_ki
+            type: context-engine.verifyKi
+            with:
+              ki: "${{ variables.ki }}"
+
+          - name: gate_on_verification
+            type: if
+            condition: "${{ steps.verify_ki.output.passed }}"
+            steps:
+              # Hit → merge write (updateKi). Miss → create with the same ki_id.
+              # Concurrent first-runs with the same ki_id still cannot duplicate:
+              # createKi with ki_id replaces on the index-backed dest.
+              - name: write_existing_or_new
+                type: if
+                condition: "${{ steps.get_existing_ki.error == null and steps.get_existing_ki.output.hits.total.value > 0 }}"
+                steps:
+                  - name: update_service_ki
+                    type: context-engine.updateKi
+                    with:
+                      ai_index_id: "{{ consts.ai_index_id }}"
+                      ki_id: "{{ variables.ki_id }}"
+                      ki: "${{ variables.ki }}"
+                else:
+                  - name: create_service_ki
+                    type: context-engine.createKi
+                    with:
+                      ai_index_id: "{{ consts.ai_index_id }}"
+                      ki_id: "{{ variables.ki_id }}"
+                      ki: "${{ variables.ki }}"
+            else:
+              - name: report_verification_failure
+                type: console
+                with:
+                  message: "KI for {{ variables.service_name }} failed verification: {{ steps.verify_ki.output.results | json }}"
+    iteration-on-failure:
+      continue: true
+
+  - name: summarize
+    type: console
+    with:
+      message: >
+        Processed {{ steps.list_services.output.values | size }} unique service.name
+        value(s) into AI index {{ consts.ai_index_id }} (createKi/updateKi by ki_id logs/service/<slug>).

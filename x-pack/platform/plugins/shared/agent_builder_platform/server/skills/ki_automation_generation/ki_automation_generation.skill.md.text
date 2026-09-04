@@ -154,7 +154,11 @@ Use free text in chat only for **open-ended** questions (e.g. Phase 1 use-case d
 there is no predefined option list.
 
 A reference workflow YAML for the Index Metadata strategy is available in the
-`index-selection-reference-workflow` resource file attached to this skill.
+`index-selection-reference-workflow` resource file attached to this skill. A
+reference workflow YAML for Cumulative / Wiki-style service entities (unique
+`service.name` values from logs, created or merged via `context-engine.createKi` /
+`context-engine.updateKi` with a stable `ki_id`) is available in the
+`service-entity-reference-workflow` resource.
 
 ## Phased workflow
 
@@ -620,12 +624,20 @@ A `foreach` over the facts. Per iteration: the verified KI sink with `ki_id` set
 Put entities and topics into `attributes` on each fact KI.
 
 **Cumulative / Wiki-style:**
-A top-level `foreach` over a hardcoded list of 1–2 entity IDs (pilot). Per entity: an
-`elasticsearch.esql.query` finding all documents referencing that entity (`LIMIT 10` for pilot).
-An `ai.prompt` synthesizing them into an entity profile: entity_name, summary, key_facts,
-open_questions, related_indices, and access_patterns. The KI upsert with
-`ki_id` set to the entity ID — re-runs read the stored KI and merge via
-`context-engine.updateKi`, enriching it over time. Put entity_name, entity_type, and related_indices into `attributes`.
+Discover entity IDs from the data rather than hardcoding them when a stable identifying
+field exists. For services in logs, run `elasticsearch.esql.query` grouped by
+`service.name` (plus a time window and a numeric cap), then `foreach` over
+`steps.<list>.output.values`. Per entity: derive `ki_id` as `logs/service/<slug>`
+(trim, lowercase, spaces to hyphens), look up the stored KI with an `ids` query,
+sample recent docs, `ai.prompt` synthesizing an entity profile (display_name, summary,
+answers_questions, key_fields, related_indices, when_to_use, access_patterns, calibrated
+confidence, evidence) that **merges** with the stored KI. Then the verified KI sink:
+`context-engine.createKi` with that `ki_id` when none exists, or `context-engine.updateKi`
+when it does. Put `entity_name`, `entity_type` (`service`), `slug`, `related_indices`,
+and `esql` into `attributes`. Index-backed AI indices only (`ki_id` is rejected on data
+streams). A complete reference YAML is in the `service-entity-reference-workflow`
+resource. For a 1–2 entity pilot, pass a hardcoded list (or `maxServices: 3`) instead of
+the STATS discovery query.
 
 **Connector:**
 Call `platform.workflows.get_step_definitions` with the connector type to get correct step params.

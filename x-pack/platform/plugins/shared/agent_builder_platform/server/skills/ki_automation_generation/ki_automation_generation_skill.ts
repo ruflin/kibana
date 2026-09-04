@@ -10,6 +10,7 @@ import { platformCoreTools } from '@kbn/agent-builder-common/tools';
 import { internalNamespaces } from '@kbn/agent-builder-common/base/namespaces';
 import content from './ki_automation_generation.skill.md.text';
 import indexSelectionReferenceYaml from './index_selection_reference.yaml.text';
+import serviceEntityReferenceYaml from './service_entity_reference.yaml.text';
 
 export const kiAutomationGenerationSkill = defineSkillType({
   id: 'ki-automation-generation',
@@ -24,6 +25,11 @@ export const kiAutomationGenerationSkill = defineSkillType({
       name: 'index-selection-reference-workflow',
       relativePath: '.',
       content: indexSelectionReferenceYaml,
+    },
+    {
+      name: 'service-entity-reference-workflow',
+      relativePath: '.',
+      content: serviceEntityReferenceYaml,
     },
   ],
   getRegistryTools: () => [

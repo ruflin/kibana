@@ -30,12 +30,44 @@ describe('kiAutomationGenerationSkill', () => {
     expect(kiAutomationGenerationSkill.content.length).toBeGreaterThan(0);
   });
 
-  it('has exactly one referencedContent entry for the index-selection reference workflow', () => {
-    expect(kiAutomationGenerationSkill.referencedContent).toHaveLength(1);
-    const ref = kiAutomationGenerationSkill.referencedContent![0];
-    expect(ref.name).toBe('index-selection-reference-workflow');
-    expect(ref.relativePath).toBe('.');
-    expect(ref.content.length).toBeGreaterThan(0);
+  it('has referencedContent entries for the index-selection and service-entity reference workflows', () => {
+    expect(kiAutomationGenerationSkill.referencedContent).toHaveLength(2);
+    expect(kiAutomationGenerationSkill.referencedContent?.map((ref) => ref.name)).toEqual([
+      'index-selection-reference-workflow',
+      'service-entity-reference-workflow',
+    ]);
+    for (const ref of kiAutomationGenerationSkill.referencedContent ?? []) {
+      expect(ref.relativePath).toBe('.');
+      expect(ref.content.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('service-entity reference workflow extracts unique service.name values and upserts entity KIs', () => {
+    const serviceEntityYaml = kiAutomationGenerationSkill.referencedContent?.find(
+      (ref) => ref.name === 'service-entity-reference-workflow'
+    )?.content;
+
+    expect(serviceEntityYaml).toBeDefined();
+    expect(serviceEntityYaml).toContain('STATS doc_count = COUNT(*) BY `service.name`');
+    expect(serviceEntityYaml).toContain('foreach: "{{ steps.list_services.output.values }}"');
+    expect(serviceEntityYaml).toContain('name: get_existing_ki');
+    expect(serviceEntityYaml).toContain('name: build_ki');
+    expect(serviceEntityYaml).toContain('type: context-engine.createKi');
+    expect(serviceEntityYaml).toContain('type: context-engine.updateKi');
+    expect(serviceEntityYaml).toContain('type: context-engine.verifyKi');
+    expect(serviceEntityYaml).toContain('ai_index_id: "{{ consts.ai_index_id }}"');
+    expect(serviceEntityYaml).toContain('ki_id: "{{ variables.ki_id }}"');
+    expect(serviceEntityYaml).toContain('logs/service/');
+    expect(serviceEntityYaml).toContain('ids:');
+    expect(serviceEntityYaml).toContain('type: entity');
+    expect(serviceEntityYaml).toContain('entity_type: service');
+    expect(serviceEntityYaml).toContain('type: ai.prompt');
+    expect(serviceEntityYaml).not.toContain('type: ai.agent');
+    expect(serviceEntityYaml).not.toContain('type: elasticsearch.index');
+    expect(kiAutomationGenerationSkill.content).toContain('context-engine.createKi');
+    expect(kiAutomationGenerationSkill.content).toContain('context-engine.updateKi');
+    expect(kiAutomationGenerationSkill.content).toContain('context-engine.verifyKi');
+    expect(kiAutomationGenerationSkill.content).toContain('logs/service/<slug>');
   });
 
   it('binds all required registry tools including getConnectors', async () => {
