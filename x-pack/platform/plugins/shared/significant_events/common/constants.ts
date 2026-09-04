@@ -131,3 +131,11 @@ export const DEFAULT_SIG_EVENTS_FLAKY_RULE_EXEMPT_SEVERITY_SCORE = 80;
 export const MIN_SIG_EVENTS_FLAKY_RULE_EXEMPT_SEVERITY_SCORE = 0;
 // 101 means "no rule is exempt" — severity scores top out at 100.
 export const MAX_SIG_EVENTS_FLAKY_RULE_EXEMPT_SEVERITY_SCORE = 101;
+
+/**
+ * Managed Context Engine AI Index used by the independent stream KI extractor.
+ * Dest must use the `ai-index-idx-` prefix; the typed Significant Events KI
+ * data stream cannot be attached as an AI Index dest.
+ */
+export const SIGNIFICANT_EVENTS_AI_INDEX_ID = 'significant-events';
+export const SIGNIFICANT_EVENTS_AI_INDEX_DEST = 'ai-index-idx-significant-events';

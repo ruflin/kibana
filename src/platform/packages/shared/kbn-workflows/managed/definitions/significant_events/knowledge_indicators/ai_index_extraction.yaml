@@ -1,0 +1,336 @@
+# Independent Context Engine KI extraction for Streams.
+#
+# Writes index_metadata / feature / detection Knowledge Indicators into the
+# managed `significant-events` AI Index. Does not touch the Significant Events
+# typed KI store, persistQueries, or alerting.
+#
+# Flow:
+#   get_mapping → sample_docs → log_patterns → stats_distribution
+#     → profile_index_metadata → sink_index_metadata
+#     → profile_features → sink_features
+#     → profile_detections → verify_and_sink_detections
+#
+# Concurrency is keyed per stream so only one run can be active for a given
+# stream; overlapping triggers are dropped.
+
+version: "1"
+name: "Significant Events AI Index extraction"
+enabled: true
+description: "Extracts Context Engine Knowledge Indicators (index metadata, features, detections) from a stream into the significant-events AI Index."
+tags:
+  - observability
+  - streams
+  - knowledge-indicators
+  - ai-index
+settings:
+  timeout: "15m"
+  concurrency:
+    key: "significant-events-ai-index-extraction-{{ inputs.streamName }}"
+    strategy: drop
+    max: 1
+triggers:
+  - type: manual
+    inputs:
+      - name: streamName
+        type: string
+        required: true
+        description: "Target stream name (also the Elasticsearch data stream) to extract KIs from."
+      - name: start
+        type: number
+        description: "Start of the sampling window (epoch ms). Defaults to 24 h ago."
+      - name: end
+        type: number
+        description: "End of the sampling window (epoch ms). Defaults to now."
+consts:
+  ai_index_id: significant-events
+  empty_list: []
+steps:
+  - name: get_mapping
+    type: elasticsearch.request
+    with:
+      method: GET
+      path: "/{{ inputs.streamName }}/_mapping"
+    on-failure:
+      continue: true
+
+  - name: sample_docs
+    type: elasticsearch.request
+    with:
+      method: POST
+      path: "/{{ inputs.streamName }}/_search"
+      body:
+        size: 20
+        query:
+          function_score:
+            query:
+              bool:
+                filter:
+                  - range:
+                      "@timestamp":
+                        gte: '{{ inputs.start | default: "now-24h" }}'
+                        lte: '{{ inputs.end | default: "now" }}'
+            random_score: {}
+            boost_mode: replace
+    on-failure:
+      continue: true
+
+  - name: log_patterns
+    type: elasticsearch.esql.query
+    with:
+      query: |-
+        FROM {{ inputs.streamName }}
+        | WHERE @timestamp >= NOW() - 24 hours
+        | STATS count = COUNT() BY pattern = CATEGORIZE(message)
+        | SORT count DESC
+        | LIMIT 25
+    on-failure:
+      continue: true
+
+  - name: stats_distribution
+    type: elasticsearch.esql.query
+    with:
+      query: |-
+        FROM {{ inputs.streamName }}
+        | WHERE @timestamp >= NOW() - 24 hours
+        | STATS count = COUNT() BY log.level, event.outcome, service.name, host.name, error.type
+        | SORT count DESC
+        | LIMIT 50
+    on-failure:
+      continue: true
+
+  - name: profile_index_metadata
+    type: ai.prompt
+    timeout: 180s
+    with:
+      systemPrompt: |
+        You are a data steward building an INDEX PROFILE Knowledge Indicator for an AI catalog.
+        Downstream, an AI agent uses the profile to decide which stream to query and how to reach live data.
+        Ground everything ONLY in the provided mapping, samples, patterns, and distributions. Never invent fields.
+        If the grounding is empty or unusable, return omit: true and leave the other fields empty.
+        Do not copy literal PII into the output.
+      prompt: |
+        Build one index_metadata Knowledge Indicator for stream `{{ inputs.streamName }}`.
+
+        Elasticsearch mapping (JSON): {{ steps.get_mapping.output | json }}
+        Sample documents (JSON): {{ steps.sample_docs.output.hits.hits | map: '_source' | json }}
+        Message patterns (JSON): {{ steps.log_patterns.output | json }}
+        Field distributions (JSON): {{ steps.stats_distribution.output | json }}
+
+        Access patterns must be valid ES|QL starting with FROM {{ inputs.streamName }}, using real field names only,
+        ending with a small LIMIT, and using parameterized ?param placeholders where values vary.
+      schema:
+        type: object
+        properties:
+          omit:
+            type: boolean
+            description: True when grounding is insufficient to emit a KI.
+          title:
+            type: string
+          description:
+            type: string
+          content:
+            type: string
+            description: Purpose, questions answered, when-to-use, and access patterns as prose.
+          tags:
+            type: array
+            items: { type: string }
+          key_fields:
+            type: array
+            items: { type: string }
+        required: [omit, title, description, content]
+
+  - name: maybe_sink_index_metadata
+    type: if
+    condition: '${{ steps.profile_index_metadata.output.content.omit != true }}'
+    steps:
+      - name: sink_index_metadata
+        type: context-engine.createKi
+        with:
+          ai_index_id: "{{ consts.ai_index_id }}"
+          ki_id: "{{ inputs.streamName }}"
+          ki:
+            type: index_metadata
+            title: "{{ steps.profile_index_metadata.output.content.title }}"
+            description: "{{ steps.profile_index_metadata.output.content.description }}"
+            content: "{{ steps.profile_index_metadata.output.content.content }}"
+            tags: "${{ steps.profile_index_metadata.output.content.tags | default: consts.empty_list }}"
+            attributes:
+              stream_name: "{{ inputs.streamName }}"
+              key_fields: "${{ steps.profile_index_metadata.output.content.key_fields | default: consts.empty_list }}"
+
+  - name: profile_features
+    type: ai.prompt
+    timeout: 180s
+    with:
+      systemPrompt: |
+        You extract feature Knowledge Indicators for observability streams.
+        A feature KI is a lightweight inventory signal: what entities, dependencies, technologies, or schema shapes this stream contains.
+        Ground every feature in the mapping, samples, patterns, and distributions. Never invent field names or entities.
+        Confidence 0.9-1.0 explicit evidence; 0.7-0.89 strong pattern; 0.5-0.69 some ambiguity; below 0.3 do not emit.
+        Emit at most 15 features. Prefer the coarsest granularity that still answers a class of questions.
+        slug must be a stable lowercase hyphenated natural key.
+      prompt: |
+        Extract feature Knowledge Indicators for stream `{{ inputs.streamName }}`.
+
+        Elasticsearch mapping (JSON): {{ steps.get_mapping.output | json }}
+        Sample documents (JSON): {{ steps.sample_docs.output.hits.hits | map: '_source' | json }}
+        Message patterns (JSON): {{ steps.log_patterns.output | json }}
+        Field distributions (JSON): {{ steps.stats_distribution.output | json }}
+
+        Each feature content must include when-to-use guidance as prose. Repeat subtype, slug, and evidence in the content as well as structured fields.
+      schema:
+        type: object
+        properties:
+          features:
+            type: array
+            items:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                content:
+                  type: string
+                subtype:
+                  type: string
+                  description: e.g. entity, dependency, technology, schema
+                slug:
+                  type: string
+                confidence:
+                  type: number
+                evidence:
+                  type: array
+                  items: { type: string }
+                evidence_doc_ids:
+                  type: array
+                  items: { type: string }
+                tags:
+                  type: array
+                  items: { type: string }
+              required: [title, description, content, subtype, slug, confidence]
+        required: [features]
+
+  - name: sink_features
+    type: foreach
+    foreach: '${{ steps.profile_features.output.content.features | default: consts.empty_list }}'
+    iteration-on-failure:
+      continue: true
+    steps:
+      - name: sink_feature
+        type: context-engine.createKi
+        with:
+          ai_index_id: "{{ consts.ai_index_id }}"
+          ki_id: "{{ inputs.streamName }}/{{ foreach.item.slug }}"
+          ki:
+            type: feature
+            title: "{{ foreach.item.title }}"
+            description: "{{ foreach.item.description }}"
+            content: "{{ foreach.item.content }}"
+            tags: "${{ foreach.item.tags | default: consts.empty_list }}"
+            attributes:
+              stream_name: "{{ inputs.streamName }}"
+              subtype: "{{ foreach.item.subtype }}"
+              slug: "{{ foreach.item.slug }}"
+              confidence: "${{ foreach.item.confidence }}"
+              evidence: "${{ foreach.item.evidence | default: consts.empty_list }}"
+              evidence_doc_ids: "${{ foreach.item.evidence_doc_ids | default: consts.empty_list }}"
+
+  - name: profile_detections
+    type: ai.prompt
+    timeout: 180s
+    with:
+      systemPrompt: |
+        You extract detection Knowledge Indicators for observability streams.
+        Each detection is a named, complete, runnable ES|QL condition — not a template.
+        Ground every threshold and field name in the provided distributions and patterns. Never invent numbers.
+        Precision over recall: prefer zero firings to false positives. Include a sample-floor on ratio denominators (e.g. WHERE total > 20).
+        At most 3 detections. At most one STATS detection per distinct failure dimension.
+        Derive nothing about query_type; the workflow will classify match vs stats from the ES|QL.
+        slug must be a stable lowercase hyphenated form of the title.
+        description must state the threshold and its baseline rationale.
+      prompt: |
+        Extract detection Knowledge Indicators for stream `{{ inputs.streamName }}`.
+
+        Elasticsearch mapping (JSON): {{ steps.get_mapping.output | json }}
+        Sample documents (JSON): {{ steps.sample_docs.output.hits.hits | map: '_source' | json }}
+        Message patterns (JSON): {{ steps.log_patterns.output | json }}
+        Field distributions (JSON): {{ steps.stats_distribution.output | json }}
+
+        Each esql MUST start with `FROM {{ inputs.streamName }}` and use only real field names.
+        Put the full query in both `esql` and `content` (as a materialized access pattern).
+      schema:
+        type: object
+        properties:
+          detections:
+            type: array
+            items:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                content:
+                  type: string
+                esql:
+                  type: string
+                slug:
+                  type: string
+                severity_score:
+                  type: number
+                confidence:
+                  type: number
+                evidence:
+                  type: array
+                  items: { type: string }
+                tags:
+                  type: array
+                  items: { type: string }
+              required: [title, description, content, esql, slug, severity_score, confidence]
+        required: [detections]
+
+  - name: sink_detections
+    type: foreach
+    foreach: '${{ steps.profile_detections.output.content.detections | default: consts.empty_list }}'
+    iteration-on-failure:
+      continue: true
+    steps:
+      - name: derive_query_type
+        type: data.set
+        with:
+          query_type: '{% if foreach.item.esql contains "STATS" %}stats{% else %}match{% endif %}'
+
+      - name: verify_detection
+        type: context-engine.verifyKi
+        with:
+          ki:
+            type: detection
+            title: "{{ foreach.item.title }}"
+            attributes:
+              esql: "{{ foreach.item.esql }}"
+        on-failure:
+          continue: true
+
+      - name: maybe_sink_detection
+        type: if
+        condition: '${{ steps.verify_detection.output.passed == true }}'
+        steps:
+          - name: sink_detection
+            type: context-engine.createKi
+            with:
+              ai_index_id: "{{ consts.ai_index_id }}"
+              ki_id: "{{ inputs.streamName }}/{{ foreach.item.slug }}"
+              ki:
+                type: detection
+                title: "{{ foreach.item.title }}"
+                description: "{{ foreach.item.description }}"
+                content: "{{ foreach.item.content }}"
+                tags: "${{ foreach.item.tags | default: consts.empty_list }}"
+                attributes:
+                  stream_name: "{{ inputs.streamName }}"
+                  esql: "{{ foreach.item.esql }}"
+                  query_type: "{{ steps.derive_query_type.output.query_type }}"
+                  severity_score: "${{ foreach.item.severity_score }}"
+                  confidence: "${{ foreach.item.confidence }}"
+                  evidence: "${{ foreach.item.evidence | default: consts.empty_list }}"

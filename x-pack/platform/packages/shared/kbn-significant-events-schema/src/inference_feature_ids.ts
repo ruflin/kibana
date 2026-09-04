@@ -16,6 +16,10 @@ export const SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID =
 export const SIGNIFICANT_EVENTS_KI_QUERY_GENERATION_INFERENCE_FEATURE_ID =
   'significant_events_ki_query_generation' as const;
 
+/** Independent Context Engine AI Index extraction from Streams. */
+export const SIGNIFICANT_EVENTS_AI_INDEX_EXTRACTION_INFERENCE_FEATURE_ID =
+  'significant_events_ai_index_extraction' as const;
+
 /** Discovery and significant event generation. */
 export const SIGNIFICANT_EVENTS_DISCOVERY_INFERENCE_FEATURE_ID =
   'significant_events_discovery' as const;

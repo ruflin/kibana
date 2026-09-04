@@ -60,6 +60,8 @@ import { registerSignificantEventsSkills } from './agent_builder/skills/register
 import { registerAgentBuilderSmlTypes } from './agent_builder/sml/register_sml_types';
 import { registerStreamsMemoryAgentBuilder } from './memory_and_investigation/skills/memory/register';
 import { registerSignificantEventsInferenceFeatures } from './register_significant_events_inference_features';
+import { registerSignificantEventsAiIndex } from './lib/ai_index/register_ai_index';
+import { ensureSignificantEventsAiIndexDest } from './lib/ai_index/ensure_dest';
 import {
   createContinuousKiOnboardingWorkflowService,
   type ContinuousKiOnboardingWorkflowService,
@@ -137,6 +139,8 @@ export class SignificantEventsPlugin
       plugins.searchInferenceEndpoints,
       this.logger.get('inference-features')
     );
+
+    registerSignificantEventsAiIndex(plugins.contextEngine);
 
     const significantEventsServices = createSignificantEventsServices();
     const knowledgeIndicatorService = new KnowledgeIndicatorService(core, this.logger);
@@ -568,6 +572,10 @@ export class SignificantEventsPlugin
       {
         name: 'knowledge indicators template',
         run: initializeKnowledgeIndicatorsTemplate({ esClient, logger: this.logger }),
+      },
+      {
+        name: 'AI index dest',
+        run: ensureSignificantEventsAiIndexDest({ esClient, logger: this.logger }),
       },
     ];
 

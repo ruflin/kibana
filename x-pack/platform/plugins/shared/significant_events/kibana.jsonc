@@ -30,7 +30,8 @@
       "searchInferenceEndpoints",
       "spaces",
       "workflowsExtensions",
-      "workflowsManagement"
+      "workflowsManagement",
+      "contextEngine"
     ],
     "requiredBundles": [],
     "extraPublicDirs": ["common"]
