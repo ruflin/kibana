@@ -27,6 +27,18 @@ import { ID, KI_TYPE_FEATURE, STREAM_NAME, TYPE } from '../fields';
 
 export const REVISION_SIZE_LIMIT = 10_000;
 
+const toIsoTimestamp = (value: unknown): string | null => {
+  if (typeof value === 'string' && value.length > 0) {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  return null;
+};
+
 export class RevisionReader {
   constructor(private readonly esClient: ElasticsearchClient, private readonly logger: Logger) {}
 
@@ -52,6 +64,32 @@ export class RevisionReader {
 
     const { hits } = await executeAndDecodeSource<StoredKnowledgeIndicator>(this.esClient, query);
     return hits;
+  }
+
+  /**
+   * Returns the max `@timestamp` among latest-per-group revisions that satisfy
+   * `postGroupingWhere`, without fetching `_source`. `pickLatestPerGroup` still
+   * needs `_id` as a tie-break, so the FROM clause requests that metadata only.
+   *
+   * An empty set, a missing data stream, or a null aggregate all return `null`.
+   */
+  async fetchMaxTimestamp(
+    where?: LatestSourceWhereCondition,
+    postGroupingWhere?: LatestSourceWhereCondition
+  ): Promise<string | null> {
+    let query = esql.from([KNOWLEDGE_INDICATORS_DATA_STREAM], ['_id']);
+    query = withWhere(query, where);
+    query = pickLatestPerGroup(query, ['stream.name', 'type', 'id']);
+    query = withWhere(query, postGroupingWhere);
+    query = query.pipe`STATS latest = MAX(@timestamp)`.keep('latest');
+
+    const response = await runEsqlQuery(this.esClient, query.print('basic'));
+    if (!response || response.values.length === 0) {
+      return null;
+    }
+
+    const rows = esqlToObjects<{ latest?: unknown }>(response);
+    return toIsoTimestamp(rows[0]?.latest);
   }
 
   /**
