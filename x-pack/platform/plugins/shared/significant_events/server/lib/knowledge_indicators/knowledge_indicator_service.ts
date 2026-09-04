@@ -27,6 +27,7 @@ import {
   KnowledgeIndicatorClient,
   type KnowledgeIndicatorDataStreamClient,
 } from './knowledge_indicator_client';
+import { createAiIndexWriter } from './ai_index';
 import type { SignificantEventsAlertingContext } from '../significant_events/alerting/significant_events_alerting_context';
 
 export class KnowledgeIndicatorService {
@@ -68,6 +69,10 @@ export class KnowledgeIndicatorService {
         esClient,
         soClient,
         logger: this.logger.get('knowledge_indicators'),
+        aiIndexWriter: createAiIndexWriter({
+          esClient,
+          logger: this.logger.get('knowledge_indicators.ai_index'),
+        }),
       },
       significantEventsAvailable,
       context,

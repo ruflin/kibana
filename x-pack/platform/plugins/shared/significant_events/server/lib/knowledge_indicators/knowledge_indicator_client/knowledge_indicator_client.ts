@@ -60,7 +60,8 @@ export class KnowledgeIndicatorClient {
       deps.dataStreamClient,
       deps.logger,
       revisionReader,
-      config.feature_ttl_days
+      config.feature_ttl_days,
+      deps.aiIndexWriter
     );
     this.reader = new IndicatorReader(revisionReader);
     this.searcher = new IndicatorSearcher(deps.esClient, deps.logger, config, revisionReader);
