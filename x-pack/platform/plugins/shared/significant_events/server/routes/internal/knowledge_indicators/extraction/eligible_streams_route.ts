@@ -122,24 +122,19 @@ const eligibleStreamsRoute = createServerRoute({
     const maxStreams = query.maxScheduledStreams ?? MAX_SCHEDULED_STREAMS;
     const lookbackHours = query.lookbackHours ?? DEFAULT_LOOKBACK_HOURS;
 
-    const [
-      connectorId,
-      executions,
-      allStreams,
-      isQueryStreamsEnabled,
-      userProvidedSettings,
-    ] = await Promise.all([
-      resolveConnectorForFeature({
-        searchInferenceEndpoints: server.searchInferenceEndpoints,
-        featureId: SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID,
-        featureName: 'knowledge indicator extraction',
-        request,
-      }),
-      streamsKIsOnboardingClient.getRecentExecutions(),
-      streamsClient.listStreams(),
-      uiSettingsClient.get<boolean>(OBSERVABILITY_STREAMS_ENABLE_QUERY_STREAMS),
-      uiSettingsClient.getUserProvided(),
-    ]);
+    const [connectorId, executions, allStreams, isQueryStreamsEnabled, userProvidedSettings] =
+      await Promise.all([
+        resolveConnectorForFeature({
+          searchInferenceEndpoints: server.searchInferenceEndpoints,
+          featureId: SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID,
+          featureName: 'knowledge indicator extraction',
+          request,
+        }),
+        streamsKIsOnboardingClient.getRecentExecutions(),
+        streamsClient.listStreams(),
+        uiSettingsClient.get<boolean>(OBSERVABILITY_STREAMS_ENABLE_QUERY_STREAMS),
+        uiSettingsClient.getUserProvided(),
+      ]);
 
     const enabledStreamsUserValue =
       userProvidedSettings[OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_ENABLED_STREAMS]?.userValue;
