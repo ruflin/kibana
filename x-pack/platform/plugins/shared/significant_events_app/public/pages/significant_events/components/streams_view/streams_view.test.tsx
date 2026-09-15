@@ -57,7 +57,11 @@ describe('StreamsView', () => {
     render(<StreamsView />);
 
     expect(screen.getByText('Add Data Source')).toBeInTheDocument();
-    expect(screen.queryByTestId('significant_events_generate_split_button')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('significant_events_onboard_streams_button')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('significant_events_generate_split_button')
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('significant_events_onboard_streams_button')
+    ).not.toBeInTheDocument();
   });
 });

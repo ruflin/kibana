@@ -23,9 +23,7 @@ const isStringArray = (value: unknown): value is string[] =>
  * Parses the Nightshift Data Sources enabled-streams uiSetting.
  * Unset / blank means the allowlist has not been written yet.
  */
-export const parseEnabledStreamsSetting = (
-  rawValue: string | undefined
-): EnabledStreamsSetting => {
+export const parseEnabledStreamsSetting = (rawValue: string | undefined): EnabledStreamsSetting => {
   if (rawValue === undefined) {
     return { configured: false, streamNames: [] };
   }

@@ -28,12 +28,12 @@ import {
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_SCHEDULED_DISCOVERY_FLAKY_RULE_EXEMPT_SEVERITY_SCORE,
 } from '@kbn/management-settings-ids';
 import { DEFAULT_INDEX_PATTERNS } from '@kbn/streams-schema';
-import { ENABLED_STREAMS_SETTING_MAX_LENGTH } from '../common/enabled_streams';
 import {
   DEFAULT_SIGNIFICANT_EVENTS_TUNING_CONFIG,
   SIGNIFICANT_EVENTS_TUNING_FIELD_BOUNDS,
   validateSignificantEventsTuningConfig,
 } from '@kbn/significant-events-schema';
+import { ENABLED_STREAMS_SETTING_MAX_LENGTH } from '../common/enabled_streams';
 import type { SignificantEventsPluginStartDependencies } from './types';
 import { isObservabilityDeployment } from './routes/utils/assert_significant_events_access';
 import { SIGNIFICANT_EVENTS_TIERED_FEATURE } from '../common';

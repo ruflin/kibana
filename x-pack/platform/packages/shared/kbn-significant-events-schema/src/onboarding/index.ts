@@ -54,8 +54,6 @@ export const KIS_ONBOARDING_IN_PROGRESS_STATUSES: ReadonlySet<SignificantEventsW
   ]);
 
 /** Statuses that mean a stream has been turned on for Nightshift / KI extraction. */
-export const isKiOnboardingEnabledStatus = (
-  status: SignificantEventsWorkflowStatus
-): boolean =>
+export const isKiOnboardingEnabledStatus = (status: SignificantEventsWorkflowStatus): boolean =>
   status !== SignificantEventsWorkflowStatus.NotStarted &&
   status !== SignificantEventsWorkflowStatus.Canceled;
