@@ -157,3 +157,122 @@ export const CREATE_QUERY_STREAM_QUERY_REQUIRED = i18n.translate(
     defaultMessage: 'Query is required',
   }
 );
+
+export const ADD_SELECT_DATA_STREAMS_MENU_ITEM_LABEL = i18n.translate(
+  'xpack.significantEventsApp.streamsView.addSelectDataStreamsMenuItemLabel',
+  {
+    defaultMessage: 'Select data streams',
+  }
+);
+
+export const SELECT_DATA_STREAMS_FLYOUT_TITLE = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsFlyoutTitle',
+  {
+    defaultMessage: 'Select data streams',
+  }
+);
+
+export const SELECT_DATA_STREAMS_DESCRIPTION = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsDescription',
+  {
+    defaultMessage:
+      'Choose existing data streams. Saving creates a query stream that reads from those sources.',
+  }
+);
+
+export const SELECT_DATA_STREAMS_LOGS_AND_METRICS_TAB = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsLogsAndMetricsTab',
+  {
+    defaultMessage: 'Logs & Metrics',
+  }
+);
+
+export const SELECT_DATA_STREAMS_OTHER_TAB = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsOtherTab',
+  {
+    defaultMessage: 'Other',
+  }
+);
+
+export const SELECT_DATA_STREAMS_SAVE_LABEL = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsSaveButtonLabel',
+  {
+    defaultMessage: 'Save',
+  }
+);
+
+export const SELECT_DATA_STREAMS_SELECTION_REQUIRED = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsSelectionRequiredErrorMessage',
+  {
+    defaultMessage: 'Select at least one data stream',
+  }
+);
+
+export const SELECT_DATA_STREAMS_EMPTY_MESSAGE = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsEmptyMessage',
+  {
+    defaultMessage: 'No data streams found.',
+  }
+);
+
+export const SELECT_DATA_STREAMS_SEARCH_PLACEHOLDER = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsSearchPlaceholder',
+  {
+    defaultMessage: 'Search data streams',
+  }
+);
+
+export const SELECT_DATA_STREAMS_NAME_COLUMN = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsNameColumnHeader',
+  {
+    defaultMessage: 'Data stream',
+  }
+);
+
+export const SELECT_DATA_STREAMS_TYPE_COLUMN = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsTypeColumnHeader',
+  {
+    defaultMessage: 'Type',
+  }
+);
+
+export const SELECT_DATA_STREAMS_TYPE_LOGS = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsTypeLogsLabel',
+  {
+    defaultMessage: 'Logs',
+  }
+);
+
+export const SELECT_DATA_STREAMS_TYPE_METRICS = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsTypeMetricsLabel',
+  {
+    defaultMessage: 'Metrics',
+  }
+);
+
+export const SELECT_DATA_STREAMS_TYPE_OTHER = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsTypeOtherLabel',
+  {
+    defaultMessage: 'Other',
+  }
+);
+
+export const SELECT_DATA_STREAMS_TABLE_CAPTION = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsTableCaptionAriaLabel',
+  {
+    defaultMessage: 'Existing data streams',
+  }
+);
+
+export const SELECT_DATA_STREAMS_LOAD_ERROR_TITLE = i18n.translate(
+  'xpack.significantEventsApp.streamsView.selectDataStreamsLoadErrorTitle',
+  {
+    defaultMessage: 'Could not load data streams',
+  }
+);
+
+export const getSelectDataStreamsSelectedCountLabel = (count: number): string =>
+  i18n.translate('xpack.significantEventsApp.streamsView.selectDataStreamsSelectedCountLabel', {
+    defaultMessage: '{count, plural, one {# data stream selected} other {# data streams selected}}',
+    values: { count },
+  });

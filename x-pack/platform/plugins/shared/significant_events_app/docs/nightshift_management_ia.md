@@ -213,16 +213,45 @@ Data Sources is `StreamsView`.
 **Removed from this tab:** Find Significant Events.
 
 **Add Data Source** (`significantEventsAddDataSourceButton`) opens a popover
-(`Add Data Source` → **Query stream**). Choosing Query stream opens
-**Create query stream** flyout (`CreateQueryStreamFlyout`).
+with two sentence-case items:
 
-Create flow:
+1. **Query stream** (`significantEventsAddQueryStreamMenuItem`) — create from
+   scratch.
+2. **Select data streams** (`significantEventsSelectDataStreamsMenuItem`) —
+   pick existing Elasticsearch data streams, then Save builds a query stream.
+
+### Query stream (create from scratch)
+
+Choosing Query stream opens **Create query stream**
+(`CreateQueryStreamFlyout`).
 
 1. Name (max 255) and ES\|QL query (max 10_000).
 2. `streamsRepositoryClient.fetch('PUT /api/streams/{name}/_query 2023-10-31', { params: { path: { name }, body: { query: { esql } } } })`.
 3. Invalidate `STREAM_LIST_QUERY_KEY` (`['streamList']` from
    `use_fetch_streams.ts`).
-4. Success toast “Query stream created”; flyout closes.
+4. Success toast “Query stream created”; flyout closes. Newly created query
+   streams are **not** auto-enabled.
+
+### Select data streams
+
+Choosing Select data streams opens **Select data streams**
+(`SelectDataStreamsFlyout`). Dataset Quality / Fleet split data streams by
+signal type (`logs`, `metrics`, `traces`, `synthetics`). This flyout reuses
+that split as a **Logs & Metrics** tab (plus **Other** when traces,
+synthetics, or custom names exist). The picker lists Elasticsearch data
+streams from `data.dataViews.getIndices` (data-stream tagged matches), not a
+new table of Kibana Streams.
+
+1. Name (max 255; same stream-name field as the create-from-scratch flyout)
+   and one or more selected data streams. Save requires both.
+2. Build ES\|QL `FROM` over the selected names (hyphenated names are quoted),
+   e.g. `FROM "logs-nginx-default", "metrics-system.cpu-default"`.
+3. Same create API as Query stream:
+   `PUT /api/streams/{name}/_query 2023-10-31` with
+   `{ query: { esql } }`.
+4. Invalidate `STREAM_LIST_QUERY_KEY`, success toast “Query stream created”,
+   flyout closes. Errors stay in the flyout (danger toast) and do not
+   auto-enable the new stream.
 
 **Per-row Enabled toggle** (`significantEventsStreamEnabledSwitch-<streamName>`):
 classic and query streams both get an EUI switch. Turning a stream **on**
@@ -391,6 +420,9 @@ noted.
 | Enabled allowlist persist + KI start/cancel | `public/pages/significant_events/hooks/use_nightshift_stream_enabled.ts` |
 | Add Data Source popover | `public/pages/significant_events/components/streams_view/add_data_source_button.tsx` |
 | Create query stream flyout + PUT | `public/pages/significant_events/components/streams_view/create_query_stream_flyout.tsx` |
+| Select data streams flyout | `public/pages/significant_events/components/streams_view/select_data_streams_flyout.tsx` |
+| ES data stream list (`getIndices`) | `public/pages/significant_events/components/streams_view/use_fetch_elasticsearch_data_streams.ts` |
+| Query-stream ES\|QL from selected data streams | `public/pages/significant_events/components/streams_view/build_query_stream_from_data_streams.ts` |
 | Stream list query key | `public/pages/significant_events/hooks/use_fetch_streams.ts` |
 | Generate split button (KI table only) | `public/pages/significant_events/components/shared/generate_split_button.tsx` |
 | Enabled-streams setting parse | `../significant_events/common/enabled_streams.ts` |
@@ -432,7 +464,8 @@ Sources (query streams plus the per-row Enabled toggle).
 | `public/pages/significant_events/components/management_sub_tabs.test.tsx` | `extra` slot sits outside the tab list |
 | `public/pages/significant_events/components/significant_events_sub_tabs_chrome.test.tsx` | Find Significant Events on SE chrome (`significant_events_discovery_button`) |
 | `public/pages/significant_events/components/significant_events_tab/significant_events_tab.test.tsx` | Discovery button absent from Events toolbar |
-| `public/pages/significant_events/components/streams_view/add_data_source_button.test.tsx` | Add Data Source → Query stream → PUT `/api/streams/{name}/_query 2023-10-31` |
+| `public/pages/significant_events/components/streams_view/add_data_source_button.test.tsx` | Add Data Source → Query stream and Select data streams → PUT `/api/streams/{name}/_query 2023-10-31` |
+| `public/pages/significant_events/components/streams_view/build_query_stream_from_data_streams.test.ts` | Logs/metrics classification and `FROM` clause quoting |
 | `public/pages/significant_events/components/streams_view/streams_view.test.tsx` | Generate absent from Data Sources chrome |
 | `public/pages/significant_events/hooks/use_nightshift_stream_enabled.test.tsx` | Allowlist persist, seed from onboarding, enable starts extraction, disable cancels |
 | `public/pages/significant_events/components/knowledge_indicators_table/generate_topology_button.test.tsx` | Prompt uses existing KIs, injects stream names, no onboarding |

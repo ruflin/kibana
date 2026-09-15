@@ -9,23 +9,32 @@ import { EuiButton, EuiContextMenu, EuiPopover } from '@elastic/eui';
 import { useBoolean } from '@kbn/react-hooks';
 import React, { useCallback, useMemo, useState } from 'react';
 import { CreateQueryStreamFlyout } from './create_query_stream_flyout';
+import { SelectDataStreamsFlyout } from './select_data_streams_flyout';
 import {
   ADD_DATA_SOURCE_BUTTON_LABEL,
   ADD_DATA_SOURCE_POPOVER_ARIA_LABEL,
   ADD_QUERY_STREAM_MENU_ITEM_LABEL,
+  ADD_SELECT_DATA_STREAMS_MENU_ITEM_LABEL,
 } from './translations';
+
+type OpenFlyout = 'queryStream' | 'selectDataStreams' | null;
 
 export function AddDataSourceButton() {
   const [isPopoverOpen, { off: closePopover, toggle: togglePopover }] = useBoolean(false);
-  const [isQueryStreamFlyoutOpen, setIsQueryStreamFlyoutOpen] = useState(false);
+  const [openFlyout, setOpenFlyout] = useState<OpenFlyout>(null);
 
   const openQueryStreamFlyout = useCallback(() => {
     closePopover();
-    setIsQueryStreamFlyoutOpen(true);
+    setOpenFlyout('queryStream');
   }, [closePopover]);
 
-  const closeQueryStreamFlyout = useCallback(() => {
-    setIsQueryStreamFlyoutOpen(false);
+  const openSelectDataStreamsFlyout = useCallback(() => {
+    closePopover();
+    setOpenFlyout('selectDataStreams');
+  }, [closePopover]);
+
+  const closeFlyout = useCallback(() => {
+    setOpenFlyout(null);
   }, []);
 
   const panels = useMemo(
@@ -39,10 +48,16 @@ export function AddDataSourceButton() {
             onClick: openQueryStreamFlyout,
             'data-test-subj': 'significantEventsAddQueryStreamMenuItem',
           },
+          {
+            name: ADD_SELECT_DATA_STREAMS_MENU_ITEM_LABEL,
+            icon: 'indexOpen',
+            onClick: openSelectDataStreamsFlyout,
+            'data-test-subj': 'significantEventsSelectDataStreamsMenuItem',
+          },
         ],
       },
     ],
-    [openQueryStreamFlyout]
+    [openQueryStreamFlyout, openSelectDataStreamsFlyout]
   );
 
   return (
@@ -66,7 +81,8 @@ export function AddDataSourceButton() {
       >
         <EuiContextMenu initialPanelId={0} panels={panels} />
       </EuiPopover>
-      {isQueryStreamFlyoutOpen && <CreateQueryStreamFlyout onClose={closeQueryStreamFlyout} />}
+      {openFlyout === 'queryStream' && <CreateQueryStreamFlyout onClose={closeFlyout} />}
+      {openFlyout === 'selectDataStreams' && <SelectDataStreamsFlyout onClose={closeFlyout} />}
     </>
   );
 }
