@@ -30,7 +30,7 @@ Overview.
 | --- | --- | --- |
 | **Nightshift** | `/app/nightshift` | Daily product. Operators start here: investigations, severity, “show all events”. |
 | **Nightshift Management** | `/app/significant_events` | Setup and review: data sources, knowledge indicators, events/rules/detections, memory. |
-| **Settings** | `/app/significant_events/settings` | Operational controls: pause, run limits, index patterns, tuning, apps, cleanup. **Not a management tab.** |
+| **Settings** | `/app/significant_events/settings` | Operational controls: pause, run limits, tuning, apps, cleanup. **Not a management tab.** |
 
 Settings is a header-menu sibling of the management chrome, not a fifth tab.
 Opening Settings hides the four management tabs and swaps the header action from
@@ -234,7 +234,7 @@ queries generation via `POST /internal/streams/{streamName}/onboarding/_execute`
 cancels an in-flight onboarding job (`action: cancel`) so continuous extraction
 does not pick it up again.
 
-The allowlist is space-scoped uiSettings (same store as index patterns), not a
+The allowlist is space-scoped uiSettings, not a
 new saved-object type. Until the user first toggles a stream, the switch is
 seeded from KI onboarding status (`completed` / `in_progress` / `failed` /
 `being_canceled` = on; `not_started` / `canceled` = off) so already-onboarded
@@ -417,12 +417,11 @@ noted.
 | Events list (no Find Significant Events) | `public/pages/significant_events/components/significant_events_tab/index.tsx` |
 | Rules + proposals | `public/pages/significant_events/components/queries_table/queries_table.tsx`, `rules_proposals_section.tsx` |
 | Detections list | `public/pages/significant_events/components/detections_tab/index.tsx` |
-| Settings (pause, limits, index patterns, tuning) | `public/pages/significant_events/components/settings/tab.tsx` |
+| Settings (pause, limits, tuning) | `public/pages/significant_events/components/settings/tab.tsx` |
 | Settings pause | `public/pages/significant_events/components/settings/maintenance_section.tsx` |
 
-The Settings heading previously labeled **Data sources** is **Index patterns**.
-That section matches streams for feature detection; it is not the Data Sources
-management tab.
+Index-pattern allowlists were removed. Streams enter Nightshift through Data
+Sources (query streams plus the per-row Enabled toggle).
 
 ### Tests covering this IA
 
@@ -470,3 +469,4 @@ management tab.
 - It does not make the topology map an Agent Builder attachment, Nightshift
   flyout, or dashboard embeddable in this change.
 - It does not auto-promote rules or invent a stored topology-graph KI type.
+- It does not keep Settings index-pattern allowlists.
