@@ -19,6 +19,7 @@ import {
 } from '@elastic/eui';
 import { css } from '@emotion/react';
 import type { KnowledgeIndicator } from '@kbn/nightshift-ai';
+import type { TopologyNode } from '@kbn/significant-events-schema';
 import type { Streams } from '@kbn/streams-schema';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAIFeatures } from '../../../../hooks/use_ai_features';
@@ -36,8 +37,8 @@ import { useKiGeneration } from './ki_generation_context';
 import { useKnowledgeIndicatorsTable } from './use_knowledge_indicators_table';
 import { useKnowledgeIndicatorsColumns } from './use_knowledge_indicators_columns';
 import { KnowledgeIndicatorsToolbar } from './knowledge_indicators_toolbar';
+import { TopologyMapAccordion } from '../../../../components/knowledge_indicators/topology_map';
 import { GenerateTopologyButton } from './generate_topology_button';
-import { TopologyMapStub } from './topology_map_stub';
 import type { KnowledgeIndicatorView } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_view';
 import {
   TABLE_CAPTION,
@@ -185,6 +186,19 @@ export function KnowledgeIndicatorsTable({ view }: { view: KnowledgeIndicatorVie
     setKnowledgeIndicatorsToDelete,
   });
 
+  const handleTopologyNodeClick = useCallback(
+    (node: TopologyNode) => {
+      const ki = filteredKnowledgeIndicators.find(
+        (item) => item.kind === 'feature' && item.feature.uuid === node.id
+      );
+      if (!ki) {
+        return;
+      }
+      selectKnowledgeIndicator(ki);
+    },
+    [filteredKnowledgeIndicators, selectKnowledgeIndicator]
+  );
+
   const generationRow = (
     <EuiFlexGroup gutterSize="s" alignItems="center" responsive={false} css={{ width: '100%' }}>
       <EuiFlexItem css={{ minWidth: 0 }}>
@@ -217,7 +231,7 @@ export function KnowledgeIndicatorsTable({ view }: { view: KnowledgeIndicatorVie
       </EuiFlexItem>
       {view === 'topology' && (
         <EuiFlexItem grow={false}>
-          <GenerateTopologyButton />
+          <GenerateTopologyButton selectedStreamNames={selectedStreams} />
         </EuiFlexItem>
       )}
     </EuiFlexGroup>
@@ -272,7 +286,12 @@ export function KnowledgeIndicatorsTable({ view }: { view: KnowledgeIndicatorVie
       {view === 'topology' && (
         <>
           <EuiSpacer size="m" />
-          <TopologyMapStub knowledgeIndicators={filteredKnowledgeIndicators} />
+          <TopologyMapAccordion
+            knowledgeIndicators={filteredKnowledgeIndicators}
+            isLoading={isLoading}
+            selectedNodeId={selectedKnowledgeIndicatorId}
+            onNodeClick={handleTopologyNodeClick}
+          />
         </>
       )}
       <EuiSpacer size="m" />

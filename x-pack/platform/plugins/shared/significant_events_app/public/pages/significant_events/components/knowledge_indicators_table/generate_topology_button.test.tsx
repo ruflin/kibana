@@ -8,7 +8,10 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { GenerateTopologyButton } from './generate_topology_button';
-import { GENERATE_TOPOLOGY_INITIAL_MESSAGE } from './translations';
+import {
+  GENERATE_TOPOLOGY_INITIAL_MESSAGE,
+  getGenerateTopologyInitialMessage,
+} from './translations';
 
 const mockOpenChat = jest.fn();
 let mockAgentBuilder: { openChat: typeof mockOpenChat } | undefined = { openChat: mockOpenChat };
@@ -46,7 +49,7 @@ describe('GenerateTopologyButton', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('opens a new chat using existing knowledge indicators as the source', () => {
+  it('opens a new chat and tells the agent no streams are selected', () => {
     render(<GenerateTopologyButton />);
     fireEvent.click(screen.getByTestId('significantEventsGenerateTopologyButton'));
 
@@ -55,8 +58,27 @@ describe('GenerateTopologyButton', () => {
       initialMessage: GENERATE_TOPOLOGY_INITIAL_MESSAGE,
       autoSendInitialMessage: true,
     });
-    expect(GENERATE_TOPOLOGY_INITIAL_MESSAGE).toMatch(/existing knowledge indicators/i);
+    expect(GENERATE_TOPOLOGY_INITIAL_MESSAGE).toMatch(/No streams are currently selected/i);
+    expect(GENERATE_TOPOLOGY_INITIAL_MESSAGE).toMatch(/Search existing knowledge indicators/i);
     expect(GENERATE_TOPOLOGY_INITIAL_MESSAGE).toMatch(/Do not run feature identification/i);
+    expect(GENERATE_TOPOLOGY_INITIAL_MESSAGE).toMatch(/stream onboarding/i);
+  });
+
+  it('injects selected stream names into the prompt', () => {
+    const selectedStreamNames = ['logs.claims', 'logs.payments'];
+    render(<GenerateTopologyButton selectedStreamNames={selectedStreamNames} />);
+    fireEvent.click(screen.getByTestId('significantEventsGenerateTopologyButton'));
+
+    const initialMessage = getGenerateTopologyInitialMessage(selectedStreamNames);
+    expect(mockOpenChat).toHaveBeenCalledWith({
+      newConversation: true,
+      initialMessage,
+      autoSendInitialMessage: true,
+    });
+    expect(initialMessage).toContain('logs.claims, logs.payments');
+    expect(initialMessage).toMatch(/existing knowledge indicators/i);
+    expect(initialMessage).toMatch(/Do not run feature identification/i);
+    expect(initialMessage).not.toMatch(/No streams are currently selected/i);
   });
 
   it('disables while new activity is blocked', () => {

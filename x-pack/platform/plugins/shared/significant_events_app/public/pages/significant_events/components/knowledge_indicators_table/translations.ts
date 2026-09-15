@@ -245,50 +245,21 @@ export const GENERATE_TOPOLOGY_INITIAL_MESSAGE = i18n.translate(
   'xpack.significantEventsApp.knowledgeIndicators.generateTopologyInitialMessage',
   {
     defaultMessage:
-      'Read the existing knowledge indicators for this system using the knowledge-indicator management and search skills. Do not run feature identification or stream onboarding. Using those existing knowledge indicators as the source of truth, generate or update the system topology: entities, technologies, infrastructure, and dependencies. Summarise what you find, fill relationship gaps that the knowledge indicators already imply, and ask before creating new knowledge indicators that are not already supported by existing ones.',
+      'No streams are currently selected in the knowledge indicators filter. Search existing knowledge indicators across accessible streams using the knowledge-indicator management and search skills. Do not run feature identification or stream onboarding. Using those existing knowledge indicators as the source of truth, generate or update the system topology: entities, technologies, infrastructure, and dependencies. Summarise what you find, fill relationship gaps that the knowledge indicators already imply, and ask before creating new knowledge indicators that are not already supported by existing ones.',
   }
 );
 
-export const TOPOLOGY_MAP_TITLE = i18n.translate(
-  'xpack.significantEventsApp.knowledgeIndicators.topologyMapTitle',
-  { defaultMessage: 'Topology overview' }
-);
-
-export const TOPOLOGY_MAP_EMPTY = i18n.translate(
-  'xpack.significantEventsApp.knowledgeIndicators.topologyMapEmpty',
-  {
-    defaultMessage:
-      'No topology knowledge indicators yet. Generate topology from existing knowledge indicators, or extract them from Data Sources.',
+export const getGenerateTopologyInitialMessage = (streamNames: readonly string[]): string => {
+  if (streamNames.length === 0) {
+    return GENERATE_TOPOLOGY_INITIAL_MESSAGE;
   }
-);
 
-export const TOPOLOGY_MAP_ENTITY_COUNT = (count: number) =>
-  i18n.translate('xpack.significantEventsApp.knowledgeIndicators.topologyMapEntityCount', {
-    defaultMessage: '{count, plural, one {# entity} other {# entities}}',
-    values: { count },
-  });
-
-export const TOPOLOGY_MAP_TECHNOLOGY_COUNT = (count: number) =>
-  i18n.translate('xpack.significantEventsApp.knowledgeIndicators.topologyMapTechnologyCount', {
-    defaultMessage: '{count, plural, one {# technology} other {# technologies}}',
-    values: { count },
-  });
-
-export const TOPOLOGY_MAP_INFRASTRUCTURE_COUNT = (count: number) =>
-  i18n.translate('xpack.significantEventsApp.knowledgeIndicators.topologyMapInfrastructureCount', {
-    defaultMessage: '{count, plural, one {# infrastructure} other {# infrastructure}}',
-    values: { count },
-  });
-
-export const TOPOLOGY_MAP_DEPENDENCY_COUNT = (count: number) =>
-  i18n.translate('xpack.significantEventsApp.knowledgeIndicators.topologyMapDependencyCount', {
-    defaultMessage: '{count, plural, one {# dependency} other {# dependencies}}',
-    values: { count },
-  });
-
-export const TOPOLOGY_MAP_PLACEHOLDER = i18n.translate(
-  'xpack.significantEventsApp.knowledgeIndicators.topologyMapPlaceholder',
-  {
-    defaultMessage: 'A visual topology map will appear here in a later release.',
-  }
-);
+  return i18n.translate(
+    'xpack.significantEventsApp.knowledgeIndicators.generateTopologyInitialMessageWithStreams',
+    {
+      defaultMessage:
+        'Read the existing knowledge indicators for the selected streams ({streamNames}) using the knowledge-indicator management and search skills. Do not run feature identification or stream onboarding. Using those existing knowledge indicators as the source of truth, generate or update the system topology: entities, technologies, infrastructure, and dependencies. Summarise what you find, fill relationship gaps that the knowledge indicators already imply, and ask before creating new knowledge indicators that are not already supported by existing ones.',
+      values: { streamNames: streamNames.join(', ') },
+    }
+  );
+};
