@@ -43,8 +43,7 @@ import { useKibana } from '../../../../hooks/use_kibana';
 import { useQueriesApi } from '../../../../hooks/use_queries_api';
 import { getFormattedError } from '../../../../util/errors';
 import { AssetImage } from '../../../../components/asset_image';
-import { useSignificantEventsAppRouter } from '../../../../hooks/use_significant_events_app_router';
-import { useSignificantEventsAppParams } from '../../../../hooks/use_significant_events_app_params';
+import { useManagementRoute } from '../../../../hooks/use_management_route';
 import { LoadingPanel } from '../../../../components/loading_panel';
 import { SparkPlot } from '../../../../components/spark_plot';
 import { SignificantEventsSearchBar } from '../../../../components/search_bar';
@@ -83,6 +82,7 @@ import {
 } from './translations';
 import { DeleteQueriesModal } from './delete_queries_modal';
 import { QueryDetailsFlyout } from './query_details_flyout';
+import { RulesProposalsSection } from './rules_proposals_section';
 import { QueryTypeBadge } from '../query_type_badge/query_type_badge';
 import { formatLastOccurredAt } from './utils';
 
@@ -90,8 +90,7 @@ const DEFAULT_PAGINATION = { index: 0, size: 10 };
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
 export function QueriesTable() {
-  const router = useSignificantEventsAppRouter();
-  const { query: routeQuery } = useSignificantEventsAppParams('/{tab}');
+  const { query: routeQuery, push, link } = useManagementRoute();
   const { euiTheme } = useEuiTheme();
   const {
     dependencies: {
@@ -141,20 +140,22 @@ export function QueriesTable() {
   const handleSelectQuery = useCallback(
     (item: SignificantEventQueryRow) => {
       const isAlreadyOpen = item.query.id === routeQuery?.selectedItem;
-      router.push('/{tab}', {
-        path: { tab: 'queries' },
+      push({
+        tab: 'significant_events',
+        subtab: 'rules',
         query: buildQueryRouteParams(isAlreadyOpen ? undefined : item.query.id),
       });
     },
-    [router, routeQuery?.selectedItem, buildQueryRouteParams]
+    [push, routeQuery?.selectedItem, buildQueryRouteParams]
   );
 
   const closeQueryFlyout = useCallback(() => {
-    router.push('/{tab}', {
-      path: { tab: 'queries' },
+    push({
+      tab: 'significant_events',
+      subtab: 'rules',
       query: buildQueryRouteParams(),
     });
-  }, [router, buildQueryRouteParams]);
+  }, [push, buildQueryRouteParams]);
 
   useEffect(() => {
     setSelectedItems([]);
@@ -361,48 +362,59 @@ export function QueriesTable() {
   const isEmpty = !queriesLoading && (queriesData?.total ?? 0) === 0 && !searchQuery;
   if (isEmpty) {
     return (
-      <EuiEmptyPrompt
-        aria-live="polite"
-        color="plain"
-        css={css`
-          && {
-            max-width: 400px;
-          }
-        `}
-        icon={<AssetImage type="significantEventsEmptyState" size={140} />}
-        title={
-          <h2>
-            {i18n.translate('xpack.significantEventsApp.queriesTable.emptyState.title', {
-              defaultMessage: 'Rules',
-            })}
-          </h2>
-        }
-        body={
-          <p>
-            {i18n.translate('xpack.significantEventsApp.queriesTable.emptyState.description', {
-              defaultMessage:
-                'No rules created yet. Promote queries from the Knowledge Indicators tab to create rules.',
-            })}
-          </p>
-        }
-        actions={
-          <EuiButtonEmpty
-            href={router.link('/{tab}', {
-              path: { tab: 'knowledge_indicators' },
-            })}
-          >
-            {i18n.translate(
-              'xpack.significantEventsApp.queriesTable.emptyState.goToKnowledgeIndicatorsButton',
-              { defaultMessage: 'Go to Knowledge Indicators' }
-            )}
-          </EuiButtonEmpty>
-        }
-      />
+      <EuiFlexGroup direction="column" gutterSize="m">
+        <EuiFlexItem grow={false}>
+          <RulesProposalsSection />
+        </EuiFlexItem>
+        <EuiFlexItem>
+          <EuiEmptyPrompt
+            aria-live="polite"
+            color="plain"
+            css={css`
+              && {
+                max-width: 400px;
+              }
+            `}
+            icon={<AssetImage type="significantEventsEmptyState" size={140} />}
+            title={
+              <h2>
+                {i18n.translate('xpack.significantEventsApp.queriesTable.emptyState.title', {
+                  defaultMessage: 'Rules',
+                })}
+              </h2>
+            }
+            body={
+              <p>
+                {i18n.translate('xpack.significantEventsApp.queriesTable.emptyState.description', {
+                  defaultMessage:
+                    'No rules created yet. Promote queries from the Knowledge Indicators tab to create rules.',
+                })}
+              </p>
+            }
+            actions={
+              <EuiButtonEmpty
+                href={link({
+                  tab: 'knowledge_indicators',
+                  subtab: 'queries',
+                })}
+              >
+                {i18n.translate(
+                  'xpack.significantEventsApp.queriesTable.emptyState.goToKnowledgeIndicatorsButton',
+                  { defaultMessage: 'Go to Knowledge Indicators' }
+                )}
+              </EuiButtonEmpty>
+            }
+          />
+        </EuiFlexItem>
+      </EuiFlexGroup>
     );
   }
 
   return (
     <EuiFlexGroup direction="column" gutterSize="m">
+      <EuiFlexItem grow={false}>
+        <RulesProposalsSection />
+      </EuiFlexItem>
       {isCpsMultiProject && (
         <EuiFlexItem grow={false}>
           <EuiText

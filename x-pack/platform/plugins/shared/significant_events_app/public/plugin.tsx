@@ -74,7 +74,7 @@ export class SignificantEventsAppPlugin
           title: i18n.translate('xpack.significantEventsApp.kiDeepLinkTitle', {
             defaultMessage: 'Significant Events / KIs',
           }),
-          path: '/knowledge_indicators',
+          path: '/knowledge_indicators/topology',
           visibleIn: [],
           keywords: [
             'knowledge indicators',
@@ -99,7 +99,7 @@ export class SignificantEventsAppPlugin
           title: i18n.translate('xpack.significantEventsApp.rulesDeepLinkTitle', {
             defaultMessage: 'Significant Events / Rules',
           }),
-          path: '/queries',
+          path: '/significant_events/rules',
           visibleIn: [],
           keywords: ['rules', 'queries', 'significant events', 'sig events', 'sig events rules'],
         },

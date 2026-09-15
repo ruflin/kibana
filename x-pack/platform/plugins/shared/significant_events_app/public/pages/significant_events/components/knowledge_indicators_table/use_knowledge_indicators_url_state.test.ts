@@ -15,12 +15,16 @@ const mockReplace = jest.fn();
 
 let mockQuery: Record<string, unknown> = {};
 
-jest.mock('../../../../hooks/use_significant_events_app_params', () => ({
-  useSignificantEventsAppParams: () => ({ query: mockQuery }),
-}));
-
-jest.mock('../../../../hooks/use_significant_events_app_router', () => ({
-  useSignificantEventsAppRouter: () => ({ push: mockPush, replace: mockReplace }),
+jest.mock('../../../../hooks/use_management_route', () => ({
+  useManagementRoute: () => ({
+    tab: 'knowledge_indicators',
+    subtab: undefined,
+    query: mockQuery,
+    push: mockPush,
+    replace: mockReplace,
+    link: jest.fn(),
+    router: { push: mockPush, replace: mockReplace },
+  }),
 }));
 
 jest.mock('@kbn/react-hooks', () => ({
@@ -202,8 +206,9 @@ describe('useKnowledgeIndicatorsUrlState', () => {
     it('calls router.replace with filter state', () => {
       renderHook(() => useKnowledgeIndicatorsUrlState(defaultParams));
 
-      expect(mockReplace).toHaveBeenCalledWith('/{tab}', {
-        path: { tab: 'knowledge_indicators' },
+      expect(mockReplace).toHaveBeenCalledWith({
+        tab: 'knowledge_indicators',
+        subtab: undefined,
         query: {},
       });
     });
@@ -222,8 +227,9 @@ describe('useKnowledgeIndicatorsUrlState', () => {
 
       renderHook(() => useKnowledgeIndicatorsUrlState(defaultParams));
 
-      expect(mockReplace).toHaveBeenCalledWith('/{tab}', {
-        path: { tab: 'knowledge_indicators' },
+      expect(mockReplace).toHaveBeenCalledWith({
+        tab: 'knowledge_indicators',
+        subtab: undefined,
         query: expect.objectContaining({
           search: 'test',
           status: 'excluded',
@@ -240,8 +246,9 @@ describe('useKnowledgeIndicatorsUrlState', () => {
     it('preserves selectedItem in URL', () => {
       mockQuery = { selectedItem: 'f1' };
       renderHook(() => useKnowledgeIndicatorsUrlState(defaultParams));
-      expect(mockReplace).toHaveBeenCalledWith('/{tab}', {
-        path: { tab: 'knowledge_indicators' },
+      expect(mockReplace).toHaveBeenCalledWith({
+        tab: 'knowledge_indicators',
+        subtab: undefined,
         query: expect.objectContaining({ selectedItem: 'f1' }),
       });
     });
@@ -253,8 +260,9 @@ describe('useKnowledgeIndicatorsUrlState', () => {
       act(() => {
         result.current.closeFlyout();
       });
-      expect(mockPush).toHaveBeenCalledWith('/{tab}', {
-        path: { tab: 'knowledge_indicators' },
+      expect(mockPush).toHaveBeenCalledWith({
+        tab: 'knowledge_indicators',
+        subtab: undefined,
         query: expect.not.objectContaining({ selectedItem: expect.anything() }),
       });
     });
@@ -269,8 +277,9 @@ describe('useKnowledgeIndicatorsUrlState', () => {
       act(() => {
         result.current.toggleSelectedKnowledgeIndicator(ki);
       });
-      expect(mockPush).toHaveBeenCalledWith('/{tab}', {
-        path: { tab: 'knowledge_indicators' },
+      expect(mockPush).toHaveBeenCalledWith({
+        tab: 'knowledge_indicators',
+        subtab: undefined,
         query: expect.objectContaining({ selectedItem: 'f1' }),
       });
     });
@@ -286,8 +295,9 @@ describe('useKnowledgeIndicatorsUrlState', () => {
       act(() => {
         result.current.toggleSelectedKnowledgeIndicator(ki);
       });
-      expect(mockPush).toHaveBeenCalledWith('/{tab}', {
-        path: { tab: 'knowledge_indicators' },
+      expect(mockPush).toHaveBeenCalledWith({
+        tab: 'knowledge_indicators',
+        subtab: undefined,
         query: expect.not.objectContaining({ selectedItem: expect.anything() }),
       });
     });

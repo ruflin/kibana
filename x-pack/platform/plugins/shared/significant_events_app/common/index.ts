@@ -11,4 +11,5 @@ export {
   type SignificantEventsAppLocator,
   type SignificantEventsAppLocatorParams,
   type SignificantEventsAppTab,
+  type SignificantEventsAppSubtab,
 } from './locators';

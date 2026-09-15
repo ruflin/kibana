@@ -11,6 +11,8 @@ import type { ListStreamDetail } from '@kbn/streams-plugin/server/routes/interna
 import { useFetchErrorToast } from '../../../hooks/use_fetch_error_toast';
 import { useKibana } from '../../../hooks/use_kibana';
 
+export const STREAM_LIST_QUERY_KEY = ['streamList'] as const;
+
 interface StreamsFetchResult {
   streams: ListStreamDetail[];
 }
@@ -34,7 +36,7 @@ export function useFetchStreams(
   };
 
   return useQuery<StreamsFetchResult, Error>({
-    queryKey: ['streamList'],
+    queryKey: STREAM_LIST_QUERY_KEY,
     queryFn: fetchStreams,
     onError: showFetchErrorToast,
     select: options?.select,

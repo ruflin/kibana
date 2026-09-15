@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import { Streams, streamMatchesIndexPatterns } from '@kbn/streams-schema';
+import { Streams } from '@kbn/streams-schema';
 import type { WorkflowExecutionListItemDto } from '@kbn/workflows';
 import { ExecutionStatus, isTerminalStatus } from '@kbn/workflows';
 import { parseStreamNameFromConcurrencyKey } from '../../../../lib/workflows/onboarding_workflow_client';
@@ -33,25 +33,30 @@ export const isSupportedStream = (stream: Streams.all.Definition): boolean =>
 /**
  * Selects the streams eligible for continuous knowledge indicator onboarding.
  *
- * Query streams are selected when the query-streams feature flag is enabled; every
- * other supported type is selected when its name matches the configured significant
- * events index patterns. This mirrors the discovery Streams list, so onboarding and
- * the list stay aligned by construction.
+ * Only streams in the Data Sources Enabled allowlist stay in Nightshift / KI
+ * scope. Query streams additionally require the query-streams feature flag.
+ * When the allowlist has not been written yet (or is empty), nothing is
+ * selected. This mirrors the per-row Enabled toggle, so onboarding and the
+ * Data Sources list stay aligned by construction.
  */
 export const filterEligibleStreams = ({
   allStreams,
   isQueryStreamsEnabled,
-  indexPatterns,
+  enabledStreamNames,
 }: {
   allStreams: Streams.all.Definition[];
   isQueryStreamsEnabled: boolean;
-  indexPatterns: string[];
+  /** Stream names enabled on the Data Sources tab. Empty means none. */
+  enabledStreamNames: ReadonlySet<string>;
 }): Streams.all.Definition[] =>
   allStreams.filter((stream) => {
+    if (!enabledStreamNames.has(stream.name)) {
+      return false;
+    }
     if (Streams.QueryStream.Definition.is(stream)) {
       return isQueryStreamsEnabled;
     }
-    return streamMatchesIndexPatterns(stream.name, indexPatterns);
+    return true;
   });
 
 /**

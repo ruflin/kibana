@@ -12,7 +12,7 @@ import { i18n } from '@kbn/i18n';
 import {
   OBSERVABILITY_STREAMS_CONTINUOUS_KI_EXTRACTION_ENABLED,
   OBSERVABILITY_STREAMS_CONTINUOUS_KI_EXTRACTION_INTERVAL_HOURS,
-  OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_INDEX_PATTERNS,
+  OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_ENABLED_STREAMS,
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_TUNING_CONFIG,
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_SCHEDULED_DISCOVERY_ENABLED,
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_SCHEDULED_DISCOVERY_DETECTION_INTERVAL_MINUTES,
@@ -26,12 +26,12 @@ import {
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_SCHEDULED_DISCOVERY_FLAKY_RULE_PROBE_AFTER_MINUTES,
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_SCHEDULED_DISCOVERY_FLAKY_RULE_EXEMPT_SEVERITY_SCORE,
 } from '@kbn/management-settings-ids';
-import { DEFAULT_INDEX_PATTERNS } from '@kbn/streams-schema';
 import {
   DEFAULT_SIGNIFICANT_EVENTS_TUNING_CONFIG,
   SIGNIFICANT_EVENTS_TUNING_FIELD_BOUNDS,
   validateSignificantEventsTuningConfig,
 } from '@kbn/significant-events-schema';
+import { ENABLED_STREAMS_SETTING_MAX_LENGTH } from '../common/enabled_streams';
 import type { SignificantEventsPluginStartDependencies } from './types';
 import { isObservabilityDeployment } from './routes/utils/assert_significant_events_access';
 import { SIGNIFICANT_EVENTS_TIERED_FEATURE } from '../common';
@@ -101,21 +101,21 @@ export function registerFeatureFlags(
     .then((isSignificantEventsAvailable) => {
       if (isSignificantEventsAvailable) {
         core.uiSettings.register({
-          [OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_INDEX_PATTERNS]: {
+          [OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_ENABLED_STREAMS]: {
             category: ['observability'],
-            name: i18n.translate('xpack.significantEvents.sigEventsIndexPatternsSettingsName', {
-              defaultMessage: 'Significant Events index patterns',
+            name: i18n.translate('xpack.significantEvents.sigEventsEnabledStreamsSettingsName', {
+              defaultMessage: 'Significant Events enabled streams',
             }) as string,
-            value: DEFAULT_INDEX_PATTERNS,
+            value: '',
             description: i18n.translate(
-              'xpack.significantEvents.sigEventsIndexPatternsSettingsDescription',
+              'xpack.significantEvents.sigEventsEnabledStreamsSettingsDescription',
               {
                 defaultMessage:
-                  'Comma-separated list of index patterns used for Significant Events stream filtering and analysis.',
+                  'JSON array of stream names enabled for Nightshift knowledge indicator extraction. Empty means the allowlist has not been set yet.',
               }
             ),
             type: 'string',
-            schema: schema.string(),
+            schema: schema.string({ maxLength: ENABLED_STREAMS_SETTING_MAX_LENGTH }),
             requiresPageReload: false,
             solutionViews: ['classic', 'oblt'],
             technicalPreview: true,

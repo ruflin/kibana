@@ -12,8 +12,7 @@ import { i18n } from '@kbn/i18n';
 import React, { useCallback, useEffect, useMemo } from 'react';
 import { useKibana } from '../../hooks/use_kibana';
 import { getFormattedError } from '../../util/errors';
-import { useSignificantEventsAppParams } from '../../hooks/use_significant_events_app_params';
-import { useSignificantEventsAppRouter } from '../../hooks/use_significant_events_app_router';
+import { useManagementRoute } from '../../hooks/use_management_route';
 import { useSignificantEventsAvailability } from '../../hooks/use_significant_events_availability';
 import { useBlocksNewActivity } from '../../hooks/use_significant_events_maintenance';
 import { RedirectTo } from '../../components/redirect_to';
@@ -35,28 +34,13 @@ import { MemoryTab } from './components/memory/tab';
 import { DetectionsTab } from './components/detections_tab';
 import { SignificantEventsTab } from './components/significant_events_tab';
 import { RunLimitsBanner } from './components/run_limits_banner';
-
-const significantEventsTabs = [
-  'streams',
-  'knowledge_indicators',
-  'queries',
-  'detections',
-  'significant_events',
-  'memory',
-  'settings',
-] as const;
-type SignificantEventsTabId = (typeof significantEventsTabs)[number];
-
-function isValidSignificantEventsTab(value: string): value is SignificantEventsTabId {
-  return significantEventsTabs.includes(value as SignificantEventsTabId);
-}
+import { ManagementSubTabs } from './components/management_sub_tabs';
+import { SignificantEventsSubTabsChrome } from './components/significant_events_sub_tabs_chrome';
+import type { KnowledgeIndicatorView } from '../../components/knowledge_indicators/utils/get_knowledge_indicator_view';
+import { isKiSubtab, resolveManagementLocation } from '../../routes/tabs';
 
 export function SignificantEventsPage() {
-  const {
-    path: { tab },
-  } = useSignificantEventsAppParams('/{tab}');
-
-  const router = useSignificantEventsAppRouter();
+  const { tab, subtab, link } = useManagementRoute();
   const {
     core: {
       application: {
@@ -80,7 +64,9 @@ export function SignificantEventsPage() {
     isError: isMaintenanceStatusError,
     status: maintenanceStatus,
   } = useBlocksNewActivity();
-  const showMaintenanceBanners = tab !== 'settings';
+  const isSettingsPage = tab === 'settings';
+  const showMaintenanceBanners = !isSettingsPage;
+  const canonical = resolveManagementLocation(tab, subtab);
 
   const onOnboardingFailed = useCallback(
     (error: string) => {
@@ -97,6 +83,14 @@ export function SignificantEventsPage() {
 
   const nightshiftLabel = i18n.translate('xpack.significantEventsApp.nightshiftButtonLabel', {
     defaultMessage: 'Nightshift',
+  });
+
+  const settingsLabel = i18n.translate('xpack.significantEventsApp.settingsButtonLabel', {
+    defaultMessage: 'Settings',
+  });
+
+  const managementLabel = i18n.translate('xpack.significantEventsApp.managementButtonLabel', {
+    defaultMessage: 'Management',
   });
 
   const systemOnboardingLabel = i18n.translate(
@@ -126,10 +120,30 @@ export function SignificantEventsPage() {
       },
     ];
 
+    if (isSettingsPage) {
+      items.push({
+        id: 'management',
+        order: 2,
+        label: managementLabel,
+        iconType: 'layers',
+        href: link({ tab: 'significant_events' }),
+        testId: 'significantEventsManagementLink',
+      });
+    } else {
+      items.push({
+        id: 'settings',
+        order: 2,
+        label: settingsLabel,
+        iconType: 'gear',
+        href: link({ tab: 'settings' }),
+        testId: 'significantEventsSettingsLink',
+      });
+    }
+
     if (agentBuilder) {
       items.push({
         id: 'significantEventsSystemOnboarding',
-        order: 2,
+        order: 3,
         label: systemOnboardingLabel,
         iconType: 'sparkles',
         run: handleOpenSystemOnboarding,
@@ -142,7 +156,11 @@ export function SignificantEventsPage() {
     agentBuilder,
     getUrlForApp,
     handleOpenSystemOnboarding,
+    isSettingsPage,
+    link,
+    managementLabel,
     nightshiftLabel,
+    settingsLabel,
     systemOnboardingLabel,
   ]);
 
@@ -159,64 +177,99 @@ export function SignificantEventsPage() {
   const tabs = useMemo(
     () => [
       {
-        id: 'streams',
-        label: i18n.translate('xpack.significantEventsApp.streamsTab', {
-          defaultMessage: 'Streams',
+        id: 'data_sources',
+        label: i18n.translate('xpack.significantEventsApp.dataSourcesTab', {
+          defaultMessage: 'Data Sources',
         }),
-        href: router.link('/{tab}', { path: { tab: 'streams' } }),
-        isSelected: tab === 'streams',
+        href: link({ tab: 'data_sources' }),
+        isSelected: canonical.tab === 'data_sources',
       },
       {
         id: 'knowledge_indicators',
         label: i18n.translate('xpack.significantEventsApp.knowledgeIndicatorsTab', {
           defaultMessage: 'Knowledge Indicators',
         }),
-        href: router.link('/{tab}', { path: { tab: 'knowledge_indicators' } }),
-        isSelected: tab === 'knowledge_indicators',
-      },
-      {
-        id: 'queries',
-        label: i18n.translate('xpack.significantEventsApp.queriesTab', {
-          defaultMessage: 'Rules',
-        }),
-        href: router.link('/{tab}', { path: { tab: 'queries' } }),
-        isSelected: tab === 'queries',
-      },
-
-      {
-        id: 'detections',
-        label: i18n.translate('xpack.significantEventsApp.detectionsTab', {
-          defaultMessage: 'Detections',
-        }),
-        href: router.link('/{tab}', { path: { tab: 'detections' } }),
-        isSelected: tab === 'detections',
+        href: link({ tab: 'knowledge_indicators', subtab: 'topology' }),
+        isSelected: canonical.tab === 'knowledge_indicators',
       },
       {
         id: 'significant_events',
         label: i18n.translate('xpack.significantEventsApp.significantEventsTab', {
           defaultMessage: 'Significant Events',
         }),
-        href: router.link('/{tab}', { path: { tab: 'significant_events' } }),
-        isSelected: tab === 'significant_events',
+        href: link({ tab: 'significant_events' }),
+        isSelected: canonical.tab === 'significant_events',
       },
       {
         id: 'memory',
         label: i18n.translate('xpack.significantEventsApp.memoryTab', {
           defaultMessage: 'Memory',
         }),
-        href: router.link('/{tab}', { path: { tab: 'memory' } }),
-        isSelected: tab === 'memory',
-      },
-      {
-        id: 'settings',
-        label: i18n.translate('xpack.significantEventsApp.settingsTab', {
-          defaultMessage: 'Settings',
-        }),
-        href: router.link('/{tab}', { path: { tab: 'settings' } }),
-        isSelected: tab === 'settings',
+        href: link({ tab: 'memory' }),
+        isSelected: canonical.tab === 'memory',
       },
     ],
-    [tab, router]
+    [canonical.tab, link]
+  );
+
+  const kiSubtabs = useMemo(
+    () => [
+      {
+        id: 'topology',
+        label: i18n.translate('xpack.significantEventsApp.knowledgeIndicatorsTopologySubtab', {
+          defaultMessage: 'Topology',
+        }),
+        href: link({ tab: 'knowledge_indicators', subtab: 'topology' }),
+        isSelected: canonical.subtab === 'topology',
+      },
+      {
+        id: 'queries',
+        label: i18n.translate('xpack.significantEventsApp.knowledgeIndicatorsQueriesSubtab', {
+          defaultMessage: 'Queries',
+        }),
+        href: link({ tab: 'knowledge_indicators', subtab: 'queries' }),
+        isSelected: canonical.subtab === 'queries',
+      },
+      {
+        id: 'more',
+        label: i18n.translate('xpack.significantEventsApp.knowledgeIndicatorsMoreSubtab', {
+          defaultMessage: 'More',
+        }),
+        href: link({ tab: 'knowledge_indicators', subtab: 'more' }),
+        isSelected: canonical.subtab === 'more',
+      },
+    ],
+    [canonical.subtab, link]
+  );
+
+  const significantEventsSubtabs = useMemo(
+    () => [
+      {
+        id: 'events',
+        label: i18n.translate('xpack.significantEventsApp.significantEventsEventsSubtab', {
+          defaultMessage: 'Events',
+        }),
+        href: link({ tab: 'significant_events' }),
+        isSelected: canonical.tab === 'significant_events' && canonical.subtab === undefined,
+      },
+      {
+        id: 'rules',
+        label: i18n.translate('xpack.significantEventsApp.significantEventsRulesSubtab', {
+          defaultMessage: 'Rules',
+        }),
+        href: link({ tab: 'significant_events', subtab: 'rules' }),
+        isSelected: canonical.subtab === 'rules',
+      },
+      {
+        id: 'detections',
+        label: i18n.translate('xpack.significantEventsApp.significantEventsDetectionsSubtab', {
+          defaultMessage: 'Detections',
+        }),
+        href: link({ tab: 'significant_events', subtab: 'detections' }),
+        isSelected: canonical.subtab === 'detections',
+      },
+    ],
+    [canonical.subtab, canonical.tab, link]
   );
 
   if (isAvailabilityLoading) {
@@ -233,18 +286,28 @@ export function SignificantEventsPage() {
     );
   }
 
-  // Legacy alias from an earlier tab name; keep until bookmarks are gone.
-  if (tab === 'discoveries') {
-    return <RedirectTo path="/{tab}" params={{ path: { tab: 'significant_events' } }} />;
+  if (canonical.needsRedirect) {
+    if (canonical.subtab) {
+      return (
+        <RedirectTo
+          path="/{tab}/{subtab}"
+          params={{ path: { tab: canonical.tab, subtab: canonical.subtab } }}
+        />
+      );
+    }
+    return <RedirectTo path="/{tab}" params={{ path: { tab: canonical.tab } }} />;
   }
 
-  if (!isValidSignificantEventsTab(tab)) {
-    return <RedirectTo path="/{tab}" params={{ path: { tab: 'streams' } }} />;
-  }
+  const kiView: KnowledgeIndicatorView | undefined =
+    canonical.subtab && isKiSubtab(canonical.subtab) ? canonical.subtab : undefined;
 
   return (
     <>
-      <SignificantEventsAppHeader title={pageTitle} menu={menu} tabs={tabs} />
+      <SignificantEventsAppHeader
+        title={pageTitle}
+        menu={menu}
+        tabs={isSettingsPage ? undefined : tabs}
+      />
       <KiGenerationProvider onFailed={onOnboardingFailed}>
         <SignificantEventsPageProvider>
           <SignificantEventsAppPageTemplate.Body grow>
@@ -288,7 +351,7 @@ export function SignificantEventsPage() {
                   </p>
                   {canManageStreams && (
                     <EuiButton
-                      href={router.link('/{tab}', { path: { tab: 'settings' } })}
+                      href={link({ tab: 'settings' })}
                       color="danger"
                       size="s"
                       data-test-subj="significantEventsStatusErrorBannerSettingsLink"
@@ -335,7 +398,7 @@ export function SignificantEventsPage() {
                   )}
                   {canManageStreams && (
                     <EuiButton
-                      href={router.link('/{tab}', { path: { tab: 'settings' } })}
+                      href={link({ tab: 'settings' })}
                       color="warning"
                       size="s"
                       data-test-subj="significantEventsPausedBannerSettingsLink"
@@ -350,13 +413,26 @@ export function SignificantEventsPage() {
               </>
             )}
             {showMaintenanceBanners && <RunLimitsBanner />}
-            {tab === 'streams' && <StreamsView />}
-            {tab === 'knowledge_indicators' && <KnowledgeIndicatorsTable />}
-            {tab === 'queries' && <QueriesTable />}
-            {tab === 'detections' && <DetectionsTab />}
-            {tab === 'significant_events' && <SignificantEventsTab />}
-            {tab === 'memory' && <MemoryTab />}
-            {tab === 'settings' && <SettingsTab />}
+            {canonical.tab === 'data_sources' && <StreamsView />}
+            {canonical.tab === 'knowledge_indicators' && kiView && (
+              <>
+                <ManagementSubTabs
+                  items={kiSubtabs}
+                  data-test-subj="significantEventsKnowledgeIndicatorsSubTabs"
+                />
+                <KnowledgeIndicatorsTable key={kiView} view={kiView} />
+              </>
+            )}
+            {canonical.tab === 'significant_events' && (
+              <>
+                <SignificantEventsSubTabsChrome items={significantEventsSubtabs} />
+                {canonical.subtab === undefined && <SignificantEventsTab />}
+                {canonical.subtab === 'rules' && <QueriesTable />}
+                {canonical.subtab === 'detections' && <DetectionsTab />}
+              </>
+            )}
+            {canonical.tab === 'memory' && <MemoryTab />}
+            {canonical.tab === 'settings' && <SettingsTab />}
           </SignificantEventsAppPageTemplate.Body>
         </SignificantEventsPageProvider>
       </KiGenerationProvider>

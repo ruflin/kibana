@@ -11,13 +11,13 @@ import { COMPUTED_FEATURE_TYPES } from '@kbn/significant-events-schema';
 import type { KnowledgeIndicator } from '@kbn/nightshift-ai';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSignificantEventsAppParams } from '../../../../hooks/use_significant_events_app_params';
-import { useSignificantEventsAppRouter } from '../../../../hooks/use_significant_events_app_router';
+import { useManagementRoute } from '../../../../hooks/use_management_route';
 import { getKnowledgeIndicatorItemId } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_item_id';
 import { getKnowledgeIndicatorStreamName } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_stream_name';
 import { getKnowledgeIndicatorSubtype } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_subtype';
 import { matchesKnowledgeIndicatorFilters } from '../../../../components/knowledge_indicators/utils/matches_knowledge_indicator_filters';
 import { getKnowledgeIndicatorType } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_type';
+import type { KnowledgeIndicatorView } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_view';
 
 const SEARCH_DEBOUNCE_MS = 300;
 const COMPUTED_FEATURE_TYPES_SET = new Set<string>(COMPUTED_FEATURE_TYPES);
@@ -27,6 +27,7 @@ interface UseKnowledgeIndicatorsUrlStateParams {
   isLoading: boolean;
   resetPagination: () => void;
   clearSelection: () => void;
+  view?: KnowledgeIndicatorView;
 }
 
 export function useKnowledgeIndicatorsUrlState({
@@ -34,9 +35,9 @@ export function useKnowledgeIndicatorsUrlState({
   isLoading,
   resetPagination,
   clearSelection,
+  view,
 }: UseKnowledgeIndicatorsUrlStateParams) {
-  const router = useSignificantEventsAppRouter();
-  const { query } = useSignificantEventsAppParams('/{tab}');
+  const { query, tab, subtab, push, replace } = useManagementRoute();
 
   const timeRangeRef = useRef<{ rangeFrom?: string; rangeTo?: string }>({});
   timeRangeRef.current = { rangeFrom: query?.rangeFrom, rangeTo: query?.rangeTo };
@@ -61,9 +62,15 @@ export function useKnowledgeIndicatorsUrlState({
     query?.stream ? castArray(query.stream) : []
   );
   const initialUrlStreamsRef = useRef<string[]>(query?.stream ? castArray(query.stream) : []);
-  const [hideComputedTypes, setHideComputedTypes] = useState(() =>
-    query?.showComputed === 'true' ? false : true
-  );
+  const [hideComputedTypes, setHideComputedTypes] = useState(() => {
+    if (view === 'more') {
+      return query?.showComputed === 'false';
+    }
+    if (view === 'topology' || view === 'queries') {
+      return false;
+    }
+    return query?.showComputed === 'true' ? false : true;
+  });
 
   const selectedKnowledgeIndicator = useMemo(
     () =>
@@ -111,6 +118,7 @@ export function useKnowledgeIndicatorsUrlState({
           statusFilter,
           selectedStreams,
           hideComputedTypes,
+          view,
         })
       ) {
         availableTypes.add(getKnowledgeIndicatorType(ki));
@@ -121,6 +129,7 @@ export function useKnowledgeIndicatorsUrlState({
           selectedTypes,
           selectedStreams,
           hideComputedTypes,
+          view,
         })
       ) {
         const subtype = getKnowledgeIndicatorSubtype(ki);
@@ -131,6 +140,7 @@ export function useKnowledgeIndicatorsUrlState({
           statusFilter,
           selectedTypes,
           hideComputedTypes,
+          view,
         })
       ) {
         availableStreams.add(getKnowledgeIndicatorStreamName(ki));
@@ -157,14 +167,26 @@ export function useKnowledgeIndicatorsUrlState({
     selectedTypes,
     selectedStreams,
     hideComputedTypes,
+    view,
   ]);
+
+  const showComputedQuery = () => {
+    if (view === 'more') {
+      return hideComputedTypes ? { showComputed: 'false' } : {};
+    }
+    if (view === 'topology' || view === 'queries') {
+      return {};
+    }
+    return !hideComputedTypes ? { showComputed: 'true' } : {};
+  };
 
   // Sync filter state to URL
   useEffect(() => {
     const { rangeFrom, rangeTo } = timeRangeRef.current;
     const selectedItem = selectedItemRef.current;
-    router.replace('/{tab}', {
-      path: { tab: 'knowledge_indicators' },
+    replace({
+      tab: tab || 'knowledge_indicators',
+      subtab,
       query: {
         ...(rangeFrom ? { rangeFrom } : {}),
         ...(rangeTo ? { rangeTo } : {}),
@@ -173,7 +195,7 @@ export function useKnowledgeIndicatorsUrlState({
         ...(selectedTypes.length ? { type: selectedTypes } : {}),
         ...(selectedSubtypes.length ? { subtype: selectedSubtypes } : {}),
         ...(selectedStreams.length ? { stream: selectedStreams } : {}),
-        ...(!hideComputedTypes ? { showComputed: 'true' } : {}),
+        ...showComputedQuery(),
         ...(selectedItem ? { selectedItem } : {}),
       },
     });
@@ -187,49 +209,65 @@ export function useKnowledgeIndicatorsUrlState({
     hideComputedTypes,
   ]);
 
-  const buildQueryParams = useCallback((selectedItem?: string) => {
-    const { rangeFrom, rangeTo } = timeRangeRef.current;
-    const p = currentParamsRef.current;
-    return {
-      ...(rangeFrom ? { rangeFrom } : {}),
-      ...(rangeTo ? { rangeTo } : {}),
-      ...(p.debouncedSearchTerm ? { search: p.debouncedSearchTerm } : {}),
-      ...(p.statusFilter !== 'active' ? { status: p.statusFilter } : {}),
-      ...(p.selectedTypes.length ? { type: p.selectedTypes } : {}),
-      ...(p.selectedSubtypes.length ? { subtype: p.selectedSubtypes } : {}),
-      ...(p.selectedStreams.length ? { stream: p.selectedStreams } : {}),
-      ...(!p.hideComputedTypes ? { showComputed: 'true' } : {}),
-      ...(selectedItem ? { selectedItem } : {}),
-    };
-  }, []);
+  const buildQueryParams = useCallback(
+    (selectedItem?: string) => {
+      const { rangeFrom, rangeTo } = timeRangeRef.current;
+      const p = currentParamsRef.current;
+      const computedQuery =
+        view === 'more'
+          ? p.hideComputedTypes
+            ? { showComputed: 'false' }
+            : {}
+          : view === 'topology' || view === 'queries'
+          ? {}
+          : !p.hideComputedTypes
+          ? { showComputed: 'true' }
+          : {};
+      return {
+        ...(rangeFrom ? { rangeFrom } : {}),
+        ...(rangeTo ? { rangeTo } : {}),
+        ...(p.debouncedSearchTerm ? { search: p.debouncedSearchTerm } : {}),
+        ...(p.statusFilter !== 'active' ? { status: p.statusFilter } : {}),
+        ...(p.selectedTypes.length ? { type: p.selectedTypes } : {}),
+        ...(p.selectedSubtypes.length ? { subtype: p.selectedSubtypes } : {}),
+        ...(p.selectedStreams.length ? { stream: p.selectedStreams } : {}),
+        ...computedQuery,
+        ...(selectedItem ? { selectedItem } : {}),
+      };
+    },
+    [view]
+  );
 
   const closeFlyout = useCallback(() => {
-    router.push('/{tab}', {
-      path: { tab: 'knowledge_indicators' },
+    push({
+      tab: tab || 'knowledge_indicators',
+      subtab,
       query: buildQueryParams(),
     });
-  }, [router, buildQueryParams]);
+  }, [push, tab, subtab, buildQueryParams]);
 
   const toggleSelectedKnowledgeIndicator = useCallback(
     (ki: KnowledgeIndicator) => {
       const id = getKnowledgeIndicatorItemId(ki);
       const isAlreadyOpen = id === selectedItemRef.current;
-      router.push('/{tab}', {
-        path: { tab: 'knowledge_indicators' },
+      push({
+        tab: tab || 'knowledge_indicators',
+        subtab,
         query: buildQueryParams(isAlreadyOpen ? undefined : id),
       });
     },
-    [router, buildQueryParams]
+    [push, tab, subtab, buildQueryParams]
   );
 
   const selectKnowledgeIndicator = useCallback(
     (ki: KnowledgeIndicator) => {
-      router.push('/{tab}', {
-        path: { tab: 'knowledge_indicators' },
+      push({
+        tab: tab || 'knowledge_indicators',
+        subtab,
         query: buildQueryParams(getKnowledgeIndicatorItemId(ki)),
       });
     },
-    [router, buildQueryParams]
+    [push, tab, subtab, buildQueryParams]
   );
 
   const handleStatusFilterChange = useCallback(

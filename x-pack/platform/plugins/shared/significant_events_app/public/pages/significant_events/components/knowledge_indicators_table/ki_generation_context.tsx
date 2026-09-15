@@ -6,7 +6,7 @@
  */
 
 import type { ListStreamDetail } from '@kbn/streams-plugin/server/routes/internal/streams/crud/route';
-import { Streams, streamMatchesIndexPatterns } from '@kbn/streams-schema';
+import { Streams } from '@kbn/streams-schema';
 import {
   KIsOnboardingStep,
   SignificantEventsWorkflowStatus,
@@ -25,7 +25,6 @@ import React, {
   useState,
 } from 'react';
 import { useInferenceFeatureConnectors } from '../../../../hooks/use_inference_feature_connectors';
-import { useIndexPatternsConfig } from '../../../../hooks/use_index_patterns_config';
 import type { ScheduleOnboardingOptions } from '../../../../hooks/use_onboarding_api';
 import { useBulkOnboarding } from '../../hooks/use_bulk_onboarding';
 import { useFetchStreams } from '../../hooks/use_fetch_streams';
@@ -82,8 +81,6 @@ export function KiGenerationProvider({
   // network calls.
   const enqueuedStreamNamesRef = useRef<Set<string>>(new Set());
 
-  const { indexPatterns } = useIndexPatternsConfig();
-
   const featuresConnectors = useInferenceFeatureConnectors(
     SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID
   );
@@ -110,11 +107,11 @@ export function KiGenerationProvider({
   const streamsListFetch = useFetchStreams({
     select: (result) => ({
       ...result,
-      // Query streams are always included; other stream types are filtered by index patterns.
       streams: result.streams.filter(
         (item) =>
-          Streams.QueryStream.Definition.is(item.stream) ||
-          streamMatchesIndexPatterns(item.stream.name, indexPatterns)
+          Streams.WiredStream.Definition.is(item.stream) ||
+          Streams.ClassicStream.Definition.is(item.stream) ||
+          Streams.QueryStream.Definition.is(item.stream)
       ),
     }),
   });

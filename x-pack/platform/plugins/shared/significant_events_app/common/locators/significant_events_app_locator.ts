@@ -11,22 +11,30 @@ import {
 } from '@kbn/deeplinks-observability';
 import type { LocatorDefinition, LocatorPublic } from '@kbn/share-plugin/public';
 import type { SerializableRecord } from '@kbn/utility-types';
+import { buildManagementPath, resolveManagementLocation, type ManagementTab } from '../tabs';
 
 export type SignificantEventsAppTab =
+  | ManagementTab
   | 'streams'
-  | 'knowledge_indicators'
   | 'queries'
   | 'detections'
-  | 'significant_events'
-  | 'memory'
-  | 'settings';
+  | 'discoveries';
+
+export type SignificantEventsAppSubtab =
+  | 'topology'
+  | 'queries'
+  | 'more'
+  | 'events'
+  | 'rules'
+  | 'detections';
 
 /**
- * Mirrors the query params of the `/{tab}` route one-to-one so every state of the
- * Significant Events app is addressable through the locator.
+ * Mirrors the query params of the management routes one-to-one so every state of the
+ * Nightshift Management app is addressable through the locator.
  */
 export interface SignificantEventsAppLocatorParams extends SerializableRecord {
   tab?: SignificantEventsAppTab;
+  subtab?: SignificantEventsAppSubtab;
   rangeFrom?: string;
   rangeTo?: string;
   search?: string;
@@ -47,9 +55,11 @@ export class SignificantEventsAppLocatorDefinition
   public readonly id = SIGNIFICANT_EVENTS_APP_LOCATOR_ID;
 
   public readonly getLocation = async ({
-    tab = 'streams',
+    tab = 'data_sources',
+    subtab,
     ...query
   }: SignificantEventsAppLocatorParams) => {
+    const canonical = resolveManagementLocation(tab, subtab);
     const searchParams = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
       if (value == null) {
@@ -62,10 +72,11 @@ export class SignificantEventsAppLocatorDefinition
     }
 
     const search = searchParams.toString();
+    const path = buildManagementPath(canonical);
 
     return {
       app: SIGNIFICANT_EVENTS_APP_ID,
-      path: `/${tab}${search ? `?${search}` : ''}`,
+      path: `${path}${search ? `?${search}` : ''}`,
       state: {},
     };
   };

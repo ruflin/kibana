@@ -106,9 +106,6 @@ jest.mock('../../../../components/search_bar', () => ({
     <div data-test-subj="searchBarQuery">{query?.query}</div>
   ),
 }));
-jest.mock('../streams_view/find_significant_events_button', () => ({
-  FindSignificantEventsButton: () => null,
-}));
 jest.mock('./filter_popover', () => ({
   FilterPopover: () => null,
 }));
@@ -181,6 +178,11 @@ describe('selectedEvent deep link', () => {
   it('passes eventId to the list fetch when selectedEvent is active', () => {
     render(<SignificantEventsTab />);
     expect(lastFetchArgs().eventId).toBe(event.event_id);
+  });
+
+  it('does not render Find Significant Events in the Events table toolbar', () => {
+    render(<SignificantEventsTab />);
+    expect(screen.queryByTestId('significant_events_discovery_button')).not.toBeInTheDocument();
   });
 
   it('opens the flyout from the list when selectedEvent resolves', () => {

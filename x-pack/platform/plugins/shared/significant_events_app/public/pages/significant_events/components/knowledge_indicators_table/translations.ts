@@ -235,3 +235,26 @@ export const BULK_PROMOTE_ERROR_TITLE = i18n.translate(
   'xpack.significantEventsApp.knowledgeIndicators.bulkPromoteErrorTitle',
   { defaultMessage: 'Failed to promote selected queries' }
 );
+
+export const GENERATE_TOPOLOGY_BUTTON_LABEL = i18n.translate(
+  'xpack.significantEventsApp.knowledgeIndicators.generateTopologyButtonLabel',
+  { defaultMessage: 'Generate topology' }
+);
+
+export const GENERATE_TOPOLOGY_ERROR_TITLE = i18n.translate(
+  'xpack.significantEventsApp.knowledgeIndicators.generateTopologyErrorTitle',
+  { defaultMessage: 'Failed to generate topology' }
+);
+
+export const GENERATING_TOPOLOGY_TITLE = i18n.translate(
+  'xpack.significantEventsApp.knowledgeIndicators.generatingTopologyTitle',
+  { defaultMessage: 'Generating topology' }
+);
+
+export const GENERATING_TOPOLOGY_DESCRIPTION = i18n.translate(
+  'xpack.significantEventsApp.knowledgeIndicators.generatingTopologyDescription',
+  {
+    defaultMessage:
+      'Updating entity, technology, infrastructure, and dependency knowledge indicators from existing knowledge indicators.',
+  }
+);

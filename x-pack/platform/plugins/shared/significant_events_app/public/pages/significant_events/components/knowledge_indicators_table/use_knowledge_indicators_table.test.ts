@@ -32,12 +32,16 @@ jest.mock('../../../../hooks/use_kibana', () => ({
   }),
 }));
 
-jest.mock('../../../../hooks/use_significant_events_app_params', () => ({
-  useSignificantEventsAppParams: () => ({ query: mockQuery }),
-}));
-
-jest.mock('../../../../hooks/use_significant_events_app_router', () => ({
-  useSignificantEventsAppRouter: () => ({ push: mockPush, replace: mockReplace }),
+jest.mock('../../../../hooks/use_management_route', () => ({
+  useManagementRoute: () => ({
+    tab: 'knowledge_indicators',
+    subtab: undefined,
+    query: mockQuery,
+    push: mockPush,
+    replace: mockReplace,
+    link: jest.fn(),
+    router: { push: mockPush, replace: mockReplace },
+  }),
 }));
 
 let mockKnowledgeIndicators: KnowledgeIndicator[] = [];

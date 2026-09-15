@@ -843,11 +843,11 @@ export const stackManagementSchema: MakeSchemaFrom<UsageStats> = {
       description: 'Enable Streams Canvas',
     },
   },
-  'observability:streamsSigEventsIndexPatterns': {
+  'observability:streamsSigEventsEnabledStreams': {
     type: 'keyword',
     _meta: {
       description:
-        'Comma-separated index patterns used for Significant Events stream filtering and analysis.',
+        'JSON array of stream names enabled for Nightshift knowledge indicator extraction.',
     },
   },
   'observability:streamsSigEventsScheduledDiscoveryEnabled': {

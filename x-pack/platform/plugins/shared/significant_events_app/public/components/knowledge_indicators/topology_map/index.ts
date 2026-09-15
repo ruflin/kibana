@@ -5,4 +5,7 @@
  * 2.0.
  */
 
-export const DEFAULT_INDEX_PATTERNS = 'logs*';
+export { TopologyMap } from './topology_map';
+export type { TopologyMapProps } from './topology_map';
+export { TopologyMapAccordion } from './topology_map_accordion';
+export type { TopologyMapAccordionProps } from './topology_map_accordion';

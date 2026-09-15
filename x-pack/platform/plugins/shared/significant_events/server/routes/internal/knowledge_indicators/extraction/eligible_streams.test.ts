@@ -72,61 +72,51 @@ describe('isSupportedStream', () => {
 });
 
 describe('filterEligibleStreams', () => {
-  it('includes non-query streams whose name matches the index patterns', () => {
+  it('includes only streams that are in the enabled-stream allowlist', () => {
     const result = filterEligibleStreams({
       allStreams: [makeStream('logs.app'), makeStream('metrics.app')],
       isQueryStreamsEnabled: false,
-      indexPatterns: ['logs.*'],
+      enabledStreamNames: new Set(['logs.app']),
     });
 
     expect(streamNames(result)).toEqual(['logs.app']);
   });
 
-  it('excludes non-query streams that do not match any index pattern', () => {
+  it('excludes streams that are not in the allowlist', () => {
     const result = filterEligibleStreams({
-      allStreams: [makeStream('traces.app')],
+      allStreams: [makeStream('logs.app'), makeStream('logs.nginx')],
       isQueryStreamsEnabled: true,
-      indexPatterns: ['logs*'],
+      enabledStreamNames: new Set(['logs.nginx']),
     });
 
-    expect(result).toEqual([]);
+    expect(streamNames(result)).toEqual(['logs.nginx']);
   });
 
-  it('always includes query streams when query streams are enabled, regardless of index patterns', () => {
+  it('includes query streams in the allowlist when query streams are enabled', () => {
     const result = filterEligibleStreams({
       allStreams: [makeStream('my-query', { query: true }), makeStream('logs.app')],
       isQueryStreamsEnabled: true,
-      indexPatterns: ['logs*'],
+      enabledStreamNames: new Set(['my-query', 'logs.app']),
     });
 
     expect(streamNames(result)).toEqual(['my-query', 'logs.app']);
   });
 
-  it('excludes query streams when query streams are disabled', () => {
+  it('excludes query streams when query streams are disabled even if allowlisted', () => {
     const result = filterEligibleStreams({
       allStreams: [makeStream('my-query', { query: true }), makeStream('logs.app')],
       isQueryStreamsEnabled: false,
-      indexPatterns: ['logs*'],
+      enabledStreamNames: new Set(['my-query', 'logs.app']),
     });
 
     expect(streamNames(result)).toEqual(['logs.app']);
   });
 
-  it('matches multiple index patterns', () => {
+  it('selects nothing when the allowlist is empty', () => {
     const result = filterEligibleStreams({
-      allStreams: [makeStream('logs.app'), makeStream('metrics.app'), makeStream('traces.app')],
-      isQueryStreamsEnabled: false,
-      indexPatterns: ['logs*', 'metrics*'],
-    });
-
-    expect(streamNames(result)).toEqual(['logs.app', 'metrics.app']);
-  });
-
-  it('selects nothing when the index patterns are empty and query streams are disabled', () => {
-    const result = filterEligibleStreams({
-      allStreams: [makeStream('logs.app'), makeStream('metrics.app')],
-      isQueryStreamsEnabled: false,
-      indexPatterns: [],
+      allStreams: [makeStream('logs.app'), makeStream('my-query', { query: true })],
+      isQueryStreamsEnabled: true,
+      enabledStreamNames: new Set(),
     });
 
     expect(result).toEqual([]);

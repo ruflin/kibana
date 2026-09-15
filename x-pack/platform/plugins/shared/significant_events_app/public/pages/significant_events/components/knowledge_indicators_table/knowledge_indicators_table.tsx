@@ -19,6 +19,7 @@ import {
 } from '@elastic/eui';
 import { css } from '@emotion/react';
 import type { KnowledgeIndicator } from '@kbn/nightshift-ai';
+import type { TopologyNode } from '@kbn/significant-events-schema';
 import type { Streams } from '@kbn/streams-schema';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAIFeatures } from '../../../../hooks/use_ai_features';
@@ -36,6 +37,11 @@ import { useKiGeneration } from './ki_generation_context';
 import { useKnowledgeIndicatorsTable } from './use_knowledge_indicators_table';
 import { useKnowledgeIndicatorsColumns } from './use_knowledge_indicators_columns';
 import { KnowledgeIndicatorsToolbar } from './knowledge_indicators_toolbar';
+import { TopologyMapAccordion } from '../../../../components/knowledge_indicators/topology_map';
+import { GenerateTopologyButton } from './generate_topology_button';
+import { useGenerateTopology } from './use_generate_topology';
+import { getFormattedError } from '../../../../util/errors';
+import type { KnowledgeIndicatorView } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_view';
 import {
   TABLE_CAPTION,
   NO_ITEMS_MESSAGE,
@@ -45,9 +51,12 @@ import {
   HIDDEN_COMPUTED_FEATURES_HINT,
   GENERATION_IN_PROGRESS_TITLE,
   getGenerationInProgressDescription,
+  GENERATING_TOPOLOGY_TITLE,
+  GENERATING_TOPOLOGY_DESCRIPTION,
+  GENERATE_TOPOLOGY_ERROR_TITLE,
 } from './translations';
 
-export function KnowledgeIndicatorsTable() {
+export function KnowledgeIndicatorsTable({ view }: { view: KnowledgeIndicatorView }) {
   const { euiTheme } = useEuiTheme();
   const { blocksActivity, activityBlockTooltip } = useBlocksNewActivity();
   const [generationStreamNames, setGenerationStreamNames] = useState<string[]>([]);
@@ -148,7 +157,13 @@ export function KnowledgeIndicatorsTable() {
     deleteKnowledgeIndicatorsInBulk,
     handleBulkPromote,
     goToPageForItemIndex,
-  } = useKnowledgeIndicatorsTable();
+  } = useKnowledgeIndicatorsTable(view);
+
+  const {
+    generateTopology,
+    isGenerating: isGeneratingTopology,
+    error: generateTopologyError,
+  } = useGenerateTopology();
 
   const wasGeneratingRef = useRef(false);
   useEffect(() => {
@@ -182,6 +197,19 @@ export function KnowledgeIndicatorsTable() {
     setKnowledgeIndicatorsToDelete,
   });
 
+  const handleTopologyNodeClick = useCallback(
+    (node: TopologyNode) => {
+      const ki = filteredKnowledgeIndicators.find(
+        (item) => item.kind === 'feature' && item.feature.uuid === node.id
+      );
+      if (!ki) {
+        return;
+      }
+      selectKnowledgeIndicator(ki);
+    },
+    [filteredKnowledgeIndicators, selectKnowledgeIndicator]
+  );
+
   const generationRow = (
     <EuiFlexGroup gutterSize="s" alignItems="center" responsive={false} css={{ width: '100%' }}>
       <EuiFlexItem css={{ minWidth: 0 }}>
@@ -212,8 +240,50 @@ export function KnowledgeIndicatorsTable() {
           isLoading={isScheduling}
         />
       </EuiFlexItem>
+      {view === 'topology' && (
+        <EuiFlexItem grow={false}>
+          <GenerateTopologyButton
+            selectedStreamNames={selectedStreams}
+            isLoading={isGeneratingTopology}
+            onGenerate={(streamNames) => {
+              void generateTopology(streamNames);
+            }}
+          />
+        </EuiFlexItem>
+      )}
     </EuiFlexGroup>
   );
+
+  const topologyProgressCallout = isGeneratingTopology ? (
+    <>
+      <EuiSpacer size="m" />
+      <EuiCallOut
+        size="s"
+        color="primary"
+        iconType={EuiLoadingSpinner}
+        title={GENERATING_TOPOLOGY_TITLE}
+        announceOnMount
+        data-test-subj="significantEventsGeneratingTopologyCallout"
+      >
+        <p>{GENERATING_TOPOLOGY_DESCRIPTION}</p>
+      </EuiCallOut>
+    </>
+  ) : null;
+
+  const topologyErrorCallout = generateTopologyError ? (
+    <>
+      <EuiSpacer size="m" />
+      <EuiCallOut
+        size="s"
+        color="danger"
+        title={GENERATE_TOPOLOGY_ERROR_TITLE}
+        announceOnMount
+        data-test-subj="significantEventsGenerateTopologyErrorCallout"
+      >
+        <p>{getFormattedError(generateTopologyError).message}</p>
+      </EuiCallOut>
+    </>
+  ) : null;
 
   const generationProgressCallout = isGenerating ? (
     <>
@@ -261,9 +331,23 @@ export function KnowledgeIndicatorsTable() {
     <EuiPanel hasBorder hasShadow={false}>
       {generationRow}
       {generationProgressCallout}
+      {view === 'topology' && (
+        <>
+          {topologyProgressCallout}
+          {topologyErrorCallout}
+          <EuiSpacer size="m" />
+          <TopologyMapAccordion
+            knowledgeIndicators={filteredKnowledgeIndicators}
+            isLoading={isLoading || isGeneratingTopology}
+            selectedNodeId={selectedKnowledgeIndicatorId}
+            onNodeClick={handleTopologyNodeClick}
+          />
+        </>
+      )}
       <EuiSpacer size="m" />
       <KnowledgeIndicatorsToolbar
         knowledgeIndicators={knowledgeIndicators}
+        view={view}
         filteredCount={filteredKnowledgeIndicators.length}
         tableSearchValue={tableSearchValue}
         debouncedSearchTerm={debouncedSearchTerm}

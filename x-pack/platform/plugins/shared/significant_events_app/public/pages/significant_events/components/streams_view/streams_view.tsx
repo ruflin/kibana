@@ -7,18 +7,16 @@
 
 import { EuiFlexGroup, EuiFlexItem, EuiText } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
-import { KIS_ONBOARDING_IN_PROGRESS_STATUSES } from '@kbn/significant-events-schema';
+import { SignificantEventsWorkflowStatus } from '@kbn/significant-events-schema';
 import React, { useCallback, useMemo, useState } from 'react';
-import type { TableRow } from './utils';
 import { parseSearchQuery } from './utils';
-import { useAIFeatures } from '../../../../hooks/use_ai_features';
-import { useSignificantEventsPageContext } from '../../context/significant_events_page_context';
 import type { SignificantEventsSearchBarProps } from '../../../../components/search_bar';
 import { SignificantEventsSearchBar } from '../../../../components/search_bar';
+import { useAIFeatures } from '../../../../hooks/use_ai_features';
 import { useBlocksNewActivity } from '../../../../hooks/use_significant_events_maintenance';
+import { useNightshiftStreamEnabled } from '../../hooks/use_nightshift_stream_enabled';
 import { useKiGeneration } from '../knowledge_indicators_table/ki_generation_context';
-import { GenerateSplitButton } from '../shared/generate_split_button';
-import { FindSignificantEventsButton } from './find_significant_events_button';
+import { AddDataSourceButton } from './add_data_source_button';
 import { STREAMS_TABLE_SEARCH_ARIA_LABEL } from './translations';
 import { StreamsTreeTable } from './tree_table';
 
@@ -31,19 +29,22 @@ export function StreamsView() {
   const {
     filteredStreams,
     isStreamsLoading,
-    isScheduling,
-    onboardingConfig,
-    setOnboardingConfig,
-    featuresConnectors,
-    queriesConnectors,
-    generatingStreamNames,
     streamStatusMap,
     cancelOnboarding,
-    bulkScheduleOnboarding,
     bulkOnboardAll,
-    bulkOnboardFeaturesOnly,
-    bulkOnboardQueriesOnly,
   } = useKiGeneration();
+
+  const knownStreamNames = useMemo(
+    () => filteredStreams?.map((item) => item.stream.name) ?? [],
+    [filteredStreams]
+  );
+
+  const { isStreamEnabled, isStreamTogglePending, setStreamEnabled } = useNightshiftStreamEnabled({
+    knownStreamNames,
+    streamStatusMap,
+    scheduleOnboarding: bulkOnboardAll,
+    cancelOnboarding,
+  });
 
   const aiFeatures = useAIFeatures();
   const allConnectors = aiFeatures?.genAiConnectors?.connectors ?? [];
@@ -51,52 +52,21 @@ export function StreamsView() {
   const isConnectorCatalogUnavailable =
     !allConnectors.length || !!aiFeatures?.genAiConnectors?.loading || !!connectorError;
 
-  const { isRunning, isCanceling, handleRun, handleCancel } = useSignificantEventsPageContext();
-
-  const isStreamActionable = useCallback(
-    (streamName: string) => {
-      if (generatingStreamNames.includes(streamName)) return false;
-      const result = streamStatusMap[streamName];
-      return !!result && !KIS_ONBOARDING_IN_PROGRESS_STATUSES.has(result.status);
+  const isStreamToggleDisabled = useCallback(
+    (streamName: string, enabled: boolean) => {
+      if (isStreamTogglePending(streamName)) {
+        return true;
+      }
+      if (streamStatusMap[streamName]?.status === SignificantEventsWorkflowStatus.BeingCanceled) {
+        return true;
+      }
+      if (enabled) {
+        return false;
+      }
+      return blocksActivity || isConnectorCatalogUnavailable;
     },
-    [generatingStreamNames, streamStatusMap]
+    [blocksActivity, isConnectorCatalogUnavailable, isStreamTogglePending, streamStatusMap]
   );
-
-  const [selectedStreams, setSelectedStreams] = useState<TableRow[]>([]);
-
-  const getActionableStreamNames = useCallback(
-    () =>
-      selectedStreams
-        .filter((item) => isStreamActionable(item.stream.name))
-        .map((item) => item.stream.name),
-    [selectedStreams, isStreamActionable]
-  );
-
-  const onBulkOnboardStreamsClick = useCallback(async () => {
-    const streamList = getActionableStreamNames();
-    setSelectedStreams([]);
-    await bulkOnboardAll(streamList);
-  }, [getActionableStreamNames, bulkOnboardAll]);
-
-  const onBulkOnboardFeaturesOnly = useCallback(async () => {
-    const streamList = getActionableStreamNames();
-    setSelectedStreams([]);
-    await bulkOnboardFeaturesOnly(streamList);
-  }, [getActionableStreamNames, bulkOnboardFeaturesOnly]);
-
-  const onBulkOnboardQueriesOnly = useCallback(async () => {
-    const streamList = getActionableStreamNames();
-    setSelectedStreams([]);
-    await bulkOnboardQueriesOnly(streamList);
-  }, [getActionableStreamNames, bulkOnboardQueriesOnly]);
-
-  const onOnboardStreamActionClick = async (streamName: string) => {
-    await bulkScheduleOnboarding([streamName]);
-  };
-
-  const onStopOnboardingActionClick = (streamName: string) => {
-    cancelOnboarding(streamName);
-  };
 
   const handleQueryChange: SignificantEventsSearchBarProps['onQueryChange'] = (queryPayload) => {
     setSearchText(String(queryPayload.query?.query ?? ''));
@@ -123,39 +93,7 @@ export function StreamsView() {
             />
           </EuiFlexItem>
           <EuiFlexItem grow={false}>
-            <GenerateSplitButton
-              size="s"
-              config={onboardingConfig}
-              allConnectors={allConnectors}
-              connectorError={connectorError}
-              featuresResolvedConnectorId={featuresConnectors.resolvedConnectorId}
-              queriesResolvedConnectorId={queriesConnectors.resolvedConnectorId}
-              onConfigChange={setOnboardingConfig}
-              onRun={onBulkOnboardStreamsClick}
-              onRunFeaturesOnly={onBulkOnboardFeaturesOnly}
-              onRunQueriesOnly={onBulkOnboardQueriesOnly}
-              isRunDisabled={
-                blocksActivity ||
-                selectedStreams.length === 0 ||
-                isConnectorCatalogUnavailable ||
-                featuresConnectors.loading ||
-                queriesConnectors.loading ||
-                isScheduling
-              }
-              runDisabledTooltip={activityBlockTooltip}
-              isConfigDisabled={selectedStreams.length === 0}
-              isLoading={isScheduling}
-            />
-          </EuiFlexItem>
-          <EuiFlexItem grow={false}>
-            <FindSignificantEventsButton
-              onRun={handleRun}
-              onCancel={handleCancel}
-              isRunning={isRunning}
-              isCanceling={isCanceling}
-              isDisabled={isRunning || blocksActivity}
-              disabledTooltip={activityBlockTooltip}
-            />
+            <AddDataSourceButton />
           </EuiFlexItem>
         </EuiFlexGroup>
       </EuiFlexItem>
@@ -175,15 +113,10 @@ export function StreamsView() {
           streamOnboardingResultMap={streamStatusMap}
           loading={isStreamsLoading}
           searchQuery={searchQuery}
-          blocksActivity={blocksActivity}
           activityBlockTooltip={activityBlockTooltip}
-          selection={{
-            selected: selectedStreams,
-            onSelectionChange: setSelectedStreams,
-            selectable: (row) => isStreamActionable(row.stream.name),
-          }}
-          onOnboardStreamActionClick={onOnboardStreamActionClick}
-          onStopOnboardingActionClick={onStopOnboardingActionClick}
+          isStreamEnabled={isStreamEnabled}
+          isStreamToggleDisabled={isStreamToggleDisabled}
+          onStreamEnabledChange={setStreamEnabled}
         />
       </EuiFlexItem>
     </EuiFlexGroup>

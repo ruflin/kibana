@@ -26,9 +26,7 @@ import { RUNNING_POLL_INTERVAL_MS } from '../../../../constants';
 import { useFetchDetections } from '../../../../hooks/use_fetch_detections';
 import { useTimefilter } from '../../../../hooks/use_timefilter';
 import { useSignificantEventsPageContext } from '../../context/significant_events_page_context';
-import { useBlocksNewActivity } from '../../../../hooks/use_significant_events_maintenance';
 import { DetectionFlyout } from './detection_flyout';
-import { FindSignificantEventsButton } from '../streams_view/find_significant_events_button';
 import { SignificantEventsSearchBar } from '../../../../components/search_bar';
 import { formatTimestamp } from '../../../../util/formatters';
 import { CHANGE_TYPE_LABELS } from '../shared/translations';
@@ -64,9 +62,7 @@ const MINIMIZE_DETAILS_ARIA_LABEL = i18n.translate(
 export const DetectionsTab = () => {
   const { euiTheme } = useEuiTheme();
   const { timeState } = useTimefilter();
-  const { blocksActivity, activityBlockTooltip } = useBlocksNewActivity();
-
-  const { isRunning, isCanceling, handleRun, handleCancel } = useSignificantEventsPageContext();
+  const { isRunning } = useSignificantEventsPageContext();
 
   const { data, isLoading, isError, refetch, pagination, setPagination } = useFetchDetections({
     from: timeState.start,
@@ -188,16 +184,6 @@ export const DetectionsTab = () => {
         <EuiFlexGroup justifyContent="flexEnd" alignItems="center" wrap={false}>
           <EuiFlexItem grow={false}>
             <SignificantEventsSearchBar showDatePicker enableDateRangePicker />
-          </EuiFlexItem>
-          <EuiFlexItem grow={false}>
-            <FindSignificantEventsButton
-              onRun={handleRun}
-              onCancel={handleCancel}
-              isRunning={isRunning}
-              isCanceling={isCanceling}
-              isDisabled={isRunning || blocksActivity}
-              disabledTooltip={activityBlockTooltip}
-            />
           </EuiFlexItem>
         </EuiFlexGroup>
       </EuiFlexItem>

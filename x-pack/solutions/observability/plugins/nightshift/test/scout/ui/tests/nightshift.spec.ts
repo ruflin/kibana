@@ -53,7 +53,7 @@ test.describe(
     });
 
     test('navigates between Significant Events, Nightshift, and settings', async ({ page }) => {
-      await page.gotoApp('significant_events/streams');
+      await page.gotoApp('significant_events/data_sources');
 
       const nightshiftButton = page.testSubj.locator(getAppMenuItemTestSubj('nightshift'));
       await expect(nightshiftButton).toBeVisible({ timeout: 60_000 });
@@ -67,6 +67,12 @@ test.describe(
 
       // Single settings action stays inline at Scout's default viewport — click it directly
       // (no overflow branch; expect() auto-waits for mount).
+      const managementLink = page.testSubj.locator('nightshiftManagementLink');
+      await expect(managementLink).toBeVisible();
+      await managementLink.click();
+      await expect(page).toHaveURL(/\/app\/significant_events\/significant_events/);
+
+      await page.gotoApp('nightshift');
       const settingsLink = page.testSubj.locator('nightshiftSettingsLink');
       await expect(settingsLink).toBeVisible();
       await settingsLink.click();

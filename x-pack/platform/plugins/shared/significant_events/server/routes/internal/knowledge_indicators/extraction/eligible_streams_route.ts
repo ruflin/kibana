@@ -10,13 +10,13 @@ import {
   OBSERVABILITY_STREAMS_CONTINUOUS_KI_EXTRACTION_ENABLED,
   OBSERVABILITY_STREAMS_CONTINUOUS_KI_EXTRACTION_INTERVAL_HOURS,
   OBSERVABILITY_STREAMS_ENABLE_QUERY_STREAMS,
-  OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_INDEX_PATTERNS,
+  OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_ENABLED_STREAMS,
 } from '@kbn/management-settings-ids';
-import { parseIndexPatterns } from '@kbn/streams-schema';
 import {
   MAX_ID_LENGTH,
   SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID,
 } from '@kbn/significant-events-schema';
+import { parseEnabledStreamsSetting } from '../../../../../common/enabled_streams';
 import { createServerRoute } from '../../../create_server_route';
 import { assertSignificantEventsAccess } from '../../../utils/assert_significant_events_access';
 import {
@@ -122,7 +122,7 @@ const eligibleStreamsRoute = createServerRoute({
     const maxStreams = query.maxScheduledStreams ?? MAX_SCHEDULED_STREAMS;
     const lookbackHours = query.lookbackHours ?? DEFAULT_LOOKBACK_HOURS;
 
-    const [connectorId, executions, allStreams, isQueryStreamsEnabled, rawIndexPatterns] =
+    const [connectorId, executions, allStreams, isQueryStreamsEnabled, userProvidedSettings] =
       await Promise.all([
         resolveConnectorForFeature({
           searchInferenceEndpoints: server.searchInferenceEndpoints,
@@ -133,15 +133,21 @@ const eligibleStreamsRoute = createServerRoute({
         streamsKIsOnboardingClient.getRecentExecutions(),
         streamsClient.listStreams(),
         uiSettingsClient.get<boolean>(OBSERVABILITY_STREAMS_ENABLE_QUERY_STREAMS),
-        uiSettingsClient.get<string>(OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_INDEX_PATTERNS),
+        uiSettingsClient.getUserProvided(),
       ]);
 
-    const indexPatterns = parseIndexPatterns(rawIndexPatterns);
+    const enabledStreamsUserValue =
+      userProvidedSettings[OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_ENABLED_STREAMS]?.userValue;
+    const enabledStreamsSetting = parseEnabledStreamsSetting(
+      typeof enabledStreamsUserValue === 'string' ? enabledStreamsUserValue : undefined
+    );
 
     const eligibleStreams = filterEligibleStreams({
       allStreams,
       isQueryStreamsEnabled,
-      indexPatterns,
+      enabledStreamNames: new Set(
+        enabledStreamsSetting.configured ? enabledStreamsSetting.streamNames : []
+      ),
     });
 
     const intervalHours =

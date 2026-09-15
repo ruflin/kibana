@@ -184,3 +184,36 @@ export const DETECTION_SCOPE_HELP_TEXT = i18n.translate(
       'Rules run across all projects linked through cross-project search, regardless of the project scope configured for this space.',
   }
 );
+
+export const RULES_PROPOSALS_TITLE = i18n.translate(
+  'xpack.significantEventsApp.queriesTable.rulesProposalsTitle',
+  { defaultMessage: 'Proposed rules' }
+);
+
+export const RULES_PROPOSALS_DESCRIPTION = i18n.translate(
+  'xpack.significantEventsApp.queriesTable.rulesProposalsDescription',
+  {
+    defaultMessage:
+      'Unpromoted query knowledge indicators that can be turned into background scanning rules.',
+  }
+);
+
+export const PROMOTE_RULE_ACTION_TITLE = i18n.translate(
+  'xpack.significantEventsApp.queriesTable.promoteRuleActionTitle',
+  { defaultMessage: 'Promote' }
+);
+
+export const PROMOTE_RULE_ACTION_DESCRIPTION = i18n.translate(
+  'xpack.significantEventsApp.queriesTable.promoteRuleActionDescription',
+  { defaultMessage: 'Promote this query to a rule' }
+);
+
+export const PROMOTE_RULE_SUCCESS_TITLE = i18n.translate(
+  'xpack.significantEventsApp.queriesTable.promoteRuleSuccessTitle',
+  { defaultMessage: 'Query promoted' }
+);
+
+export const PROMOTE_RULE_ERROR_TITLE = i18n.translate(
+  'xpack.significantEventsApp.queriesTable.promoteRuleErrorTitle',
+  { defaultMessage: 'Failed to promote query' }
+);

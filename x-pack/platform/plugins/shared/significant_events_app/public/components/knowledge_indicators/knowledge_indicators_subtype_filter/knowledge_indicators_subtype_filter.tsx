@@ -11,6 +11,7 @@ import { upperFirst } from 'lodash';
 import React, { useMemo } from 'react';
 import { KnowledgeIndicatorSelectableFilter } from '../knowledge_indicator_selectable_filter';
 import { getKnowledgeIndicatorSubtype } from '../utils/get_knowledge_indicator_subtype';
+import type { KnowledgeIndicatorView } from '../utils/get_knowledge_indicator_view';
 
 interface KnowledgeIndicatorsSubtypeFilterProps {
   knowledgeIndicators: KnowledgeIndicator[];
@@ -21,6 +22,7 @@ interface KnowledgeIndicatorsSubtypeFilterProps {
   onSelectedSubtypesChange: (subtypes: string[]) => void;
   hideComputedTypes?: boolean;
   selectedStreams?: string[];
+  view?: KnowledgeIndicatorView;
 }
 
 export function KnowledgeIndicatorsSubtypeFilter({
@@ -32,10 +34,11 @@ export function KnowledgeIndicatorsSubtypeFilter({
   onSelectedSubtypesChange,
   hideComputedTypes = false,
   selectedStreams = [],
+  view,
 }: KnowledgeIndicatorsSubtypeFilterProps) {
   const filterCriteria = useMemo(
-    () => ({ statusFilter, selectedTypes, selectedStreams, hideComputedTypes }),
-    [statusFilter, selectedTypes, selectedStreams, hideComputedTypes]
+    () => ({ statusFilter, selectedTypes, selectedStreams, hideComputedTypes, view }),
+    [statusFilter, selectedTypes, selectedStreams, hideComputedTypes, view]
   );
 
   return (

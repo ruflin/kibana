@@ -11,6 +11,23 @@ import React from 'react';
 import { SignificantEventsAppPageTemplate } from '../components/page_template';
 import { RedirectTo } from '../components/redirect_to';
 import { SignificantEventsPage } from '../pages/significant_events/page';
+import { DEFAULT_MANAGEMENT_TAB } from '../../common/tabs';
+
+const managementQueryParams = t.partial({
+  query: t.partial({
+    rangeFrom: t.string,
+    rangeTo: t.string,
+    search: t.string,
+    status: t.string,
+    type: t.union([t.string, t.array(t.string)]),
+    subtype: t.union([t.string, t.array(t.string)]),
+    stream: t.union([t.string, t.array(t.string)]),
+    showComputed: t.string,
+    selectedItem: t.string,
+    selectedEvent: t.string,
+    openEvent: t.string,
+  }),
+});
 
 /**
  * The array of route definitions to be used when the application creates the routes.
@@ -27,7 +44,19 @@ const significantEventsAppRoutes = {
     ),
     children: {
       '/': {
-        element: <RedirectTo path="/{tab}" params={{ path: { tab: 'streams' } }} />,
+        element: <RedirectTo path="/{tab}" params={{ path: { tab: DEFAULT_MANAGEMENT_TAB } }} />,
+      },
+      '/{tab}/{subtab}': {
+        element: <SignificantEventsPage />,
+        params: t.intersection([
+          t.type({
+            path: t.type({
+              tab: t.string,
+              subtab: t.string,
+            }),
+          }),
+          managementQueryParams,
+        ]),
       },
       '/{tab}': {
         element: <SignificantEventsPage />,
@@ -37,21 +66,7 @@ const significantEventsAppRoutes = {
               tab: t.string,
             }),
           }),
-          t.partial({
-            query: t.partial({
-              rangeFrom: t.string,
-              rangeTo: t.string,
-              search: t.string,
-              status: t.string,
-              type: t.union([t.string, t.array(t.string)]),
-              subtype: t.union([t.string, t.array(t.string)]),
-              stream: t.union([t.string, t.array(t.string)]),
-              showComputed: t.string,
-              selectedItem: t.string,
-              selectedEvent: t.string,
-              openEvent: t.string,
-            }),
-          }),
+          managementQueryParams,
         ]),
       },
     },

@@ -67,6 +67,21 @@ export {
   toBaseFeature,
 } from './src/feature';
 
+export type {
+  TopologyEdge,
+  TopologyEdgeKind,
+  TopologyGraph,
+  TopologyNode,
+  TopologyNodeType,
+  TopologyUnresolvedEndpoint,
+} from './src/topology_graph';
+
+export {
+  TOPOLOGY_EDGE_KINDS,
+  TOPOLOGY_NODE_TYPES,
+  featuresToTopologyGraph,
+} from './src/topology_graph';
+
 export { FeatureAccumulator } from './src/feature_accumulator';
 
 export type { IterationResult } from './src/api/features';
@@ -157,7 +172,11 @@ export type {
   KIsOnboardingStatusResult,
 } from './src/onboarding';
 
-export { KIsOnboardingStep, KIS_ONBOARDING_IN_PROGRESS_STATUSES } from './src/onboarding';
+export {
+  KIsOnboardingStep,
+  KIS_ONBOARDING_IN_PROGRESS_STATUSES,
+  isKiOnboardingEnabledStatus,
+} from './src/onboarding';
 
 export type { SignificantEventsWorkflowStatusResult } from './src/workflows';
 
