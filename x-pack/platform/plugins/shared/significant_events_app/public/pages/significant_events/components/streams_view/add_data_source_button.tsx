@@ -51,7 +51,7 @@ export function AddDataSourceButton() {
         button={
           <EuiButton
             size="s"
-            iconType="plusInCircle"
+            iconType="plusCircle"
             onClick={togglePopover}
             data-test-subj="significantEventsAddDataSourceButton"
           >

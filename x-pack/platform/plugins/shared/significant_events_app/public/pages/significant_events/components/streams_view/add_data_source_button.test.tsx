@@ -52,9 +52,11 @@ describe('AddDataSourceButton', () => {
   it('opens a Query stream selection instead of Find Significant Events', () => {
     renderButton();
 
-    expect(screen.getByTestId('significantEventsAddDataSourceButton')).toHaveTextContent(
-      ADD_DATA_SOURCE_BUTTON_LABEL
-    );
+    const addDataSourceButton = screen.getByTestId('significantEventsAddDataSourceButton');
+    expect(addDataSourceButton).toHaveTextContent(ADD_DATA_SOURCE_BUTTON_LABEL);
+    expect(
+      addDataSourceButton.querySelector('[data-euiicon-type="plusCircle"]')
+    ).toBeInTheDocument();
     expect(screen.queryByText('Find Significant Events')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('significantEventsAddDataSourceButton'));
