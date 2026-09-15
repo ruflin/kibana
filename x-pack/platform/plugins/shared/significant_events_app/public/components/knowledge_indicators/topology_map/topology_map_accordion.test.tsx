@@ -30,7 +30,9 @@ function makeFeature(overrides: Partial<Feature> & Pick<Feature, 'id' | 'type'>)
   };
 }
 
-function makeFeatureKI(overrides: Partial<Feature> & Pick<Feature, 'id' | 'type'>): KnowledgeIndicator {
+function makeFeatureKI(
+  overrides: Partial<Feature> & Pick<Feature, 'id' | 'type'>
+): KnowledgeIndicator {
   return { kind: 'feature', feature: makeFeature(overrides) };
 }
 

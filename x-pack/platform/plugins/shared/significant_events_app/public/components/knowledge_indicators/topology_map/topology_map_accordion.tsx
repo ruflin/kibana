@@ -127,6 +127,7 @@ export function TopologyMapAccordion({
             {unresolvedRefs.length > 0 ? (
               <EuiFlexItem>
                 <EuiCallOut
+                  announceOnMount
                   size="s"
                   color="warning"
                   title={TOPOLOGY_MAP_UNRESOLVED_TITLE(unresolvedRefs.length)}

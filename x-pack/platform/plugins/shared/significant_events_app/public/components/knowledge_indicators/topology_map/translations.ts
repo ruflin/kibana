@@ -62,11 +62,14 @@ export const TOPOLOGY_MAP_UNRESOLVED_TITLE = (count: number) =>
   });
 
 export const TOPOLOGY_MAP_UNRESOLVED_DESCRIPTION = (refs: string) =>
-  i18n.translate('xpack.significantEventsApp.knowledgeIndicators.topologyMapUnresolvedDescription', {
-    defaultMessage:
-      'These endpoints are listed from dependency knowledge indicators and were not invented as nodes: {refs}.',
-    values: { refs },
-  });
+  i18n.translate(
+    'xpack.significantEventsApp.knowledgeIndicators.topologyMapUnresolvedDescription',
+    {
+      defaultMessage:
+        'These endpoints are listed from dependency knowledge indicators and were not invented as nodes: {refs}.',
+      values: { refs },
+    }
+  );
 
 export const TOPOLOGY_NODE_ARIA_LABEL = ({
   type,

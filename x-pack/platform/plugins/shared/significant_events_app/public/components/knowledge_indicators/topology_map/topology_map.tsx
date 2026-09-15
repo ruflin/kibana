@@ -7,7 +7,10 @@
 
 import { EuiCallOut, useEuiTheme } from '@elastic/eui';
 import { css } from '@emotion/react';
-import type { TopologyGraph, TopologyNode as TopologyNodeData } from '@kbn/significant-events-schema';
+import type {
+  TopologyGraph,
+  TopologyNode as TopologyNodeModel,
+} from '@kbn/significant-events-schema';
 import {
   Background,
   Controls,
@@ -16,7 +19,6 @@ import {
   ReactFlowProvider,
   type ColorMode,
   type Edge,
-  type Node,
   type NodeMouseHandler,
   type NodeTypes,
 } from '@xyflow/react';
@@ -34,7 +36,7 @@ const DEFAULT_HEIGHT = 360;
 
 export interface TopologyMapProps {
   graph: TopologyGraph;
-  onNodeClick?: (node: TopologyNodeData) => void;
+  onNodeClick?: (node: TopologyNodeModel) => void;
   interactive?: boolean;
   height?: number;
   selectedNodeId?: string;
@@ -72,16 +74,24 @@ class GraphErrorBoundary extends Component<
   }
 }
 
-function toFlowNodes(
-  graph: TopologyGraph,
-  selectedNodeId?: string
-): Array<Node<TopologyNodeData, 'topology'>> {
+function toTopologyNode(data: TopologyFlowNode['data']): TopologyNodeModel {
+  return {
+    id: data.id,
+    featureId: data.featureId,
+    type: data.type,
+    ...(data.subtype ? { subtype: data.subtype } : {}),
+    label: data.label,
+    streamName: data.streamName,
+  };
+}
+
+function toFlowNodes(graph: TopologyGraph, selectedNodeId?: string): TopologyFlowNode[] {
   return graph.nodes.map((node) => ({
     id: node.id,
     type: 'topology',
     position: { x: 0, y: 0 },
     selected: selectedNodeId === node.id,
-    data: node,
+    data: { ...node },
   }));
 }
 
@@ -123,7 +133,7 @@ function TopologyMapCanvas({
       if (!interactive) {
         return;
       }
-      onNodeClick?.(node.data);
+      onNodeClick?.(toTopologyNode(node.data));
     },
     [interactive, onNodeClick]
   );
@@ -136,7 +146,7 @@ function TopologyMapCanvas({
         height: ${height}px;
       `}
     >
-      <ReactFlow
+      <ReactFlow<TopologyFlowNode, Edge>
         nodes={nodes}
         edges={edges}
         nodeTypes={NODE_TYPES}

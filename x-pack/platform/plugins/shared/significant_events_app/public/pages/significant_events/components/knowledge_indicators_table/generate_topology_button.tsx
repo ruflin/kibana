@@ -9,10 +9,7 @@ import { EuiButton, EuiToolTip } from '@elastic/eui';
 import React, { useCallback } from 'react';
 import { useKibana } from '../../../../hooks/use_kibana';
 import { useBlocksNewActivity } from '../../../../hooks/use_significant_events_maintenance';
-import {
-  GENERATE_TOPOLOGY_BUTTON_LABEL,
-  getGenerateTopologyInitialMessage,
-} from './translations';
+import { GENERATE_TOPOLOGY_BUTTON_LABEL, getGenerateTopologyInitialMessage } from './translations';
 
 export function GenerateTopologyButton({
   selectedStreamNames = [],

@@ -12,7 +12,8 @@ import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import React, { memo } from 'react';
 import { TOPOLOGY_NODE_ARIA_LABEL } from './translations';
 
-export type TopologyFlowNode = Node<TopologyNodeData, 'topology'>;
+export type TopologyFlowNodeData = TopologyNodeData & Record<string, unknown>;
+export type TopologyFlowNode = Node<TopologyFlowNodeData, 'topology'>;
 
 const NODE_KIND_COLORS = {
   entity: 'primary',
@@ -51,7 +52,9 @@ function TopologyNodeComponent({ data, selected }: NodeProps<TopologyFlowNode>) 
         border: ${selected ? euiTheme.border.width.thick : euiTheme.border.width.thin} solid
           ${selected ? euiTheme.colors.primary : border};
         background: ${background};
-        outline: ${selected ? `${euiTheme.border.width.thick} solid ${euiTheme.colors.primary}` : 'none'};
+        outline: ${selected
+          ? `${euiTheme.border.width.thick} solid ${euiTheme.colors.primary}`
+          : 'none'};
       `}
     >
       <Handle

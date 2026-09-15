@@ -77,9 +77,7 @@ const isTopologyNodeType = (type: string): type is TopologyNodeType =>
   TOPOLOGY_NODE_TYPE_SET.has(type);
 
 const nodeLabel = (feature: Feature): string =>
-  asNonEmptyString(feature.title) ??
-  asNonEmptyString(feature.properties.name) ??
-  feature.id;
+  asNonEmptyString(feature.title) ?? asNonEmptyString(feature.properties.name) ?? feature.id;
 
 const toTopologyNode = (feature: Feature & { type: TopologyNodeType }): TopologyNode => ({
   id: feature.uuid,
@@ -97,7 +95,11 @@ interface NodeLookup {
   byTitle: Map<string, TopologyNode>;
 }
 
-const registerIfAbsent = (map: Map<string, TopologyNode>, key: string, node: TopologyNode): void => {
+const registerIfAbsent = (
+  map: Map<string, TopologyNode>,
+  key: string,
+  node: TopologyNode
+): void => {
   if (!map.has(key)) {
     map.set(key, node);
   }

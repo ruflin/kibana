@@ -11,12 +11,10 @@ import { featuresToTopologyGraph } from './topology_graph';
 
 function makeFeature(overrides: Partial<Feature> & Pick<Feature, 'id' | 'type'>): Feature {
   const base = {
-    id: overrides.id,
-    stream_name: overrides.stream_name ?? 'logs.claims',
-    type: overrides.type,
-    description: overrides.description ?? `${overrides.type} ${overrides.id}`,
-    properties: overrides.properties ?? {},
-    confidence: overrides.confidence ?? 100,
+    stream_name: 'logs.claims',
+    description: `${overrides.type} ${overrides.id}`,
+    properties: {},
+    confidence: 100,
     ...overrides,
   };
   return {
