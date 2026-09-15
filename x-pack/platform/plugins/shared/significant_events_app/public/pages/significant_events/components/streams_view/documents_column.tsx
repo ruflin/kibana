@@ -82,12 +82,13 @@ export function DocumentsColumn({
   const noDocCountData = histogramQueryResult.error ? '' : '-';
 
   const noHistogramData = histogramQueryResult.error ? (
-    <EuiIconTip
-      type="warning"
-      color="danger"
-      content={getErrorMessage(histogramQueryResult.error)}
-      data-test-subj="streamsDocCount-error"
-    />
+    <span data-test-subj="streamsDocCount-error">
+      <EuiIconTip
+        type="warning"
+        color="danger"
+        content={getErrorMessage(histogramQueryResult.error)}
+      />
+    </span>
   ) : (
     <EuiIcon type="chartLine" size="m" aria-hidden={true} />
   );

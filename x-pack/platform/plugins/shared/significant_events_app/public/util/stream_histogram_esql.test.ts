@@ -5,10 +5,7 @@
  * 2.0.
  */
 
-import {
-  buildStreamIngestHistogramEsql,
-  getMeaningfulBucketMs,
-} from './stream_histogram_esql';
+import { buildStreamIngestHistogramEsql, getMeaningfulBucketMs } from './stream_histogram_esql';
 
 describe('stream_histogram_esql', () => {
   it('uses the same 24h bucket interval as the Streams list sparkline', () => {

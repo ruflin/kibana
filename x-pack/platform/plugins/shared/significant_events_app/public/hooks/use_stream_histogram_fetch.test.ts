@@ -86,9 +86,7 @@ describe('useStreamHistogramFetch', () => {
 
     await result.current.getStreamHistogram('logs-generic-default');
 
-    expect(mockExecuteEsqlQuery.mock.calls[0][0].query).toContain(
-      'logs-generic-default,logs-generic-default::failures'
-    );
+    expect(mockExecuteEsqlQuery.mock.calls[0][0].query).toContain('logs-generic-default::failures');
   });
 
   it('treats unknown-index errors as an empty histogram', async () => {

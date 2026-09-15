@@ -55,10 +55,7 @@ jest.mock('./documents_column', () => ({
     indexPattern: string;
     numDataPoints: number;
   }) => (
-    <div
-      data-test-subj={`streamsDocCount-${indexPattern}`}
-      data-num-data-points={numDataPoints}
-    >
+    <div data-test-subj={`streamsDocCount-${indexPattern}`} data-num-data-points={numDataPoints}>
       522,131
     </div>
   ),
