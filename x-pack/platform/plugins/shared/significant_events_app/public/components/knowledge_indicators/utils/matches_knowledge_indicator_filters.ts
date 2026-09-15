@@ -10,6 +10,10 @@ import { isComputedFeature } from '@kbn/significant-events-schema';
 import { getKnowledgeIndicatorStreamName } from './get_knowledge_indicator_stream_name';
 import { getKnowledgeIndicatorSubtype } from './get_knowledge_indicator_subtype';
 import { getKnowledgeIndicatorType } from './get_knowledge_indicator_type';
+import {
+  matchesKnowledgeIndicatorView,
+  type KnowledgeIndicatorView,
+} from './get_knowledge_indicator_view';
 
 export interface KnowledgeIndicatorFilterCriteria {
   statusFilter?: 'active' | 'excluded';
@@ -18,6 +22,7 @@ export interface KnowledgeIndicatorFilterCriteria {
   selectedStreams?: string[];
   hideComputedTypes?: boolean;
   searchTerm?: string;
+  view?: KnowledgeIndicatorView;
 }
 
 const isActive = (ki: KnowledgeIndicator): boolean => ki.kind === 'query' || !ki.feature.excluded;
@@ -33,13 +38,17 @@ export const matchesKnowledgeIndicatorFilters = (
     selectedStreams,
     hideComputedTypes,
     searchTerm,
+    view,
   } = criteria;
 
   if (statusFilter === 'active' && !isActive(ki)) return false;
   if (statusFilter === 'excluded' && isActive(ki)) return false;
 
+  const type = getKnowledgeIndicatorType(ki);
+  if (view && !matchesKnowledgeIndicatorView(type, view)) return false;
+
   if (selectedTypes?.length) {
-    if (!selectedTypes.includes(getKnowledgeIndicatorType(ki))) return false;
+    if (!selectedTypes.includes(type)) return false;
   }
 
   if (selectedSubtypes?.length) {

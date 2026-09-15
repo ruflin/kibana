@@ -85,6 +85,37 @@ describe('NightshiftPage', () => {
     expect(screen.getByTestId('nightshiftAppStub')).toBeInTheDocument();
   });
 
+  it('links to Nightshift Management with EBT tracking', async () => {
+    renderPage();
+    await openAppMenuOverflow();
+
+    const managementLink = await screen.findByTestId('nightshiftManagementLink');
+    expect(managementLink).toHaveAttribute('href', '/app/significant_events/significant_events');
+
+    let trackedClick: { action: string | null; element: string | null } | undefined;
+    const captureTrackedClick = (event: MouseEvent) => {
+      const target = event.target;
+      const trackedTarget = target instanceof Element ? target.closest('[data-ebt-action]') : null;
+      trackedClick = trackedTarget
+        ? {
+            action: trackedTarget.getAttribute('data-ebt-action'),
+            element: trackedTarget.getAttribute('data-ebt-element'),
+          }
+        : undefined;
+    };
+    document.addEventListener('click', captureTrackedClick);
+    await act(async () => fireEvent.click(managementLink));
+    document.removeEventListener('click', captureTrackedClick);
+
+    await waitFor(() =>
+      expect(trackedClick).toEqual({
+        action: 'viewManagement',
+        element: 'nightshiftPageHeader',
+      })
+    );
+    expect(navigateToUrl).toHaveBeenCalledWith('/app/significant_events/significant_events');
+  });
+
   it('links to Streams settings with EBT tracking', async () => {
     renderPage();
     await openAppMenuOverflow();

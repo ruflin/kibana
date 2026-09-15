@@ -573,7 +573,7 @@ export function SettingsTab() {
           <EuiText size="s">
             <h3>
               {i18n.translate('xpack.significantEventsApp.settings.dataSourcesSectionTitle', {
-                defaultMessage: 'Data sources',
+                defaultMessage: 'Index patterns',
               })}
             </h3>
           </EuiText>

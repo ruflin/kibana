@@ -10,6 +10,7 @@ import type { KnowledgeIndicator } from '@kbn/nightshift-ai';
 import React, { useMemo } from 'react';
 import { KnowledgeIndicatorSelectableFilter } from '../../../../components/knowledge_indicators/knowledge_indicator_selectable_filter';
 import { getKnowledgeIndicatorStreamName } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_stream_name';
+import type { KnowledgeIndicatorView } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_view';
 
 interface StreamFilterProps {
   knowledgeIndicators: KnowledgeIndicator[];
@@ -19,6 +20,7 @@ interface StreamFilterProps {
   hideComputedTypes: boolean;
   selectedStreams: string[];
   onSelectedStreamsChange: (selectedStreams: string[]) => void;
+  view?: KnowledgeIndicatorView;
 }
 
 export function StreamFilter({
@@ -29,10 +31,11 @@ export function StreamFilter({
   hideComputedTypes,
   selectedStreams,
   onSelectedStreamsChange,
+  view,
 }: StreamFilterProps) {
   const filterCriteria = useMemo(
-    () => ({ statusFilter, selectedTypes, hideComputedTypes }),
-    [statusFilter, selectedTypes, hideComputedTypes]
+    () => ({ statusFilter, selectedTypes, hideComputedTypes, view }),
+    [statusFilter, selectedTypes, hideComputedTypes, view]
   );
 
   return (

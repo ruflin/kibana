@@ -21,6 +21,7 @@ import { TableTitle } from '../../../../components/features/table_title';
 import { KnowledgeIndicatorsTypeFilter } from '../../../../components/knowledge_indicators/knowledge_indicators_type_filter';
 import { KnowledgeIndicatorsSubtypeFilter } from '../../../../components/knowledge_indicators/knowledge_indicators_subtype_filter';
 import { MATCH_QUERY_TYPE } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_type';
+import type { KnowledgeIndicatorView } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_view';
 import { KnowledgeIndicatorsStatusFilter } from '../../../../components/knowledge_indicators/knowledge_indicators_status_filter';
 import { StreamFilter } from '../stream_filter';
 import {
@@ -43,6 +44,7 @@ const searchBarStyle = css`
 
 interface KnowledgeIndicatorsToolbarProps {
   knowledgeIndicators: KnowledgeIndicator[];
+  view: KnowledgeIndicatorView;
   filteredCount: number;
   tableSearchValue: string;
   debouncedSearchTerm: string;
@@ -78,6 +80,7 @@ interface KnowledgeIndicatorsToolbarProps {
 
 export function KnowledgeIndicatorsToolbar({
   knowledgeIndicators,
+  view,
   filteredCount,
   tableSearchValue,
   debouncedSearchTerm,
@@ -129,6 +132,7 @@ export function KnowledgeIndicatorsToolbar({
             hideComputedTypes={hideComputedTypes}
             statusFilter={statusFilter}
             onStatusFilterChange={onStatusFilterChange}
+            view={view}
           />
         </EuiFlexItem>
         <EuiFlexItem grow={false}>
@@ -140,6 +144,7 @@ export function KnowledgeIndicatorsToolbar({
             onSelectedTypesChange={onSelectedTypesChange}
             hideComputedTypes={hideComputedTypes}
             selectedStreams={selectedStreams}
+            view={view}
           />
         </EuiFlexItem>
         <EuiFlexItem grow={false}>
@@ -152,6 +157,7 @@ export function KnowledgeIndicatorsToolbar({
             onSelectedSubtypesChange={onSelectedSubtypesChange}
             hideComputedTypes={hideComputedTypes}
             selectedStreams={selectedStreams}
+            view={view}
           />
         </EuiFlexItem>
         <EuiFlexItem grow={false}>
@@ -163,16 +169,19 @@ export function KnowledgeIndicatorsToolbar({
             hideComputedTypes={hideComputedTypes}
             selectedStreams={selectedStreams}
             onSelectedStreamsChange={onSelectedStreamsChange}
+            view={view}
           />
         </EuiFlexItem>
-        <EuiFlexItem grow={false}>
-          <EuiSwitch
-            label={SHOW_COMPUTED_LABEL}
-            checked={!hideComputedTypes}
-            onChange={(e) => onComputedToggleChange(e.target.checked)}
-            compressed
-          />
-        </EuiFlexItem>
+        {view === 'more' && (
+          <EuiFlexItem grow={false}>
+            <EuiSwitch
+              label={SHOW_COMPUTED_LABEL}
+              checked={!hideComputedTypes}
+              onChange={(e) => onComputedToggleChange(e.target.checked)}
+              compressed
+            />
+          </EuiFlexItem>
+        )}
       </EuiFlexGroup>
       <EuiSpacer size="m" />
       <EuiFlexGroup alignItems="center" gutterSize="s">
@@ -218,7 +227,8 @@ export function KnowledgeIndicatorsToolbar({
             </EuiButtonEmpty>
           </EuiFlexItem>
         )}
-        {selectedTypes.length === 1 && selectedTypes[0] === MATCH_QUERY_TYPE && (
+        {(view === 'queries' ||
+          (selectedTypes.length === 1 && selectedTypes[0] === MATCH_QUERY_TYPE)) && (
           <EuiFlexItem grow={false}>
             <EuiToolTip content={activityBlockTooltip}>
               <EuiButtonEmpty

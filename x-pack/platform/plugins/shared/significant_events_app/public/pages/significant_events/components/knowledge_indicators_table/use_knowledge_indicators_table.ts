@@ -34,10 +34,11 @@ import {
 } from './translations';
 import { getPromoteSkipReason } from '../../../../lib/promote_skip_reason';
 import { useKnowledgeIndicatorsUrlState } from './use_knowledge_indicators_url_state';
+import type { KnowledgeIndicatorView } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_view';
 
 export { getKnowledgeIndicatorTitle };
 
-export function useKnowledgeIndicatorsTable() {
+export function useKnowledgeIndicatorsTable(view?: KnowledgeIndicatorView) {
   const {
     core: {
       notifications: { toasts },
@@ -82,6 +83,7 @@ export function useKnowledgeIndicatorsTable() {
     isLoading,
     resetPagination,
     clearSelection,
+    view,
   });
 
   const {
@@ -126,6 +128,7 @@ export function useKnowledgeIndicatorsTable() {
         selectedStreams,
         hideComputedTypes,
         searchTerm: debouncedSearchTerm,
+        view,
       })
     );
 
@@ -142,6 +145,7 @@ export function useKnowledgeIndicatorsTable() {
     selectedSubtypes,
     selectedStreams,
     hideComputedTypes,
+    view,
   ]);
 
   const handleTableChange = useCallback(({ page }: CriteriaWithPagination<KnowledgeIndicator>) => {
@@ -243,6 +247,7 @@ export function useKnowledgeIndicatorsTable() {
           selectedStreams,
           hideComputedTypes: false,
           searchTerm: debouncedSearchTerm,
+          view,
         })
       )
       .some((ki) => ki.kind === 'feature' && isComputedFeature(ki.feature));
@@ -255,6 +260,7 @@ export function useKnowledgeIndicatorsTable() {
     selectedSubtypes,
     selectedStreams,
     debouncedSearchTerm,
+    view,
   ]);
 
   const handleBulkPromote = useCallback(() => {

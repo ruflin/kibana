@@ -36,6 +36,9 @@ import { useKiGeneration } from './ki_generation_context';
 import { useKnowledgeIndicatorsTable } from './use_knowledge_indicators_table';
 import { useKnowledgeIndicatorsColumns } from './use_knowledge_indicators_columns';
 import { KnowledgeIndicatorsToolbar } from './knowledge_indicators_toolbar';
+import { GenerateTopologyButton } from './generate_topology_button';
+import { TopologyMapStub } from './topology_map_stub';
+import type { KnowledgeIndicatorView } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_view';
 import {
   TABLE_CAPTION,
   NO_ITEMS_MESSAGE,
@@ -47,7 +50,7 @@ import {
   getGenerationInProgressDescription,
 } from './translations';
 
-export function KnowledgeIndicatorsTable() {
+export function KnowledgeIndicatorsTable({ view }: { view: KnowledgeIndicatorView }) {
   const { euiTheme } = useEuiTheme();
   const { blocksActivity, activityBlockTooltip } = useBlocksNewActivity();
   const [generationStreamNames, setGenerationStreamNames] = useState<string[]>([]);
@@ -148,7 +151,7 @@ export function KnowledgeIndicatorsTable() {
     deleteKnowledgeIndicatorsInBulk,
     handleBulkPromote,
     goToPageForItemIndex,
-  } = useKnowledgeIndicatorsTable();
+  } = useKnowledgeIndicatorsTable(view);
 
   const wasGeneratingRef = useRef(false);
   useEffect(() => {
@@ -212,6 +215,11 @@ export function KnowledgeIndicatorsTable() {
           isLoading={isScheduling}
         />
       </EuiFlexItem>
+      {view === 'topology' && (
+        <EuiFlexItem grow={false}>
+          <GenerateTopologyButton />
+        </EuiFlexItem>
+      )}
     </EuiFlexGroup>
   );
 
@@ -261,9 +269,16 @@ export function KnowledgeIndicatorsTable() {
     <EuiPanel hasBorder hasShadow={false}>
       {generationRow}
       {generationProgressCallout}
+      {view === 'topology' && (
+        <>
+          <EuiSpacer size="m" />
+          <TopologyMapStub knowledgeIndicators={filteredKnowledgeIndicators} />
+        </>
+      )}
       <EuiSpacer size="m" />
       <KnowledgeIndicatorsToolbar
         knowledgeIndicators={knowledgeIndicators}
+        view={view}
         filteredCount={filteredKnowledgeIndicators.length}
         tableSearchValue={tableSearchValue}
         debouncedSearchTerm={debouncedSearchTerm}

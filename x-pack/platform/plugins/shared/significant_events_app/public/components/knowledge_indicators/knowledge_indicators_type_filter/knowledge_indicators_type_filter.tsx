@@ -15,6 +15,7 @@ import {
   MATCH_QUERY_TYPE,
   STATS_QUERY_TYPE,
 } from '../utils/get_knowledge_indicator_type';
+import type { KnowledgeIndicatorView } from '../utils/get_knowledge_indicator_view';
 
 interface KnowledgeIndicatorTypeFilterProps {
   knowledgeIndicators: KnowledgeIndicator[];
@@ -24,6 +25,7 @@ interface KnowledgeIndicatorTypeFilterProps {
   onSelectedTypesChange: (selectedTypes: string[]) => void;
   hideComputedTypes?: boolean;
   selectedStreams?: string[];
+  view?: KnowledgeIndicatorView;
 }
 
 export function KnowledgeIndicatorsTypeFilter({
@@ -34,10 +36,11 @@ export function KnowledgeIndicatorsTypeFilter({
   onSelectedTypesChange,
   hideComputedTypes = false,
   selectedStreams = [],
+  view,
 }: KnowledgeIndicatorTypeFilterProps) {
   const filterCriteria = useMemo(
-    () => ({ statusFilter, selectedStreams, hideComputedTypes }),
-    [statusFilter, selectedStreams, hideComputedTypes]
+    () => ({ statusFilter, selectedStreams, hideComputedTypes, view }),
+    [statusFilter, selectedStreams, hideComputedTypes, view]
   );
 
   return (

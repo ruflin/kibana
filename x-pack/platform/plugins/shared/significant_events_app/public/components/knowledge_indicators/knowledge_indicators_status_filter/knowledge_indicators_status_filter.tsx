@@ -10,6 +10,7 @@ import { i18n } from '@kbn/i18n';
 import type { KnowledgeIndicator } from '@kbn/nightshift-ai';
 import React, { useMemo } from 'react';
 import { matchesKnowledgeIndicatorFilters } from '../utils/matches_knowledge_indicator_filters';
+import type { KnowledgeIndicatorView } from '../utils/get_knowledge_indicator_view';
 
 interface KnowledgeIndicatorStatusFilterProps {
   knowledgeIndicators: KnowledgeIndicator[];
@@ -19,6 +20,7 @@ interface KnowledgeIndicatorStatusFilterProps {
   hideComputedTypes?: boolean;
   statusFilter: 'active' | 'excluded';
   onStatusFilterChange: (filter: 'active' | 'excluded') => void;
+  view?: KnowledgeIndicatorView;
 }
 
 export function KnowledgeIndicatorsStatusFilter({
@@ -29,6 +31,7 @@ export function KnowledgeIndicatorsStatusFilter({
   hideComputedTypes = false,
   statusFilter,
   onStatusFilterChange,
+  view,
 }: KnowledgeIndicatorStatusFilterProps) {
   const statusFilterCounts = useMemo(() => {
     return knowledgeIndicators.reduce(
@@ -38,6 +41,7 @@ export function KnowledgeIndicatorsStatusFilter({
           selectedStreams,
           hideComputedTypes,
           searchTerm,
+          view,
         });
 
         if (!matchesOtherFilters) {
@@ -54,7 +58,7 @@ export function KnowledgeIndicatorsStatusFilter({
       },
       { active: 0, excluded: 0 }
     );
-  }, [knowledgeIndicators, searchTerm, selectedTypes, selectedStreams, hideComputedTypes]);
+  }, [knowledgeIndicators, searchTerm, selectedTypes, selectedStreams, hideComputedTypes, view]);
 
   return (
     <EuiFilterGroup>

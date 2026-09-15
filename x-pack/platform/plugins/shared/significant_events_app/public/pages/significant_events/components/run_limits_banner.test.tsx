@@ -13,8 +13,8 @@ import { useRunQuotas } from '../../../hooks/use_significant_events_run_quotas';
 import { RunLimitsBanner } from './run_limits_banner';
 
 jest.mock('../../../hooks/use_significant_events_run_quotas');
-jest.mock('../../../hooks/use_significant_events_app_router', () => ({
-  useSignificantEventsAppRouter: () => ({ link: jest.fn().mockReturnValue('#settings') }),
+jest.mock('../../../hooks/use_management_route', () => ({
+  useManagementRoute: () => ({ link: jest.fn().mockReturnValue('#settings') }),
 }));
 
 const mockUseRunQuotas = useRunQuotas as jest.MockedFunction<typeof useRunQuotas>;

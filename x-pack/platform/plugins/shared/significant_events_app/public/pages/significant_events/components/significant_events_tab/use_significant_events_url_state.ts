@@ -6,10 +6,9 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
-import { useSignificantEventsAppParams } from '../../../../hooks/use_significant_events_app_params';
-import { useSignificantEventsAppRouter } from '../../../../hooks/use_significant_events_app_router';
+import { useManagementRoute } from '../../../../hooks/use_management_route';
 
-type TabQuery = ReturnType<typeof useSignificantEventsAppParams<'/{tab}'>>['query'];
+type TabQuery = ReturnType<typeof useManagementRoute>['query'];
 
 const omitSelectedEvent = (query: TabQuery): Omit<TabQuery, 'selectedEvent'> => {
   const { selectedEvent, ...rest } = query ?? {};
@@ -26,8 +25,7 @@ const omitSelectedEvent = (query: TabQuery): Omit<TabQuery, 'selectedEvent'> => 
  *   flyout opens; closing the flyout removes `openEvent` while keeping `selectedEvent`.
  */
 export const useSignificantEventsUrlState = () => {
-  const router = useSignificantEventsAppRouter();
-  const { query } = useSignificantEventsAppParams('/{tab}');
+  const { query, push, replace } = useManagementRoute();
 
   const queryRef = useRef(query);
   queryRef.current = query;
@@ -37,32 +35,32 @@ export const useSignificantEventsUrlState = () => {
 
   const openEvent = useCallback(
     (eventId: string) => {
-      router.push('/{tab}', {
-        path: { tab: 'significant_events' },
+      push({
+        tab: 'significant_events',
         query: { ...(queryRef.current ?? {}), openEvent: eventId },
       });
     },
-    [router]
+    [push]
   );
 
   const closeEvent = useCallback(() => {
     const { openEvent: _, ...rest } = queryRef.current ?? {};
-    router.push('/{tab}', {
-      path: { tab: 'significant_events' },
+    push({
+      tab: 'significant_events',
       query: rest,
     });
-  }, [router]);
+  }, [push]);
 
   // replace (not push): clearing is often triggered per keystroke from the search bar, and a
   // history entry per keystroke would make the back button restore the cleared selection.
   // Keep openEvent so a filter/search edit does not close the flyout while the event is still
   // in the list. A later fetch that drops the event clears openEvent separately.
   const clearSelectedEvent = useCallback(() => {
-    router.replace('/{tab}', {
-      path: { tab: 'significant_events' },
+    replace({
+      tab: 'significant_events',
       query: omitSelectedEvent(queryRef.current),
     });
-  }, [router]);
+  }, [replace]);
 
   const toggleEvent = useCallback(
     (eventId: string) => {
@@ -84,12 +82,12 @@ export const useSignificantEventsUrlState = () => {
     }
     normalizedForRef.current = selectedEventId;
     if (!queryRef.current?.openEvent) {
-      router.replace('/{tab}', {
-        path: { tab: 'significant_events' },
+      replace({
+        tab: 'significant_events',
         query: { ...(queryRef.current ?? {}), openEvent: selectedEventId },
       });
     }
-  }, [selectedEventId, router]);
+  }, [selectedEventId, replace]);
 
   return { selectedEventId, openEventId, openEvent, closeEvent, clearSelectedEvent, toggleEvent };
 };
