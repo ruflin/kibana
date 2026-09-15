@@ -31,7 +31,6 @@ export function StreamsView() {
     isStreamsLoading,
     streamStatusMap,
     cancelOnboarding,
-    bulkScheduleOnboarding,
     bulkOnboardAll,
   } = useKiGeneration();
 
@@ -68,14 +67,6 @@ export function StreamsView() {
     },
     [blocksActivity, isConnectorCatalogUnavailable, isStreamTogglePending, streamStatusMap]
   );
-
-  const onOnboardStreamActionClick = async (streamName: string) => {
-    await bulkScheduleOnboarding([streamName]);
-  };
-
-  const onStopOnboardingActionClick = (streamName: string) => {
-    cancelOnboarding(streamName);
-  };
 
   const handleQueryChange: SignificantEventsSearchBarProps['onQueryChange'] = (queryPayload) => {
     setSearchText(String(queryPayload.query?.query ?? ''));
@@ -122,13 +113,10 @@ export function StreamsView() {
           streamOnboardingResultMap={streamStatusMap}
           loading={isStreamsLoading}
           searchQuery={searchQuery}
-          blocksActivity={blocksActivity}
           activityBlockTooltip={activityBlockTooltip}
           isStreamEnabled={isStreamEnabled}
           isStreamToggleDisabled={isStreamToggleDisabled}
           onStreamEnabledChange={setStreamEnabled}
-          onOnboardStreamActionClick={onOnboardStreamActionClick}
-          onStopOnboardingActionClick={onStopOnboardingActionClick}
         />
       </EuiFlexItem>
     </EuiFlexGroup>

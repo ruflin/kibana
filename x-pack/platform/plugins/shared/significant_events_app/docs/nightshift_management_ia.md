@@ -240,11 +240,13 @@ seeded from KI onboarding status (`completed` / `in_progress` / `failed` /
 `being_canceled` = on; `not_started` / `canceled` = off) so already-onboarded
 streams stay on after reload.
 
-Status / KI Features / KI Queries columns still reflect extraction progress and
-errors. The per-row radar action remains as an explicit **re-run** for
-already-enabled streams (stop while in progress). The toolbar **Generate** split
-button and row selection were removed from Data Sources; they competed with the
-toggle as the enable path. Generate remains on Knowledge Indicators.
+The table columns are Name, Enabled, Status, and KI Features. Status / KI
+Features still reflect extraction progress and errors. KI Queries, Events, and
+Actions (including the per-row radar re-run) were removed from this table.
+Enable still starts KI extraction; there is no separate re-run control on Data
+Sources. The toolbar **Generate** split button and row selection were removed
+from Data Sources; they competed with the toggle as the enable path. Generate
+remains on Knowledge Indicators.
 
 ---
 

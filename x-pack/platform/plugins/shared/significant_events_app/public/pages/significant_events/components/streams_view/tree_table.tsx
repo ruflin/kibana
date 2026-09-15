@@ -24,31 +24,21 @@ import type { ListStreamDetail } from '@kbn/streams-plugin/server/routes/interna
 import { Streams } from '@kbn/streams-schema';
 import {
   SignificantEventsWorkflowStatus,
-  KIS_ONBOARDING_IN_PROGRESS_STATUSES,
   type SignificantEventsWorkflowStatusResult,
 } from '@kbn/significant-events-schema';
 import { STREAMS_APP_LOCATOR_ID } from '@kbn/deeplinks-observability';
 import type { StreamsAppLocationParams } from '@kbn/streams-plugin/common';
 import React, { useMemo, useState } from 'react';
-import { useIsCpsMultiProject } from '@kbn/cps-utils';
 import { useKibana } from '../../../../hooks/use_kibana';
 import { QueryStreamBadge, TechnicalPreviewBadge } from '../../../../components/badges';
 import { KnowledgeIndicatorsColumn } from './knowledge_indicators_column';
-import { QueriesColumn } from './queries_column';
-import { SignificantEventsColumn } from './significant_events_column';
 import { StreamEnabledSwitch } from './stream_enabled_switch';
 import {
-  ACTIONS_COLUMN_HEADER,
   ENABLED_COLUMN_HEADER,
   KNOWLEDGE_INDICATORS_COLUMN_HEADER,
   NAME_COLUMN_HEADER,
   NO_STREAMS_MESSAGE,
   ONBOARDING_STATUS_COLUMN_HEADER,
-  QUERIES_COLUMN_HEADER,
-  RUN_STREAM_ONBOARDING_BUTTON_LABEL,
-  SIGNIFICANT_EVENTS_COLUMN_HEADER,
-  SIGNIFICANT_EVENTS_COLUMN_TOOLTIP,
-  STOP_STREAM_ONBOARDING_BUTTON_LABEL,
   STREAMS_TABLE_CAPTION_ARIA_LABEL,
 } from './translations';
 import type { SortableField, TableRow } from './utils';
@@ -58,7 +48,6 @@ import {
   enrichStream,
   filterCollapsedStreamRows,
   filterStreamsByQuery,
-  getOnboardStreamTooltip,
 } from './utils';
 
 const EMPTY_CHILDREN: NonNullable<TableRow['children']> = [];
@@ -68,32 +57,24 @@ export function StreamsTreeTable({
   streams = [],
   streamOnboardingResultMap,
   searchQuery,
-  blocksActivity = false,
   activityBlockTooltip,
   isStreamEnabled,
   isStreamToggleDisabled,
   onStreamEnabledChange,
-  onOnboardStreamActionClick,
-  onStopOnboardingActionClick,
 }: {
   streams?: ListStreamDetail[];
   streamOnboardingResultMap: Record<string, SignificantEventsWorkflowStatusResult>;
   loading?: boolean;
   searchQuery: Query;
-  /** When true, per-row onboard actions are disabled (global pause / status loading). */
-  blocksActivity?: boolean;
-  /** Explains why onboard actions are disabled (loading / error / paused). */
+  /** Explains why the Enabled toggle is disabled (loading / error / paused). */
   activityBlockTooltip?: string;
   isStreamEnabled: (streamName: string) => boolean;
   isStreamToggleDisabled: (streamName: string, enabled: boolean) => boolean;
   onStreamEnabledChange: (streamName: string, enabled: boolean) => void;
-  onOnboardStreamActionClick: (streamName: string) => void;
-  onStopOnboardingActionClick: (streamName: string) => void;
 }) {
   const {
     dependencies: {
       start: {
-        cps,
         share: {
           url: { locators },
         },
@@ -102,7 +83,6 @@ export function StreamsTreeTable({
   } = useKibana();
   const streamsLocator = locators.get<StreamsAppLocationParams>(STREAMS_APP_LOCATOR_ID);
   const { euiTheme } = useEuiTheme();
-  const isCpsMultiProject = useIsCpsMultiProject(cps?.cpsManager);
 
   const [sortField, setSortField] = useState<SortableField>('nameSortKey');
   const [sortDirection, setSortDirection] = useState<Direction>('asc');
@@ -375,86 +355,6 @@ export function StreamsTreeTable({
                   streamOnboardingResult={streamOnboardingResultMap[item.stream.name]}
                 />
               ),
-            },
-            {
-              name: QUERIES_COLUMN_HEADER,
-              width: '120px',
-              align: 'left',
-              render: (item: TableRow) => (
-                <QueriesColumn
-                  streamName={item.stream.name}
-                  streamOnboardingResult={streamOnboardingResultMap[item.stream.name]}
-                />
-              ),
-            },
-            {
-              name: (
-                <EuiFlexGroup alignItems="center" gutterSize="xs" responsive={false}>
-                  <EuiFlexItem grow={false}>{SIGNIFICANT_EVENTS_COLUMN_HEADER}</EuiFlexItem>
-                  <EuiFlexItem grow={false}>
-                    <EuiIconTip
-                      type="info"
-                      color="subdued"
-                      content={SIGNIFICANT_EVENTS_COLUMN_TOOLTIP}
-                      size="s"
-                    />
-                  </EuiFlexItem>
-                </EuiFlexGroup>
-              ),
-              width: '210px',
-              align: 'left',
-              render: (item: TableRow) => <SignificantEventsColumn streamName={item.stream.name} />,
-            },
-            {
-              field: 'definition',
-              name: ACTIONS_COLUMN_HEADER,
-              width: '60px',
-              align: 'left',
-              sortable: false,
-              dataType: 'string',
-              render: (_: unknown, item: TableRow) => {
-                const onboardingResult = streamOnboardingResultMap[item.stream.name];
-
-                if (KIS_ONBOARDING_IN_PROGRESS_STATUSES.has(onboardingResult?.status)) {
-                  return (
-                    <EuiToolTip
-                      position="top"
-                      content={STOP_STREAM_ONBOARDING_BUTTON_LABEL}
-                      display="block"
-                      disableScreenReaderOutput
-                    >
-                      <EuiButtonIcon
-                        iconType="stop"
-                        aria-label={STOP_STREAM_ONBOARDING_BUTTON_LABEL}
-                        disabled={
-                          onboardingResult.status === SignificantEventsWorkflowStatus.BeingCanceled
-                        }
-                        onClick={() => onStopOnboardingActionClick(item.stream.name)}
-                      />
-                    </EuiToolTip>
-                  );
-                }
-
-                if (!isStreamEnabled(item.stream.name)) {
-                  return null;
-                }
-
-                return (
-                  <EuiToolTip
-                    position="top"
-                    content={getOnboardStreamTooltip({ activityBlockTooltip, isCpsMultiProject })}
-                    display="block"
-                    disableScreenReaderOutput
-                  >
-                    <EuiButtonIcon
-                      iconType="radar"
-                      aria-label={RUN_STREAM_ONBOARDING_BUTTON_LABEL}
-                      disabled={blocksActivity}
-                      onClick={() => onOnboardStreamActionClick(item.stream.name)}
-                    />
-                  </EuiToolTip>
-                );
-              },
             },
           ]}
           itemId="nameSortKey"

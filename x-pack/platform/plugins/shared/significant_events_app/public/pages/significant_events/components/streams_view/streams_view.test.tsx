@@ -39,7 +39,6 @@ jest.mock('../knowledge_indicators_table/ki_generation_context', () => ({
     isStreamsLoading: false,
     streamStatusMap: {},
     cancelOnboarding: jest.fn(),
-    bulkScheduleOnboarding: jest.fn(),
     bulkOnboardAll: jest.fn(),
   }),
 }));

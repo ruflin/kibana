@@ -14,27 +14,6 @@ export const NAME_COLUMN_HEADER = i18n.translate(
   }
 );
 
-export const SIGNIFICANT_EVENTS_COLUMN_HEADER = i18n.translate(
-  'xpack.significantEventsApp.streamsTree.significantEventsColumnName',
-  {
-    defaultMessage: 'Events',
-  }
-);
-
-export const SIGNIFICANT_EVENTS_COLUMN_TOOLTIP = i18n.translate(
-  'xpack.significantEventsApp.streamsTree.significantEventsColumnTooltip',
-  {
-    defaultMessage: 'Number of results produced by created rules.',
-  }
-);
-
-export const QUERIES_COLUMN_HEADER = i18n.translate(
-  'xpack.significantEventsApp.streamsTree.queriesColumnName',
-  {
-    defaultMessage: 'KI Queries',
-  }
-);
-
 export const KNOWLEDGE_INDICATORS_COLUMN_HEADER = i18n.translate(
   'xpack.significantEventsApp.streamsTree.knowledgeIndicatorsColumnName',
   {
@@ -62,13 +41,6 @@ export const getEnableStreamToggleAriaLabel = (streamName: string): string =>
     values: { streamName },
   });
 
-export const ACTIONS_COLUMN_HEADER = i18n.translate(
-  'xpack.significantEventsApp.streamsTree.actionsColumnName',
-  {
-    defaultMessage: 'Actions',
-  }
-);
-
 export const NO_STREAMS_MESSAGE = i18n.translate(
   'xpack.significantEventsApp.streamsTree.noStreamsMessage',
   {
@@ -85,29 +57,6 @@ export const STREAMS_TABLE_CAPTION_ARIA_LABEL = i18n.translate(
   'xpack.significantEventsApp.streamsTree.tableCaptionAriaLabel',
   {
     defaultMessage: 'Streams data table, listing stream names with links',
-  }
-);
-
-export const RUN_STREAM_ONBOARDING_BUTTON_LABEL = i18n.translate(
-  'xpack.significantEventsApp.streamsTree.runStreamOnboardingButtonEmptyLabel',
-  {
-    defaultMessage: 'Onboard stream',
-  }
-);
-
-/** Onboard-stream tooltip, extended with the cross-project generation disclosure. */
-export const RUN_STREAM_ONBOARDING_CROSS_PROJECT_TOOLTIP = i18n.translate(
-  'xpack.significantEventsApp.streamsTree.runStreamOnboardingCrossProjectTooltip',
-  {
-    defaultMessage:
-      'Onboard stream. Analyzes data from all projects linked through cross-project search, regardless of the project scope configured for this space.',
-  }
-);
-
-export const STOP_STREAM_ONBOARDING_BUTTON_LABEL = i18n.translate(
-  'xpack.significantEventsApp.streamsTree.stopStreamOnboardingButtonEmptyLabel',
-  {
-    defaultMessage: 'Stop stream onboarding',
   }
 );
 
