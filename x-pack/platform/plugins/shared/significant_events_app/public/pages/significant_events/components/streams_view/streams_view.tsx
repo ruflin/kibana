@@ -11,14 +11,13 @@ import { KIS_ONBOARDING_IN_PROGRESS_STATUSES } from '@kbn/significant-events-sch
 import React, { useCallback, useMemo, useState } from 'react';
 import type { TableRow } from './utils';
 import { parseSearchQuery } from './utils';
-import { useAIFeatures } from '../../../../hooks/use_ai_features';
-import { useSignificantEventsPageContext } from '../../context/significant_events_page_context';
 import type { SignificantEventsSearchBarProps } from '../../../../components/search_bar';
 import { SignificantEventsSearchBar } from '../../../../components/search_bar';
+import { useAIFeatures } from '../../../../hooks/use_ai_features';
 import { useBlocksNewActivity } from '../../../../hooks/use_significant_events_maintenance';
 import { useKiGeneration } from '../knowledge_indicators_table/ki_generation_context';
 import { GenerateSplitButton } from '../shared/generate_split_button';
-import { FindSignificantEventsButton } from './find_significant_events_button';
+import { AddDataSourceButton } from './add_data_source_button';
 import { STREAMS_TABLE_SEARCH_ARIA_LABEL } from './translations';
 import { StreamsTreeTable } from './tree_table';
 
@@ -50,8 +49,6 @@ export function StreamsView() {
   const connectorError = aiFeatures?.genAiConnectors?.error;
   const isConnectorCatalogUnavailable =
     !allConnectors.length || !!aiFeatures?.genAiConnectors?.loading || !!connectorError;
-
-  const { isRunning, isCanceling, handleRun, handleCancel } = useSignificantEventsPageContext();
 
   const isStreamActionable = useCallback(
     (streamName: string) => {
@@ -148,14 +145,7 @@ export function StreamsView() {
             />
           </EuiFlexItem>
           <EuiFlexItem grow={false}>
-            <FindSignificantEventsButton
-              onRun={handleRun}
-              onCancel={handleCancel}
-              isRunning={isRunning}
-              isCanceling={isCanceling}
-              isDisabled={isRunning || blocksActivity}
-              disabledTooltip={activityBlockTooltip}
-            />
+            <AddDataSourceButton />
           </EuiFlexItem>
         </EuiFlexGroup>
       </EuiFlexItem>

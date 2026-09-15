@@ -104,3 +104,94 @@ export const ONBOARDING_FAILURE_TITLE = i18n.translate(
     defaultMessage: 'Could not onboard stream',
   }
 );
+
+export const ADD_DATA_SOURCE_BUTTON_LABEL = i18n.translate(
+  'xpack.significantEventsApp.streamsView.addDataSourceButtonLabel',
+  {
+    defaultMessage: 'Add Data Source',
+  }
+);
+
+export const ADD_DATA_SOURCE_POPOVER_ARIA_LABEL = i18n.translate(
+  'xpack.significantEventsApp.streamsView.addDataSourcePopoverAriaLabel',
+  {
+    defaultMessage: 'Add data source options',
+  }
+);
+
+export const ADD_QUERY_STREAM_MENU_ITEM_LABEL = i18n.translate(
+  'xpack.significantEventsApp.streamsView.addQueryStreamMenuItemLabel',
+  {
+    defaultMessage: 'Query stream',
+  }
+);
+
+export const CREATE_QUERY_STREAM_FLYOUT_TITLE = i18n.translate(
+  'xpack.significantEventsApp.streamsView.createQueryStreamFlyoutTitle',
+  {
+    defaultMessage: 'Create query stream',
+  }
+);
+
+export const CREATE_QUERY_STREAM_NAME_LABEL = i18n.translate(
+  'xpack.significantEventsApp.streamsView.createQueryStreamNameLabel',
+  {
+    defaultMessage: 'Stream name',
+  }
+);
+
+export const CREATE_QUERY_STREAM_QUERY_LABEL = i18n.translate(
+  'xpack.significantEventsApp.streamsView.createQueryStreamQueryLabel',
+  {
+    defaultMessage: 'ES|QL query',
+  }
+);
+
+export const CREATE_QUERY_STREAM_DESCRIPTION = i18n.translate(
+  'xpack.significantEventsApp.streamsView.createQueryStreamDescription',
+  {
+    defaultMessage: 'Use ES|QL to define a query stream as a Nightshift data source.',
+  }
+);
+
+export const CREATE_QUERY_STREAM_SAVE_LABEL = i18n.translate(
+  'xpack.significantEventsApp.streamsView.createQueryStreamSaveLabel',
+  {
+    defaultMessage: 'Create query stream',
+  }
+);
+
+export const CREATE_QUERY_STREAM_CANCEL_LABEL = i18n.translate(
+  'xpack.significantEventsApp.streamsView.createQueryStreamCancelLabel',
+  {
+    defaultMessage: 'Cancel',
+  }
+);
+
+export const CREATE_QUERY_STREAM_SUCCESS_TITLE = i18n.translate(
+  'xpack.significantEventsApp.streamsView.createQueryStreamSuccessTitle',
+  {
+    defaultMessage: 'Query stream created',
+  }
+);
+
+export const CREATE_QUERY_STREAM_ERROR_TITLE = i18n.translate(
+  'xpack.significantEventsApp.streamsView.createQueryStreamErrorTitle',
+  {
+    defaultMessage: 'Error creating query stream',
+  }
+);
+
+export const CREATE_QUERY_STREAM_NAME_REQUIRED = i18n.translate(
+  'xpack.significantEventsApp.streamsView.createQueryStreamNameRequired',
+  {
+    defaultMessage: 'Name is required',
+  }
+);
+
+export const CREATE_QUERY_STREAM_QUERY_REQUIRED = i18n.translate(
+  'xpack.significantEventsApp.streamsView.createQueryStreamQueryRequired',
+  {
+    defaultMessage: 'Query is required',
+  }
+);
