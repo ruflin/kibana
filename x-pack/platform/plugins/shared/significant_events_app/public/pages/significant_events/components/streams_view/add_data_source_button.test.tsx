@@ -157,8 +157,7 @@ describe('AddDataSourceButton', () => {
           path: { name: 'checkout-sources' },
           body: {
             query: {
-              esql:
-                'FROM "logs-nginx-default", "metrics-system.cpu-default", "traces-apm-default"',
+              esql: 'FROM "logs-nginx-default", "metrics-system.cpu-default", "traces-apm-default"',
             },
           },
         },
@@ -166,7 +165,9 @@ describe('AddDataSourceButton', () => {
       });
     });
     expect(mockAddSuccess).toHaveBeenCalled();
-    expect(screen.queryByTestId('significantEventsSelectDataStreamsFlyout')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('significantEventsSelectDataStreamsFlyout')
+    ).not.toBeInTheDocument();
   });
 
   it('requires a name and at least one selected data stream before save', async () => {

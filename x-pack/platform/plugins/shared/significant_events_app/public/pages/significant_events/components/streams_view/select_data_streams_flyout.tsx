@@ -89,7 +89,11 @@ export function SelectDataStreamsFlyout({ onClose }: SelectDataStreamsFlyoutProp
     },
   } = useKibana();
   const queryClient = useQueryClient();
-  const { data: dataStreams = [], isLoading, error: loadError } = useFetchElasticsearchDataStreams();
+  const {
+    data: dataStreams = [],
+    isLoading,
+    error: loadError,
+  } = useFetchElasticsearchDataStreams();
 
   const [name, setName] = useState('');
   const [selectedNames, setSelectedNames] = useState<Set<string>>(() => new Set());
@@ -250,6 +254,7 @@ export function SelectDataStreamsFlyout({ onClose }: SelectDataStreamsFlyoutProp
           >
             {loadError ? (
               <EuiCallOut
+                announceOnMount
                 title={SELECT_DATA_STREAMS_LOAD_ERROR_TITLE}
                 color="danger"
                 size="s"
@@ -273,7 +278,7 @@ export function SelectDataStreamsFlyout({ onClose }: SelectDataStreamsFlyoutProp
                     'data-test-subj': 'significantEventsSelectDataStreamsSearch',
                   },
                 }}
-                message={SELECT_DATA_STREAMS_EMPTY_MESSAGE}
+                noItemsMessage={SELECT_DATA_STREAMS_EMPTY_MESSAGE}
                 data-test-subj="significantEventsSelectDataStreamsTable"
               />
             )}
