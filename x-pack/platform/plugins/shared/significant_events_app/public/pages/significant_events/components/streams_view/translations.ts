@@ -14,6 +14,13 @@ export const NAME_COLUMN_HEADER = i18n.translate(
   }
 );
 
+export const DOCUMENTS_COLUMN_HEADER = i18n.translate(
+  'xpack.significantEventsApp.streamsTreeTable.documentsColumnName',
+  {
+    defaultMessage: 'Documents',
+  }
+);
+
 export const KNOWLEDGE_INDICATORS_COLUMN_HEADER = i18n.translate(
   'xpack.significantEventsApp.streamsTree.knowledgeIndicatorsColumnName',
   {

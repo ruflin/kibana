@@ -269,9 +269,15 @@ seeded from KI onboarding status (`completed` / `in_progress` / `failed` /
 `being_canceled` = on; `not_started` / `canceled` = off) so already-onboarded
 streams stay on after reload.
 
-The table columns are Name, Enabled, Status, and KI Features. Status / KI
-Features still reflect extraction progress and errors. KI Queries, Events, and
-Actions (including the per-row radar re-run) were removed from this table.
+The table columns are Name, Documents, Enabled, Status, and KI Features.
+Documents is the Streams list sparkline (`DocumentsColumn`): formatted
+document count plus a mini histogram over the Data Sources time-picker
+range (same ES|QL ingest histogram as Streams, typically last 24 hours).
+Classic and query streams both get a cell. Loading shows a dash and
+spinner; empty shows `-` and a line-chart icon; errors show a warning
+icon (no empty chart). Status / KI Features still reflect extraction
+progress and errors. KI Queries, Events, and Actions (including the
+per-row radar re-run) were removed from this table.
 Enable still starts KI extraction; there is no separate re-run control on Data
 Sources. The toolbar **Generate** split button and row selection were removed
 from Data Sources; they competed with the toggle as the enable path. Generate
@@ -416,6 +422,9 @@ noted.
 | Concern | File |
 | --- | --- |
 | Data Sources page (Enabled toggle + Add Data Source) | `public/pages/significant_events/components/streams_view/streams_view.tsx` |
+| Data Sources table (Documents sparkline) | `public/pages/significant_events/components/streams_view/tree_table.tsx` |
+| Documents sparkline cell (Streams-equivalent) | `public/pages/significant_events/components/streams_view/documents_column.tsx` |
+| Documents histogram fetch (Streams ES\|QL path) | `public/hooks/use_stream_histogram_fetch.ts` |
 | Per-row Enabled switch | `public/pages/significant_events/components/streams_view/stream_enabled_switch.tsx` |
 | Enabled allowlist persist + KI start/cancel | `public/pages/significant_events/hooks/use_nightshift_stream_enabled.ts` |
 | Add Data Source popover | `public/pages/significant_events/components/streams_view/add_data_source_button.tsx` |
@@ -466,6 +475,9 @@ Sources (query streams plus the per-row Enabled toggle).
 | `public/pages/significant_events/components/significant_events_tab/significant_events_tab.test.tsx` | Discovery button absent from Events toolbar |
 | `public/pages/significant_events/components/streams_view/add_data_source_button.test.tsx` | Add Data Source → Query stream and Select data streams → PUT `/api/streams/{name}/_query 2023-10-31` |
 | `public/pages/significant_events/components/streams_view/build_query_stream_from_data_streams.test.ts` | Logs/metrics classification and `FROM` clause quoting |
+| `public/pages/significant_events/components/streams_view/tree_table.test.tsx` | Name / Documents / Enabled / Status / KI Features; sparkline wired for classic and query streams |
+| `public/pages/significant_events/components/streams_view/documents_column.test.tsx` | Documents cell loading / empty / error / count |
+| `public/hooks/use_stream_histogram_fetch.test.ts` | Histogram hook uses Streams ES\|QL + toolbar range |
 | `public/pages/significant_events/components/streams_view/streams_view.test.tsx` | Generate absent from Data Sources chrome |
 | `public/pages/significant_events/hooks/use_nightshift_stream_enabled.test.tsx` | Allowlist persist, seed from onboarding, enable starts extraction, disable cancels |
 | `public/pages/significant_events/components/knowledge_indicators_table/generate_topology_button.test.tsx` | Prompt uses existing KIs, injects stream names, no onboarding |

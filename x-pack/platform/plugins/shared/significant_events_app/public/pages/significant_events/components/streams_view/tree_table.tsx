@@ -29,11 +29,18 @@ import {
 import { STREAMS_APP_LOCATOR_ID } from '@kbn/deeplinks-observability';
 import type { StreamsAppLocationParams } from '@kbn/streams-plugin/common';
 import React, { useMemo, useState } from 'react';
+import {
+  STREAMS_HISTOGRAM_NUM_DATA_POINTS,
+  useStreamHistogramFetch,
+} from '../../../../hooks/use_stream_histogram_fetch';
 import { useKibana } from '../../../../hooks/use_kibana';
+import { useTimefilter } from '../../../../hooks/use_timefilter';
 import { QueryStreamBadge, TechnicalPreviewBadge } from '../../../../components/badges';
+import { DocumentsColumn } from './documents_column';
 import { KnowledgeIndicatorsColumn } from './knowledge_indicators_column';
 import { StreamEnabledSwitch } from './stream_enabled_switch';
 import {
+  DOCUMENTS_COLUMN_HEADER,
   ENABLED_COLUMN_HEADER,
   KNOWLEDGE_INDICATORS_COLUMN_HEADER,
   NAME_COLUMN_HEADER,
@@ -83,6 +90,20 @@ export function StreamsTreeTable({
   } = useKibana();
   const streamsLocator = locators.get<StreamsAppLocationParams>(STREAMS_APP_LOCATOR_ID);
   const { euiTheme } = useEuiTheme();
+  const { timeState } = useTimefilter();
+
+  const privilegeMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const streamDetail of streams) {
+      map.set(streamDetail.stream.name, streamDetail.privileges.read_failure_store);
+    }
+    return map;
+  }, [streams]);
+
+  const { getStreamHistogram } = useStreamHistogramFetch({
+    getCanReadFailureStore: (streamName: string) => privilegeMap.get(streamName) ?? false,
+    numDataPoints: STREAMS_HISTOGRAM_NUM_DATA_POINTS,
+  });
 
   const [sortField, setSortField] = useState<SortableField>('nameSortKey');
   const [sortDirection, setSortDirection] = useState<Direction>('asc');
@@ -292,6 +313,19 @@ export function StreamsTreeTable({
                   </EuiFlexGroup>
                 );
               },
+            },
+            {
+              name: DOCUMENTS_COLUMN_HEADER,
+              width: '180px',
+              align: 'right',
+              render: (item: TableRow) => (
+                <DocumentsColumn
+                  indexPattern={item.stream.name}
+                  histogramQueryFetch={getStreamHistogram(item.stream.name)}
+                  timeState={timeState}
+                  numDataPoints={STREAMS_HISTOGRAM_NUM_DATA_POINTS}
+                />
+              ),
             },
             {
               name: ENABLED_COLUMN_HEADER,
