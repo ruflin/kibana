@@ -13,6 +13,7 @@ import {
   OBSERVABILITY_STREAMS_CONTINUOUS_KI_EXTRACTION_ENABLED,
   OBSERVABILITY_STREAMS_CONTINUOUS_KI_EXTRACTION_INTERVAL_HOURS,
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_INDEX_PATTERNS,
+  OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_ENABLED_STREAMS,
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_TUNING_CONFIG,
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_SCHEDULED_DISCOVERY_ENABLED,
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_SCHEDULED_DISCOVERY_DETECTION_INTERVAL_MINUTES,
@@ -27,6 +28,7 @@ import {
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_SCHEDULED_DISCOVERY_FLAKY_RULE_EXEMPT_SEVERITY_SCORE,
 } from '@kbn/management-settings-ids';
 import { DEFAULT_INDEX_PATTERNS } from '@kbn/streams-schema';
+import { ENABLED_STREAMS_SETTING_MAX_LENGTH } from '../common/enabled_streams';
 import {
   DEFAULT_SIGNIFICANT_EVENTS_TUNING_CONFIG,
   SIGNIFICANT_EVENTS_TUNING_FIELD_BOUNDS,
@@ -116,6 +118,27 @@ export function registerFeatureFlags(
             ),
             type: 'string',
             schema: schema.string(),
+            requiresPageReload: false,
+            solutionViews: ['classic', 'oblt'],
+            technicalPreview: true,
+            readonly: true,
+            readonlyMode: 'ui',
+          },
+          [OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_ENABLED_STREAMS]: {
+            category: ['observability'],
+            name: i18n.translate('xpack.significantEvents.sigEventsEnabledStreamsSettingsName', {
+              defaultMessage: 'Significant Events enabled streams',
+            }) as string,
+            value: '',
+            description: i18n.translate(
+              'xpack.significantEvents.sigEventsEnabledStreamsSettingsDescription',
+              {
+                defaultMessage:
+                  'JSON array of stream names enabled for Nightshift knowledge indicator extraction. Empty means the allowlist has not been set yet.',
+              }
+            ),
+            type: 'string',
+            schema: schema.string({ maxLength: ENABLED_STREAMS_SETTING_MAX_LENGTH }),
             requiresPageReload: false,
             solutionViews: ['classic', 'oblt'],
             technicalPreview: true,

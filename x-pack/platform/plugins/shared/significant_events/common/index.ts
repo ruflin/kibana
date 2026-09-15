@@ -9,6 +9,14 @@ export { QUERY_STATUSES } from './queries';
 export type { QueryStatus } from './queries';
 
 export {
+  ENABLED_STREAMS_SETTING_MAX_LENGTH,
+  ENABLED_STREAMS_SETTING_UNSET,
+  parseEnabledStreamsSetting,
+  serializeEnabledStreamsSetting,
+} from './enabled_streams';
+export type { EnabledStreamsSetting } from './enabled_streams';
+
+export {
   STREAMS_SIGNIFICANT_EVENTS_AVAILABLE_FLAG,
   SIGNIFICANT_EVENTS_SEMANTIC_CODE_SEARCH_GROUNDING_ENABLED_FLAG,
   STREAMS_SIGNIFICANT_EVENTS_APPS_ENABLED_FLAG,

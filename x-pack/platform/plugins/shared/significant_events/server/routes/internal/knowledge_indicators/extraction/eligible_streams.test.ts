@@ -131,6 +131,32 @@ describe('filterEligibleStreams', () => {
 
     expect(result).toEqual([]);
   });
+
+  it('intersects matching streams with an explicit enabled-stream allowlist', () => {
+    const result = filterEligibleStreams({
+      allStreams: [
+        makeStream('logs.app'),
+        makeStream('logs.nginx'),
+        makeStream('my-query', { query: true }),
+      ],
+      isQueryStreamsEnabled: true,
+      indexPatterns: ['logs*'],
+      enabledStreamNames: new Set(['logs.nginx', 'my-query']),
+    });
+
+    expect(streamNames(result)).toEqual(['logs.nginx', 'my-query']);
+  });
+
+  it('selects nothing when an explicit allowlist is empty', () => {
+    const result = filterEligibleStreams({
+      allStreams: [makeStream('logs.app'), makeStream('my-query', { query: true })],
+      isQueryStreamsEnabled: true,
+      indexPatterns: ['logs*'],
+      enabledStreamNames: new Set(),
+    });
+
+    expect(result).toEqual([]);
+  });
 });
 
 describe('classifyStreams', () => {

@@ -172,7 +172,11 @@ export type {
   KIsOnboardingStatusResult,
 } from './src/onboarding';
 
-export { KIsOnboardingStep, KIS_ONBOARDING_IN_PROGRESS_STATUSES } from './src/onboarding';
+export {
+  KIsOnboardingStep,
+  KIS_ONBOARDING_IN_PROGRESS_STATUSES,
+  isKiOnboardingEnabledStatus,
+} from './src/onboarding';
 
 export type { SignificantEventsWorkflowStatusResult } from './src/workflows';
 

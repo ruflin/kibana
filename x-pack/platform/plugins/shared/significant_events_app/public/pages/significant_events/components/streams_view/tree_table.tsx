@@ -4,7 +4,7 @@
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
-import type { CriteriaWithPagination, Direction, EuiTableSelectionType, Query } from '@elastic/eui';
+import type { CriteriaWithPagination, Direction, Query } from '@elastic/eui';
 import {
   EuiButtonIcon,
   EuiFlexGroup,
@@ -36,8 +36,10 @@ import { QueryStreamBadge, TechnicalPreviewBadge } from '../../../../components/
 import { KnowledgeIndicatorsColumn } from './knowledge_indicators_column';
 import { QueriesColumn } from './queries_column';
 import { SignificantEventsColumn } from './significant_events_column';
+import { StreamEnabledSwitch } from './stream_enabled_switch';
 import {
   ACTIONS_COLUMN_HEADER,
+  ENABLED_COLUMN_HEADER,
   KNOWLEDGE_INDICATORS_COLUMN_HEADER,
   NAME_COLUMN_HEADER,
   NO_STREAMS_MESSAGE,
@@ -66,9 +68,11 @@ export function StreamsTreeTable({
   streams = [],
   streamOnboardingResultMap,
   searchQuery,
-  selection,
   blocksActivity = false,
   activityBlockTooltip,
+  isStreamEnabled,
+  isStreamToggleDisabled,
+  onStreamEnabledChange,
   onOnboardStreamActionClick,
   onStopOnboardingActionClick,
 }: {
@@ -76,11 +80,13 @@ export function StreamsTreeTable({
   streamOnboardingResultMap: Record<string, SignificantEventsWorkflowStatusResult>;
   loading?: boolean;
   searchQuery: Query;
-  selection: EuiTableSelectionType<TableRow>;
   /** When true, per-row onboard actions are disabled (global pause / status loading). */
   blocksActivity?: boolean;
   /** Explains why onboard actions are disabled (loading / error / paused). */
   activityBlockTooltip?: string;
+  isStreamEnabled: (streamName: string) => boolean;
+  isStreamToggleDisabled: (streamName: string, enabled: boolean) => boolean;
+  onStreamEnabledChange: (streamName: string, enabled: boolean) => void;
   onOnboardStreamActionClick: (streamName: string) => void;
   onStopOnboardingActionClick: (streamName: string) => void;
 }) {
@@ -220,7 +226,6 @@ export function StreamsTreeTable({
     <EuiFlexGroup direction="column" gutterSize="m">
       <EuiFlexItem>
         <EuiInMemoryTable<TableRow>
-          selection={selection}
           loading={loading}
           data-test-subj="streamsTable"
           columns={[
@@ -305,6 +310,24 @@ export function StreamsTreeTable({
                       </EuiFlexItem>
                     )}
                   </EuiFlexGroup>
+                );
+              },
+            },
+            {
+              name: ENABLED_COLUMN_HEADER,
+              width: '90px',
+              align: 'left',
+              render: (item: TableRow) => {
+                const enabled = isStreamEnabled(item.stream.name);
+                const toggleDisabled = isStreamToggleDisabled(item.stream.name, enabled);
+                return (
+                  <StreamEnabledSwitch
+                    streamName={item.stream.name}
+                    checked={enabled}
+                    disabled={toggleDisabled}
+                    disabledTooltip={toggleDisabled ? activityBlockTooltip : undefined}
+                    onEnabledChange={onStreamEnabledChange}
+                  />
                 );
               },
             },
@@ -410,6 +433,10 @@ export function StreamsTreeTable({
                       />
                     </EuiToolTip>
                   );
+                }
+
+                if (!isStreamEnabled(item.stream.name)) {
+                  return null;
                 }
 
                 return (

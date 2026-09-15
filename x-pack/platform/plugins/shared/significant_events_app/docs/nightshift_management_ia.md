@@ -224,10 +224,27 @@ Create flow:
    `use_fetch_streams.ts`).
 4. Success toast “Query stream created”; flyout closes.
 
-**Kept on this tab:** the **Generate** split button for KI onboarding of
-**selected streams** (`GenerateSplitButton`: all / features only / queries
-only). Selection drives bulk onboarding; Generate is disabled with no
-selection, while activity is paused, or while connectors are unavailable.
+**Per-row Enabled toggle** (`significantEventsStreamEnabledSwitch-<streamName>`):
+classic and query streams both get an EUI switch. Turning a stream **on**
+persists it in the Nightshift/KI allowlist
+(`observability:streamsSigEventsEnabledStreams`) and starts KI extraction for
+**that stream only** (same pipeline as Generate: features identification +
+queries generation via `POST /internal/streams/{streamName}/onboarding/_execute`
+`action: schedule`). Turning a stream **off** removes it from the allowlist and
+cancels an in-flight onboarding job (`action: cancel`) so continuous extraction
+does not pick it up again.
+
+The allowlist is space-scoped uiSettings (same store as index patterns), not a
+new saved-object type. Until the user first toggles a stream, the switch is
+seeded from KI onboarding status (`completed` / `in_progress` / `failed` /
+`being_canceled` = on; `not_started` / `canceled` = off) so already-onboarded
+streams stay on after reload.
+
+Status / KI Features / KI Queries columns still reflect extraction progress and
+errors. The per-row radar action remains as an explicit **re-run** for
+already-enabled streams (stop while in progress). The toolbar **Generate** split
+button and row selection were removed from Data Sources; they competed with the
+toggle as the enable path. Generate remains on Knowledge Indicators.
 
 ---
 
@@ -367,11 +384,15 @@ noted.
 
 | Concern | File |
 | --- | --- |
-| Data Sources page (Generate + Add Data Source) | `public/pages/significant_events/components/streams_view/streams_view.tsx` |
+| Data Sources page (Enabled toggle + Add Data Source) | `public/pages/significant_events/components/streams_view/streams_view.tsx` |
+| Per-row Enabled switch | `public/pages/significant_events/components/streams_view/stream_enabled_switch.tsx` |
+| Enabled allowlist persist + KI start/cancel | `public/pages/significant_events/hooks/use_nightshift_stream_enabled.ts` |
 | Add Data Source popover | `public/pages/significant_events/components/streams_view/add_data_source_button.tsx` |
 | Create query stream flyout + PUT | `public/pages/significant_events/components/streams_view/create_query_stream_flyout.tsx` |
 | Stream list query key | `public/pages/significant_events/hooks/use_fetch_streams.ts` |
-| Generate split button (KI onboarding) | `public/pages/significant_events/components/shared/generate_split_button.tsx` |
+| Generate split button (KI table only) | `public/pages/significant_events/components/shared/generate_split_button.tsx` |
+| Enabled-streams setting parse | `../significant_events/common/enabled_streams.ts` |
+| Continuous extraction respects allowlist | `../significant_events/server/routes/internal/knowledge_indicators/extraction/classify_streams.ts` |
 
 ### Topology
 
@@ -411,6 +432,8 @@ management tab.
 | `public/pages/significant_events/components/significant_events_sub_tabs_chrome.test.tsx` | Find Significant Events on SE chrome (`significant_events_discovery_button`) |
 | `public/pages/significant_events/components/significant_events_tab/significant_events_tab.test.tsx` | Discovery button absent from Events toolbar |
 | `public/pages/significant_events/components/streams_view/add_data_source_button.test.tsx` | Add Data Source → Query stream → PUT `/api/streams/{name}/_query 2023-10-31` |
+| `public/pages/significant_events/components/streams_view/streams_view.test.tsx` | Generate absent from Data Sources chrome |
+| `public/pages/significant_events/hooks/use_nightshift_stream_enabled.test.tsx` | Allowlist persist, seed from onboarding, enable starts extraction, disable cancels |
 | `public/pages/significant_events/components/knowledge_indicators_table/generate_topology_button.test.tsx` | Prompt uses existing KIs, injects stream names, no onboarding |
 | `public/components/knowledge_indicators/utils/get_knowledge_indicator_view.test.ts` | Topology / Queries / More type membership |
 | `public/components/knowledge_indicators/topology_map/topology_map_accordion.test.tsx` | Counts, empty/loading, unresolved endpoints, canvas present |

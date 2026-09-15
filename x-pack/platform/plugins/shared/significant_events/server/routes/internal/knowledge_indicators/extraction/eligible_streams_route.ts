@@ -11,7 +11,9 @@ import {
   OBSERVABILITY_STREAMS_CONTINUOUS_KI_EXTRACTION_INTERVAL_HOURS,
   OBSERVABILITY_STREAMS_ENABLE_QUERY_STREAMS,
   OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_INDEX_PATTERNS,
+  OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_ENABLED_STREAMS,
 } from '@kbn/management-settings-ids';
+import { parseEnabledStreamsSetting } from '../../../../../common/enabled_streams';
 import { parseIndexPatterns } from '@kbn/streams-schema';
 import {
   MAX_ID_LENGTH,
@@ -122,26 +124,41 @@ const eligibleStreamsRoute = createServerRoute({
     const maxStreams = query.maxScheduledStreams ?? MAX_SCHEDULED_STREAMS;
     const lookbackHours = query.lookbackHours ?? DEFAULT_LOOKBACK_HOURS;
 
-    const [connectorId, executions, allStreams, isQueryStreamsEnabled, rawIndexPatterns] =
-      await Promise.all([
-        resolveConnectorForFeature({
-          searchInferenceEndpoints: server.searchInferenceEndpoints,
-          featureId: SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID,
-          featureName: 'knowledge indicator extraction',
-          request,
-        }),
-        streamsKIsOnboardingClient.getRecentExecutions(),
-        streamsClient.listStreams(),
-        uiSettingsClient.get<boolean>(OBSERVABILITY_STREAMS_ENABLE_QUERY_STREAMS),
-        uiSettingsClient.get<string>(OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_INDEX_PATTERNS),
-      ]);
+    const [
+      connectorId,
+      executions,
+      allStreams,
+      isQueryStreamsEnabled,
+      rawIndexPatterns,
+      userProvidedSettings,
+    ] = await Promise.all([
+      resolveConnectorForFeature({
+        searchInferenceEndpoints: server.searchInferenceEndpoints,
+        featureId: SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID,
+        featureName: 'knowledge indicator extraction',
+        request,
+      }),
+      streamsKIsOnboardingClient.getRecentExecutions(),
+      streamsClient.listStreams(),
+      uiSettingsClient.get<boolean>(OBSERVABILITY_STREAMS_ENABLE_QUERY_STREAMS),
+      uiSettingsClient.get<string>(OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_INDEX_PATTERNS),
+      uiSettingsClient.getUserProvided(),
+    ]);
 
     const indexPatterns = parseIndexPatterns(rawIndexPatterns);
+    const enabledStreamsUserValue =
+      userProvidedSettings[OBSERVABILITY_STREAMS_SIGNIFICANT_EVENTS_ENABLED_STREAMS]?.userValue;
+    const enabledStreamsSetting = parseEnabledStreamsSetting(
+      typeof enabledStreamsUserValue === 'string' ? enabledStreamsUserValue : undefined
+    );
 
     const eligibleStreams = filterEligibleStreams({
       allStreams,
       isQueryStreamsEnabled,
       indexPatterns,
+      enabledStreamNames: enabledStreamsSetting.configured
+        ? new Set(enabledStreamsSetting.streamNames)
+        : undefined,
     });
 
     const intervalHours =

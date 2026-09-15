@@ -35,19 +35,27 @@ export const isSupportedStream = (stream: Streams.all.Definition): boolean =>
  *
  * Query streams are selected when the query-streams feature flag is enabled; every
  * other supported type is selected when its name matches the configured significant
- * events index patterns. This mirrors the discovery Streams list, so onboarding and
- * the list stay aligned by construction.
+ * events index patterns. When `enabledStreamNames` is provided (the Data Sources
+ * allowlist has been written), only those names stay in Nightshift / KI scope.
+ * This mirrors the discovery Streams list, so onboarding and the list stay aligned
+ * by construction.
  */
 export const filterEligibleStreams = ({
   allStreams,
   isQueryStreamsEnabled,
   indexPatterns,
+  enabledStreamNames,
 }: {
   allStreams: Streams.all.Definition[];
   isQueryStreamsEnabled: boolean;
   indexPatterns: string[];
+  /** When set, only these stream names stay in Nightshift / KI scope. */
+  enabledStreamNames?: ReadonlySet<string>;
 }): Streams.all.Definition[] =>
   allStreams.filter((stream) => {
+    if (enabledStreamNames && !enabledStreamNames.has(stream.name)) {
+      return false;
+    }
     if (Streams.QueryStream.Definition.is(stream)) {
       return isQueryStreamsEnabled;
     }

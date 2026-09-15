@@ -42,12 +42,25 @@ export const KNOWLEDGE_INDICATORS_COLUMN_HEADER = i18n.translate(
   }
 );
 
+export const ENABLED_COLUMN_HEADER = i18n.translate(
+  'xpack.significantEventsApp.streamsTree.enabledColumnName',
+  {
+    defaultMessage: 'Enabled',
+  }
+);
+
 export const ONBOARDING_STATUS_COLUMN_HEADER = i18n.translate(
   'xpack.significantEventsApp.streamsTree.onboardingStatusColumnName',
   {
     defaultMessage: 'Status',
   }
 );
+
+export const getEnableStreamToggleAriaLabel = (streamName: string): string =>
+  i18n.translate('xpack.significantEventsApp.streamsTree.enableStreamToggleSwitch', {
+    defaultMessage: 'Enable {streamName} for Nightshift knowledge indicator extraction',
+    values: { streamName },
+  });
 
 export const ACTIONS_COLUMN_HEADER = i18n.translate(
   'xpack.significantEventsApp.streamsTree.actionsColumnName',
