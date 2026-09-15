@@ -70,7 +70,7 @@ export function resolveManagementLocation(
   }
 
   if (tab === 'knowledge_indicators') {
-    if (!isKiSubtab(subtab ?? '')) {
+    if (!subtab || !isKiSubtab(subtab)) {
       return { tab, subtab: DEFAULT_KI_SUBTAB, needsRedirect: true };
     }
     return { tab, subtab, needsRedirect: false };

@@ -53,15 +53,16 @@ export function useManagementRoute(): ManagementRoute {
 
   const link = useCallback(
     (target: ManagementRouteTarget) => {
+      const query = target.query ?? {};
       if (target.subtab) {
         return router.link('/{tab}/{subtab}', {
           path: { tab: target.tab, subtab: target.subtab },
-          query: target.query,
+          query,
         });
       }
       return router.link('/{tab}', {
         path: { tab: target.tab },
-        query: target.query,
+        query,
       });
     },
     [router]
@@ -69,16 +70,17 @@ export function useManagementRoute(): ManagementRoute {
 
   const push = useCallback(
     (target: ManagementRouteTarget) => {
+      const query = target.query ?? {};
       if (target.subtab) {
         router.push('/{tab}/{subtab}', {
           path: { tab: target.tab, subtab: target.subtab },
-          query: target.query,
+          query,
         });
         return;
       }
       router.push('/{tab}', {
         path: { tab: target.tab },
-        query: target.query,
+        query,
       });
     },
     [router]
@@ -86,16 +88,17 @@ export function useManagementRoute(): ManagementRoute {
 
   const replace = useCallback(
     (target: ManagementRouteTarget) => {
+      const query = target.query ?? {};
       if (target.subtab) {
         router.replace('/{tab}/{subtab}', {
           path: { tab: target.tab, subtab: target.subtab },
-          query: target.query,
+          query,
         });
         return;
       }
       router.replace('/{tab}', {
         path: { tab: target.tab },
-        query: target.query,
+        query,
       });
     },
     [router]

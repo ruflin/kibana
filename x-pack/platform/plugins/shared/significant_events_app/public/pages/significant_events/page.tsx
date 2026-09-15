@@ -300,9 +300,8 @@ export function SignificantEventsPage() {
     return <RedirectTo path="/{tab}" params={{ path: { tab: canonical.tab } }} />;
   }
 
-  const kiView: KnowledgeIndicatorView | undefined = isKiSubtab(canonical.subtab ?? '')
-    ? canonical.subtab
-    : undefined;
+  const kiView: KnowledgeIndicatorView | undefined =
+    canonical.subtab && isKiSubtab(canonical.subtab) ? canonical.subtab : undefined;
 
   return (
     <>
