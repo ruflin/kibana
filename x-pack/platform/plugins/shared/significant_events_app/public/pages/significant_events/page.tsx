@@ -36,10 +36,7 @@ import { SignificantEventsTab } from './components/significant_events_tab';
 import { RunLimitsBanner } from './components/run_limits_banner';
 import { ManagementSubTabs } from './components/management_sub_tabs';
 import type { KnowledgeIndicatorView } from '../../components/knowledge_indicators/utils/get_knowledge_indicator_view';
-import {
-  isKiSubtab,
-  resolveManagementLocation,
-} from '../../routes/tabs';
+import { isKiSubtab, resolveManagementLocation } from '../../routes/tabs';
 
 export function SignificantEventsPage() {
   const { tab, subtab, link } = useManagementRoute();

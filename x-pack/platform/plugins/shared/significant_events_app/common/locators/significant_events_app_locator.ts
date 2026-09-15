@@ -11,11 +11,7 @@ import {
 } from '@kbn/deeplinks-observability';
 import type { LocatorDefinition, LocatorPublic } from '@kbn/share-plugin/public';
 import type { SerializableRecord } from '@kbn/utility-types';
-import {
-  buildManagementPath,
-  resolveManagementLocation,
-  type ManagementTab,
-} from '../tabs';
+import { buildManagementPath, resolveManagementLocation, type ManagementTab } from '../tabs';
 
 export type SignificantEventsAppTab =
   | ManagementTab

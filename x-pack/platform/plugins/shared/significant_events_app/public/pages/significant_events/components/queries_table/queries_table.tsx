@@ -368,43 +368,43 @@ export function QueriesTable() {
         </EuiFlexItem>
         <EuiFlexItem>
           <EuiEmptyPrompt
-        aria-live="polite"
-        color="plain"
-        css={css`
-          && {
-            max-width: 400px;
-          }
-        `}
-        icon={<AssetImage type="significantEventsEmptyState" size={140} />}
-        title={
-          <h2>
-            {i18n.translate('xpack.significantEventsApp.queriesTable.emptyState.title', {
-              defaultMessage: 'Rules',
-            })}
-          </h2>
-        }
-        body={
-          <p>
-            {i18n.translate('xpack.significantEventsApp.queriesTable.emptyState.description', {
-              defaultMessage:
-                'No rules created yet. Promote queries from the Knowledge Indicators tab to create rules.',
-            })}
-          </p>
-        }
-        actions={
-          <EuiButtonEmpty
-            href={link({
-              tab: 'knowledge_indicators',
-              subtab: 'queries',
-            })}
-          >
-            {i18n.translate(
-              'xpack.significantEventsApp.queriesTable.emptyState.goToKnowledgeIndicatorsButton',
-              { defaultMessage: 'Go to Knowledge Indicators' }
-            )}
-          </EuiButtonEmpty>
-        }
-      />
+            aria-live="polite"
+            color="plain"
+            css={css`
+              && {
+                max-width: 400px;
+              }
+            `}
+            icon={<AssetImage type="significantEventsEmptyState" size={140} />}
+            title={
+              <h2>
+                {i18n.translate('xpack.significantEventsApp.queriesTable.emptyState.title', {
+                  defaultMessage: 'Rules',
+                })}
+              </h2>
+            }
+            body={
+              <p>
+                {i18n.translate('xpack.significantEventsApp.queriesTable.emptyState.description', {
+                  defaultMessage:
+                    'No rules created yet. Promote queries from the Knowledge Indicators tab to create rules.',
+                })}
+              </p>
+            }
+            actions={
+              <EuiButtonEmpty
+                href={link({
+                  tab: 'knowledge_indicators',
+                  subtab: 'queries',
+                })}
+              >
+                {i18n.translate(
+                  'xpack.significantEventsApp.queriesTable.emptyState.goToKnowledgeIndicatorsButton',
+                  { defaultMessage: 'Go to Knowledge Indicators' }
+                )}
+              </EuiButtonEmpty>
+            }
+          />
         </EuiFlexItem>
       </EuiFlexGroup>
     );

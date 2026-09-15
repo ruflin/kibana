@@ -76,9 +76,7 @@ describe('SignificantEventsAppLocatorDefinition', () => {
       stream: ['logs', 'logs.nginx'],
     });
 
-    expect(path).toBe(
-      '/knowledge_indicators/topology?stream=logs&stream=logs.nginx'
-    );
+    expect(path).toBe('/knowledge_indicators/topology?stream=logs&stream=logs.nginx');
   });
 
   it('omits undefined params', async () => {

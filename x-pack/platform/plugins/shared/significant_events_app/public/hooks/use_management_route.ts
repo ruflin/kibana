@@ -12,7 +12,7 @@ import {
   type StatefulSignificantEventsAppRouter,
 } from './use_significant_events_app_router';
 
-export type ManagementRouteQuery = {
+export interface ManagementRouteQuery {
   rangeFrom?: string;
   rangeTo?: string;
   search?: string;
@@ -24,7 +24,7 @@ export type ManagementRouteQuery = {
   selectedItem?: string;
   selectedEvent?: string;
   openEvent?: string;
-};
+}
 
 export interface ManagementRouteTarget {
   tab: string;
@@ -53,16 +53,16 @@ export function useManagementRoute(): ManagementRoute {
 
   const link = useCallback(
     (target: ManagementRouteTarget) => {
-      const query = target.query ?? {};
+      const queryParams = target.query ?? {};
       if (target.subtab) {
         return router.link('/{tab}/{subtab}', {
           path: { tab: target.tab, subtab: target.subtab },
-          query,
+          query: queryParams,
         });
       }
       return router.link('/{tab}', {
         path: { tab: target.tab },
-        query,
+        query: queryParams,
       });
     },
     [router]
@@ -70,17 +70,17 @@ export function useManagementRoute(): ManagementRoute {
 
   const push = useCallback(
     (target: ManagementRouteTarget) => {
-      const query = target.query ?? {};
+      const queryParams = target.query ?? {};
       if (target.subtab) {
         router.push('/{tab}/{subtab}', {
           path: { tab: target.tab, subtab: target.subtab },
-          query,
+          query: queryParams,
         });
         return;
       }
       router.push('/{tab}', {
         path: { tab: target.tab },
-        query,
+        query: queryParams,
       });
     },
     [router]
@@ -88,17 +88,17 @@ export function useManagementRoute(): ManagementRoute {
 
   const replace = useCallback(
     (target: ManagementRouteTarget) => {
-      const query = target.query ?? {};
+      const queryParams = target.query ?? {};
       if (target.subtab) {
         router.replace('/{tab}/{subtab}', {
           path: { tab: target.tab, subtab: target.subtab },
-          query,
+          query: queryParams,
         });
         return;
       }
       router.replace('/{tab}', {
         path: { tab: target.tab },
-        query,
+        query: queryParams,
       });
     },
     [router]

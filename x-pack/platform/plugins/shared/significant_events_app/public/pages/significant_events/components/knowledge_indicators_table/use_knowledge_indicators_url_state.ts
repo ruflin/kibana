@@ -209,31 +209,34 @@ export function useKnowledgeIndicatorsUrlState({
     hideComputedTypes,
   ]);
 
-  const buildQueryParams = useCallback((selectedItem?: string) => {
-    const { rangeFrom, rangeTo } = timeRangeRef.current;
-    const p = currentParamsRef.current;
-    const computedQuery =
-      view === 'more'
-        ? p.hideComputedTypes
-          ? { showComputed: 'false' }
-          : {}
-        : view === 'topology' || view === 'queries'
+  const buildQueryParams = useCallback(
+    (selectedItem?: string) => {
+      const { rangeFrom, rangeTo } = timeRangeRef.current;
+      const p = currentParamsRef.current;
+      const computedQuery =
+        view === 'more'
+          ? p.hideComputedTypes
+            ? { showComputed: 'false' }
+            : {}
+          : view === 'topology' || view === 'queries'
           ? {}
           : !p.hideComputedTypes
-            ? { showComputed: 'true' }
-            : {};
-    return {
-      ...(rangeFrom ? { rangeFrom } : {}),
-      ...(rangeTo ? { rangeTo } : {}),
-      ...(p.debouncedSearchTerm ? { search: p.debouncedSearchTerm } : {}),
-      ...(p.statusFilter !== 'active' ? { status: p.statusFilter } : {}),
-      ...(p.selectedTypes.length ? { type: p.selectedTypes } : {}),
-      ...(p.selectedSubtypes.length ? { subtype: p.selectedSubtypes } : {}),
-      ...(p.selectedStreams.length ? { stream: p.selectedStreams } : {}),
-      ...computedQuery,
-      ...(selectedItem ? { selectedItem } : {}),
-    };
-  }, [view]);
+          ? { showComputed: 'true' }
+          : {};
+      return {
+        ...(rangeFrom ? { rangeFrom } : {}),
+        ...(rangeTo ? { rangeTo } : {}),
+        ...(p.debouncedSearchTerm ? { search: p.debouncedSearchTerm } : {}),
+        ...(p.statusFilter !== 'active' ? { status: p.statusFilter } : {}),
+        ...(p.selectedTypes.length ? { type: p.selectedTypes } : {}),
+        ...(p.selectedSubtypes.length ? { subtype: p.selectedSubtypes } : {}),
+        ...(p.selectedStreams.length ? { stream: p.selectedStreams } : {}),
+        ...computedQuery,
+        ...(selectedItem ? { selectedItem } : {}),
+      };
+    },
+    [view]
+  );
 
   const closeFlyout = useCallback(() => {
     push({

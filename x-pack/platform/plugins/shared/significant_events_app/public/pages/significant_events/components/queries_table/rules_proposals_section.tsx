@@ -123,7 +123,8 @@ export function RulesProposalsSection() {
         render: (item: SignificantEventQueryRow) => {
           const isStats = item.query.type === QUERY_TYPE_STATS;
           const isDisabled = blocksActivity || isStats || promoteMutation.isLoading;
-          const tooltip = activityBlockTooltip ?? (isStats ? STATS_PROMOTE_DISABLED_TOOLTIP : undefined);
+          const tooltip =
+            activityBlockTooltip ?? (isStats ? STATS_PROMOTE_DISABLED_TOOLTIP : undefined);
           const button = (
             <EuiButtonEmpty
               iconType="plusCircle"
@@ -149,11 +150,7 @@ export function RulesProposalsSection() {
   }
 
   return (
-    <EuiPanel
-      hasBorder
-      hasShadow={false}
-      data-test-subj="significantEventsRulesProposals"
-    >
+    <EuiPanel hasBorder hasShadow={false} data-test-subj="significantEventsRulesProposals">
       <EuiFlexGroup direction="column" gutterSize="s">
         <EuiFlexItem>
           <EuiTitle size="xs">

@@ -44,9 +44,7 @@ const significantEventsAppRoutes = {
     ),
     children: {
       '/': {
-        element: (
-          <RedirectTo path="/{tab}" params={{ path: { tab: DEFAULT_MANAGEMENT_TAB } }} />
-        ),
+        element: <RedirectTo path="/{tab}" params={{ path: { tab: DEFAULT_MANAGEMENT_TAB } }} />,
       },
       '/{tab}/{subtab}': {
         element: <SignificantEventsPage />,

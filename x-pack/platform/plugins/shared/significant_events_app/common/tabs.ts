@@ -96,12 +96,6 @@ export function resolveManagementLocation(
   return { tab, needsRedirect: false };
 }
 
-export function buildManagementPath({
-  tab,
-  subtab,
-}: {
-  tab: string;
-  subtab?: string;
-}): string {
+export function buildManagementPath({ tab, subtab }: { tab: string; subtab?: string }): string {
   return subtab ? `/${tab}/${subtab}` : `/${tab}`;
 }
