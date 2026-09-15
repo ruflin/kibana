@@ -45,7 +45,6 @@ import { useTimeRangeUpdate } from '../../../../hooks/use_time_range_update';
 import { useKiGeneration } from '../knowledge_indicators_table/ki_generation_context';
 import { useSignificantEventsPageContext } from '../../context/significant_events_page_context';
 import { SignificantEventFlyout } from './significant_event_flyout';
-import { FindSignificantEventsButton } from '../streams_view/find_significant_events_button';
 import type { SignificantEventsSearchBarProps } from '../../../../components/search_bar';
 import { SignificantEventsSearchBar } from '../../../../components/search_bar';
 import { formatTimestamp } from '../../../../util/formatters';
@@ -371,8 +370,7 @@ export const SignificantEventsTab = () => {
     [filteredStreams]
   );
 
-  const { isRunning, isCanceling, handleRun, handleCancel } = useSignificantEventsPageContext();
-  const { blocksActivity, activityBlockTooltip } = useBlocksNewActivity();
+  const { isRunning } = useSignificantEventsPageContext();
 
   // When selectedEvent is active the list is filtered to just that event (server-side,
   // bypassing time range). Otherwise fetch with the current filters and time window.
@@ -646,16 +644,6 @@ export const SignificantEventsTab = () => {
               >
                 {RESET_FILTERS_LABEL}
               </EuiButtonEmpty>
-            </EuiFlexItem>
-            <EuiFlexItem grow={false}>
-              <FindSignificantEventsButton
-                onRun={handleRun}
-                onCancel={handleCancel}
-                isRunning={isRunning}
-                isCanceling={isCanceling}
-                isDisabled={isRunning || blocksActivity}
-                disabledTooltip={activityBlockTooltip}
-              />
             </EuiFlexItem>
           </EuiFlexGroup>
         </EuiFlexGroup>

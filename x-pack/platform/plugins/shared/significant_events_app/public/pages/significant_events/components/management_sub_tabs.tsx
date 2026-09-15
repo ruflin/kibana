@@ -5,8 +5,9 @@
  * 2.0.
  */
 
-import { EuiSpacer, EuiTabs, EuiTab } from '@elastic/eui';
+import { EuiFlexGroup, EuiFlexItem, EuiSpacer, EuiTabs, EuiTab } from '@elastic/eui';
 import React from 'react';
+import type { ReactNode } from 'react';
 
 export interface ManagementSubTabItem {
   id: string;
@@ -17,20 +18,32 @@ export interface ManagementSubTabItem {
 
 export function ManagementSubTabs({
   items,
+  extra,
   'data-test-subj': dataTestSubj,
 }: {
   items: ManagementSubTabItem[];
+  extra?: ReactNode;
   'data-test-subj'?: string;
 }) {
   return (
     <>
-      <EuiTabs data-test-subj={dataTestSubj}>
-        {items.map((item) => (
-          <EuiTab key={item.id} href={item.href} isSelected={item.isSelected}>
-            {item.label}
-          </EuiTab>
-        ))}
-      </EuiTabs>
+      <EuiFlexGroup
+        alignItems="center"
+        justifyContent="spaceBetween"
+        gutterSize="s"
+        responsive={false}
+      >
+        <EuiFlexItem grow>
+          <EuiTabs data-test-subj={dataTestSubj}>
+            {items.map((item) => (
+              <EuiTab key={item.id} href={item.href} isSelected={item.isSelected}>
+                {item.label}
+              </EuiTab>
+            ))}
+          </EuiTabs>
+        </EuiFlexItem>
+        {extra ? <EuiFlexItem grow={false}>{extra}</EuiFlexItem> : null}
+      </EuiFlexGroup>
       <EuiSpacer />
     </>
   );

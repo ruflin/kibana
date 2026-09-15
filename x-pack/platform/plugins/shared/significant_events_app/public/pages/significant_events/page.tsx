@@ -35,6 +35,7 @@ import { DetectionsTab } from './components/detections_tab';
 import { SignificantEventsTab } from './components/significant_events_tab';
 import { RunLimitsBanner } from './components/run_limits_banner';
 import { ManagementSubTabs } from './components/management_sub_tabs';
+import { SignificantEventsSubTabsChrome } from './components/significant_events_sub_tabs_chrome';
 import type { KnowledgeIndicatorView } from '../../components/knowledge_indicators/utils/get_knowledge_indicator_view';
 import { isKiSubtab, resolveManagementLocation } from '../../routes/tabs';
 
@@ -424,10 +425,7 @@ export function SignificantEventsPage() {
             )}
             {canonical.tab === 'significant_events' && (
               <>
-                <ManagementSubTabs
-                  items={significantEventsSubtabs}
-                  data-test-subj="significantEventsSubTabs"
-                />
+                <SignificantEventsSubTabsChrome items={significantEventsSubtabs} />
                 {canonical.subtab === undefined && <SignificantEventsTab />}
                 {canonical.subtab === 'rules' && <QueriesTable />}
                 {canonical.subtab === 'detections' && <DetectionsTab />}
