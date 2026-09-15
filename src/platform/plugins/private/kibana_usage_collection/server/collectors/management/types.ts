@@ -209,6 +209,7 @@ export interface UsageStats {
   'observability:streamsEnableDraftStreams': boolean;
   'observability:streamsEnableCanvas': boolean;
   'observability:streamsSigEventsIndexPatterns': string;
+  'observability:streamsSigEventsEnabledStreams': string;
   'observability:streamsSigEventsScheduledDiscoveryEnabled': boolean;
   'observability:streamsSigEventsScheduledDiscoveryDetectionIntervalMinutes': number;
   'observability:streamsSigEventsScheduledDiscoveryDetectionBucketIntervalMinutes': number;

@@ -850,6 +850,13 @@ export const stackManagementSchema: MakeSchemaFrom<UsageStats> = {
         'Comma-separated index patterns used for Significant Events stream filtering and analysis.',
     },
   },
+  'observability:streamsSigEventsEnabledStreams': {
+    type: 'keyword',
+    _meta: {
+      description:
+        'JSON array of stream names enabled for Nightshift knowledge indicator extraction.',
+    },
+  },
   'observability:streamsSigEventsScheduledDiscoveryEnabled': {
     type: 'boolean',
     _meta: {
