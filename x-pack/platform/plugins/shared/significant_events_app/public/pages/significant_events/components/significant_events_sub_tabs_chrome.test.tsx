@@ -9,7 +9,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { SignificantEventsSubTabsChrome } from './significant_events_sub_tabs_chrome';
 
-jest.mock('../../context/significant_events_page_context', () => ({
+jest.mock('../context/significant_events_page_context', () => ({
   useSignificantEventsPageContext: jest.fn(() => ({
     isRunning: false,
     isCanceling: false,
