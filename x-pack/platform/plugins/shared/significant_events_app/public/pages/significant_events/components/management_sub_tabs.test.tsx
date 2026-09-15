@@ -36,4 +36,12 @@ describe('ManagementSubTabs', () => {
     expect(extra).toBeInTheDocument();
     expect(screen.getByTestId('managementSubTabs')).not.toContainElement(extra);
   });
+
+  it('does not grow to fill a column flex parent', () => {
+    render(<ManagementSubTabs items={items} data-test-subj="managementSubTabs" />);
+
+    const chrome = screen.getByTestId('managementSubTabsChrome');
+    expect(chrome).toContainElement(screen.getByTestId('managementSubTabs'));
+    expect(chrome).toHaveStyle({ flexGrow: '0', flexShrink: '0' });
+  });
 });

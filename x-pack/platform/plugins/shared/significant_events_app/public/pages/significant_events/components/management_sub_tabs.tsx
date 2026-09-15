@@ -6,6 +6,7 @@
  */
 
 import { EuiFlexGroup, EuiFlexItem, EuiSpacer, EuiTabs, EuiTab } from '@elastic/eui';
+import { css } from '@emotion/react';
 import React from 'react';
 import type { ReactNode } from 'react';
 
@@ -15,6 +16,13 @@ export interface ManagementSubTabItem {
   href: string;
   isSelected: boolean;
 }
+
+// The page body is a full-height column flex; EuiFlexGroup always grows, so wrap
+// the tab row or it expands and vertically centers above the table.
+const chromeCss = css`
+  flex-grow: 0;
+  flex-shrink: 0;
+`;
 
 export function ManagementSubTabs({
   items,
@@ -26,7 +34,7 @@ export function ManagementSubTabs({
   'data-test-subj'?: string;
 }) {
   return (
-    <>
+    <div css={chromeCss} data-test-subj="managementSubTabsChrome">
       <EuiFlexGroup
         alignItems="center"
         justifyContent="spaceBetween"
@@ -45,6 +53,6 @@ export function ManagementSubTabs({
         {extra ? <EuiFlexItem grow={false}>{extra}</EuiFlexItem> : null}
       </EuiFlexGroup>
       <EuiSpacer />
-    </>
+    </div>
   );
 }

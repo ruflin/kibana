@@ -51,5 +51,7 @@ describe('SignificantEventsSubTabsChrome', () => {
     expect(screen.getByRole('tab', { name: 'Detections' })).toBeInTheDocument();
     expect(button).toBeInTheDocument();
     expect(tabs).not.toContainElement(button);
+    expect(screen.getByTestId('managementSubTabsChrome')).toContainElement(tabs);
+    expect(screen.getByTestId('managementSubTabsChrome')).toContainElement(button);
   });
 });
