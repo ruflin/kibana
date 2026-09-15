@@ -7,39 +7,30 @@
 
 import { EuiButton, EuiToolTip } from '@elastic/eui';
 import React, { useCallback } from 'react';
-import { useKibana } from '../../../../hooks/use_kibana';
 import { useBlocksNewActivity } from '../../../../hooks/use_significant_events_maintenance';
-import { GENERATE_TOPOLOGY_BUTTON_LABEL, getGenerateTopologyInitialMessage } from './translations';
+import { GENERATE_TOPOLOGY_BUTTON_LABEL } from './translations';
 
 export function GenerateTopologyButton({
   selectedStreamNames = [],
+  isLoading = false,
+  onGenerate,
 }: {
   selectedStreamNames?: string[];
+  isLoading?: boolean;
+  onGenerate: (streamNames: string[]) => void;
 }) {
-  const {
-    dependencies: {
-      start: { agentBuilder },
-    },
-  } = useKibana();
   const { blocksActivity, activityBlockTooltip } = useBlocksNewActivity();
 
   const handleGenerateTopology = useCallback(() => {
-    agentBuilder?.openChat({
-      newConversation: true,
-      initialMessage: getGenerateTopologyInitialMessage(selectedStreamNames),
-      autoSendInitialMessage: true,
-    });
-  }, [agentBuilder, selectedStreamNames]);
-
-  if (!agentBuilder) {
-    return null;
-  }
+    onGenerate(selectedStreamNames);
+  }, [onGenerate, selectedStreamNames]);
 
   const button = (
     <EuiButton
       iconType="sparkles"
       onClick={handleGenerateTopology}
-      isDisabled={blocksActivity}
+      isDisabled={blocksActivity || isLoading}
+      isLoading={isLoading}
       data-test-subj="significantEventsGenerateTopologyButton"
     >
       {GENERATE_TOPOLOGY_BUTTON_LABEL}

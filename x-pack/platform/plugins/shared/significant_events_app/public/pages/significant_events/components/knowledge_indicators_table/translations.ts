@@ -241,25 +241,20 @@ export const GENERATE_TOPOLOGY_BUTTON_LABEL = i18n.translate(
   { defaultMessage: 'Generate topology' }
 );
 
-export const GENERATE_TOPOLOGY_INITIAL_MESSAGE = i18n.translate(
-  'xpack.significantEventsApp.knowledgeIndicators.generateTopologyInitialMessage',
-  {
-    defaultMessage:
-      'No streams are currently selected in the knowledge indicators filter. Search existing knowledge indicators across accessible streams using the knowledge-indicator management and search skills. Do not run feature identification or stream onboarding. Using those existing knowledge indicators as the source of truth, generate or update the system topology: entities, technologies, infrastructure, and dependencies. Summarise what you find, fill relationship gaps that the knowledge indicators already imply, and ask before creating new knowledge indicators that are not already supported by existing ones.',
-  }
+export const GENERATE_TOPOLOGY_ERROR_TITLE = i18n.translate(
+  'xpack.significantEventsApp.knowledgeIndicators.generateTopologyErrorTitle',
+  { defaultMessage: 'Failed to generate topology' }
 );
 
-export const getGenerateTopologyInitialMessage = (streamNames: readonly string[]): string => {
-  if (streamNames.length === 0) {
-    return GENERATE_TOPOLOGY_INITIAL_MESSAGE;
-  }
+export const GENERATING_TOPOLOGY_TITLE = i18n.translate(
+  'xpack.significantEventsApp.knowledgeIndicators.generatingTopologyTitle',
+  { defaultMessage: 'Generating topology' }
+);
 
-  return i18n.translate(
-    'xpack.significantEventsApp.knowledgeIndicators.generateTopologyInitialMessageWithStreams',
-    {
-      defaultMessage:
-        'Read the existing knowledge indicators for the selected streams ({streamNames}) using the knowledge-indicator management and search skills. Do not run feature identification or stream onboarding. Using those existing knowledge indicators as the source of truth, generate or update the system topology: entities, technologies, infrastructure, and dependencies. Summarise what you find, fill relationship gaps that the knowledge indicators already imply, and ask before creating new knowledge indicators that are not already supported by existing ones.',
-      values: { streamNames: streamNames.join(', ') },
-    }
-  );
-};
+export const GENERATING_TOPOLOGY_DESCRIPTION = i18n.translate(
+  'xpack.significantEventsApp.knowledgeIndicators.generatingTopologyDescription',
+  {
+    defaultMessage:
+      'Updating entity, technology, infrastructure, and dependency knowledge indicators from existing knowledge indicators.',
+  }
+);

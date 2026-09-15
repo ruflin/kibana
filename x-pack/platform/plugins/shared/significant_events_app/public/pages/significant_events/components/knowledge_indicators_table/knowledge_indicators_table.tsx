@@ -39,6 +39,8 @@ import { useKnowledgeIndicatorsColumns } from './use_knowledge_indicators_column
 import { KnowledgeIndicatorsToolbar } from './knowledge_indicators_toolbar';
 import { TopologyMapAccordion } from '../../../../components/knowledge_indicators/topology_map';
 import { GenerateTopologyButton } from './generate_topology_button';
+import { useGenerateTopology } from './use_generate_topology';
+import { getFormattedError } from '../../../../util/errors';
 import type { KnowledgeIndicatorView } from '../../../../components/knowledge_indicators/utils/get_knowledge_indicator_view';
 import {
   TABLE_CAPTION,
@@ -49,6 +51,9 @@ import {
   HIDDEN_COMPUTED_FEATURES_HINT,
   GENERATION_IN_PROGRESS_TITLE,
   getGenerationInProgressDescription,
+  GENERATING_TOPOLOGY_TITLE,
+  GENERATING_TOPOLOGY_DESCRIPTION,
+  GENERATE_TOPOLOGY_ERROR_TITLE,
 } from './translations';
 
 export function KnowledgeIndicatorsTable({ view }: { view: KnowledgeIndicatorView }) {
@@ -154,6 +159,12 @@ export function KnowledgeIndicatorsTable({ view }: { view: KnowledgeIndicatorVie
     goToPageForItemIndex,
   } = useKnowledgeIndicatorsTable(view);
 
+  const {
+    generateTopology,
+    isGenerating: isGeneratingTopology,
+    error: generateTopologyError,
+  } = useGenerateTopology();
+
   const wasGeneratingRef = useRef(false);
   useEffect(() => {
     if (isGenerating) {
@@ -231,11 +242,48 @@ export function KnowledgeIndicatorsTable({ view }: { view: KnowledgeIndicatorVie
       </EuiFlexItem>
       {view === 'topology' && (
         <EuiFlexItem grow={false}>
-          <GenerateTopologyButton selectedStreamNames={selectedStreams} />
+          <GenerateTopologyButton
+            selectedStreamNames={selectedStreams}
+            isLoading={isGeneratingTopology}
+            onGenerate={(streamNames) => {
+              void generateTopology(streamNames);
+            }}
+          />
         </EuiFlexItem>
       )}
     </EuiFlexGroup>
   );
+
+  const topologyProgressCallout = isGeneratingTopology ? (
+    <>
+      <EuiSpacer size="m" />
+      <EuiCallOut
+        size="s"
+        color="primary"
+        iconType={EuiLoadingSpinner}
+        title={GENERATING_TOPOLOGY_TITLE}
+        announceOnMount
+        data-test-subj="significantEventsGeneratingTopologyCallout"
+      >
+        <p>{GENERATING_TOPOLOGY_DESCRIPTION}</p>
+      </EuiCallOut>
+    </>
+  ) : null;
+
+  const topologyErrorCallout = generateTopologyError ? (
+    <>
+      <EuiSpacer size="m" />
+      <EuiCallOut
+        size="s"
+        color="danger"
+        title={GENERATE_TOPOLOGY_ERROR_TITLE}
+        announceOnMount
+        data-test-subj="significantEventsGenerateTopologyErrorCallout"
+      >
+        <p>{getFormattedError(generateTopologyError).message}</p>
+      </EuiCallOut>
+    </>
+  ) : null;
 
   const generationProgressCallout = isGenerating ? (
     <>
@@ -285,10 +333,12 @@ export function KnowledgeIndicatorsTable({ view }: { view: KnowledgeIndicatorVie
       {generationProgressCallout}
       {view === 'topology' && (
         <>
+          {topologyProgressCallout}
+          {topologyErrorCallout}
           <EuiSpacer size="m" />
           <TopologyMapAccordion
             knowledgeIndicators={filteredKnowledgeIndicators}
-            isLoading={isLoading}
+            isLoading={isLoading || isGeneratingTopology}
             selectedNodeId={selectedKnowledgeIndicatorId}
             onNodeClick={handleTopologyNodeClick}
           />

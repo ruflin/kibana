@@ -346,14 +346,24 @@ new stored KI type whose payload is the graph.
 4. **Node click** selects the matching KI (`feature.uuid === node.id`) via the
    existing table/flyout selection (`selectKnowledgeIndicator`). Selected node
    id tracks `selectedKnowledgeIndicatorId`.
-5. **Generate topology** injects selected **KI filter** stream names
-   (`selectedStreams` from the knowledge indicators table URL/filter state,
-   not the onboarding StreamPicker) into the Agent Builder prompt. Empty
-   selection searches existing KIs across accessible streams. The prompt
-   explicitly forbids feature identification and stream onboarding.
+5. **Generate topology** regenerates topology knowledge indicators **in the
+   Topology panel**. It does **not** open Agent Builder chat. The button
+   stays available whenever the user can start new activity (`useBlocksNewActivity`
+   / pause). Selected **KI filter** stream names (`selectedStreams` from the
+   knowledge indicators table URL/filter state, not the onboarding
+   StreamPicker) are sent to
+   `POST /internal/streams/knowledge_indicators/topology/_generate`. An empty
+   selection uses existing knowledge indicators across accessible streams.
+   The server does not run feature identification or stream onboarding. It
+   materializes implied entity / technology / infrastructure / dependency
+   knowledge indicators from the current KI set, then asks the KI-extraction
+   inference connector to fill remaining gaps that those KIs already support.
+   On success the features query is invalidated and `TopologyMapAccordion`
+   re-projects the filtered topology KIs. The button and map show loading
+   while that runs; failures surface as a topology-panel callout and a toast.
 
 `TopologyMapAccordion` re-projects the **currently filtered** topology KIs, so
-Generate topology fills the panel once those KIs update and the table
+Generate topology fills the panel once those KIs persist and the table
 refreshes.
 
 ### Later slices — do not block this PR
@@ -363,9 +373,6 @@ These are planned consumers of the same `TopologyGraph` / map, not shipped:
 - Agent Builder attachment of the topology map
 - Nightshift daily flyout embed
 - Dashboard embeddable
-- Agent write-back of implied knowledge indicators (the Generate topology
-  prompt already asks before creating KIs that existing ones do not support;
-  there is no automatic write-back)
 
 The management accordion is the first consumer, not a dashboard-embeddable
 blocker.
@@ -448,8 +455,11 @@ noted.
 | Node chrome | `public/components/knowledge_indicators/topology_map/topology_node.tsx` |
 | Client dagre layout | `public/components/knowledge_indicators/topology_map/apply_dagre_layout.ts` |
 | KI table, map host, node click | `public/pages/significant_events/components/knowledge_indicators_table/knowledge_indicators_table.tsx` |
-| Generate topology (Agent Builder) | `public/pages/significant_events/components/knowledge_indicators_table/generate_topology_button.tsx` |
-| Generate topology prompt copy | `public/pages/significant_events/components/knowledge_indicators_table/translations.ts` |
+| Generate topology (in-panel regenerate) | `public/pages/significant_events/components/knowledge_indicators_table/generate_topology_button.tsx` |
+| Generate topology client | `public/pages/significant_events/components/knowledge_indicators_table/use_generate_topology.ts` |
+| Generate topology API | `../significant_events/server/routes/internal/knowledge_indicators/topology/route.ts` (`POST /internal/streams/knowledge_indicators/topology/_generate`) |
+| Implied topology materialization | `../significant_events/server/lib/significant_events/topology/derive_implied_topology_features.ts` |
+| Topology LLM pass | `../significant_events/server/lib/significant_events/topology/generate_topology_from_knowledge_indicators.ts` |
 
 ### Other surfaces
 
@@ -480,7 +490,8 @@ Sources (query streams plus the per-row Enabled toggle).
 | `public/hooks/use_stream_histogram_fetch.test.ts` | Histogram hook uses Streams ES\|QL + toolbar range |
 | `public/pages/significant_events/components/streams_view/streams_view.test.tsx` | Generate absent from Data Sources chrome |
 | `public/pages/significant_events/hooks/use_nightshift_stream_enabled.test.tsx` | Allowlist persist, seed from onboarding, enable starts extraction, disable cancels |
-| `public/pages/significant_events/components/knowledge_indicators_table/generate_topology_button.test.tsx` | Prompt uses existing KIs, injects stream names, no onboarding |
+| `public/pages/significant_events/components/knowledge_indicators_table/generate_topology_button.test.tsx` | In-panel regenerate, no chat, respects pause |
+| `public/pages/significant_events/components/knowledge_indicators_table/use_generate_topology.test.tsx` | Calls topology `_generate` API, invalidates features, toasts on error |
 | `public/components/knowledge_indicators/utils/get_knowledge_indicator_view.test.ts` | Topology / Queries / More type membership |
 | `public/components/knowledge_indicators/topology_map/topology_map_accordion.test.tsx` | Counts, empty/loading, unresolved endpoints, canvas present |
 | `public/components/knowledge_indicators/topology_map/apply_dagre_layout.test.ts` | Client dagre positions |

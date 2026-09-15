@@ -8,25 +8,10 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { GenerateTopologyButton } from './generate_topology_button';
-import {
-  GENERATE_TOPOLOGY_INITIAL_MESSAGE,
-  getGenerateTopologyInitialMessage,
-} from './translations';
 
-const mockOpenChat = jest.fn();
-let mockAgentBuilder: { openChat: typeof mockOpenChat } | undefined = { openChat: mockOpenChat };
+const mockOnGenerate = jest.fn();
 let mockBlocksActivity = false;
 let mockActivityBlockTooltip: string | undefined;
-
-jest.mock('../../../../hooks/use_kibana', () => ({
-  useKibana: () => ({
-    dependencies: {
-      start: {
-        agentBuilder: mockAgentBuilder,
-      },
-    },
-  }),
-}));
 
 jest.mock('../../../../hooks/use_significant_events_maintenance', () => ({
   useBlocksNewActivity: () => ({
@@ -38,53 +23,44 @@ jest.mock('../../../../hooks/use_significant_events_maintenance', () => ({
 describe('GenerateTopologyButton', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockAgentBuilder = { openChat: mockOpenChat };
     mockBlocksActivity = false;
     mockActivityBlockTooltip = undefined;
   });
 
-  it('hides when agent builder is unavailable', () => {
-    mockAgentBuilder = undefined;
-    const { container } = render(<GenerateTopologyButton />);
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('opens a new chat and tells the agent no streams are selected', () => {
-    render(<GenerateTopologyButton />);
+  it('regenerates topology for the current stream filter without opening chat', () => {
+    render(
+      <GenerateTopologyButton
+        selectedStreamNames={['logs.claims', 'logs.payments']}
+        onGenerate={mockOnGenerate}
+      />
+    );
     fireEvent.click(screen.getByTestId('significantEventsGenerateTopologyButton'));
 
-    expect(mockOpenChat).toHaveBeenCalledWith({
-      newConversation: true,
-      initialMessage: GENERATE_TOPOLOGY_INITIAL_MESSAGE,
-      autoSendInitialMessage: true,
-    });
-    expect(GENERATE_TOPOLOGY_INITIAL_MESSAGE).toMatch(/No streams are currently selected/i);
-    expect(GENERATE_TOPOLOGY_INITIAL_MESSAGE).toMatch(/Search existing knowledge indicators/i);
-    expect(GENERATE_TOPOLOGY_INITIAL_MESSAGE).toMatch(/Do not run feature identification/i);
-    expect(GENERATE_TOPOLOGY_INITIAL_MESSAGE).toMatch(/stream onboarding/i);
+    expect(mockOnGenerate).toHaveBeenCalledTimes(1);
+    expect(mockOnGenerate).toHaveBeenCalledWith(['logs.claims', 'logs.payments']);
   });
 
-  it('injects selected stream names into the prompt', () => {
-    const selectedStreamNames = ['logs.claims', 'logs.payments'];
-    render(<GenerateTopologyButton selectedStreamNames={selectedStreamNames} />);
+  it('regenerates across the existing knowledge-indicator set when no streams are selected', () => {
+    render(<GenerateTopologyButton onGenerate={mockOnGenerate} />);
     fireEvent.click(screen.getByTestId('significantEventsGenerateTopologyButton'));
 
-    const initialMessage = getGenerateTopologyInitialMessage(selectedStreamNames);
-    expect(mockOpenChat).toHaveBeenCalledWith({
-      newConversation: true,
-      initialMessage,
-      autoSendInitialMessage: true,
-    });
-    expect(initialMessage).toContain('logs.claims, logs.payments');
-    expect(initialMessage).toMatch(/existing knowledge indicators/i);
-    expect(initialMessage).toMatch(/Do not run feature identification/i);
-    expect(initialMessage).not.toMatch(/No streams are currently selected/i);
+    expect(mockOnGenerate).toHaveBeenCalledWith([]);
+  });
+
+  it('is available even when Agent Builder is not present', () => {
+    render(<GenerateTopologyButton onGenerate={mockOnGenerate} />);
+    expect(screen.getByTestId('significantEventsGenerateTopologyButton')).toBeEnabled();
   });
 
   it('disables while new activity is blocked', () => {
     mockBlocksActivity = true;
     mockActivityBlockTooltip = 'Paused';
-    render(<GenerateTopologyButton />);
+    render(<GenerateTopologyButton onGenerate={mockOnGenerate} />);
+    expect(screen.getByTestId('significantEventsGenerateTopologyButton')).toBeDisabled();
+  });
+
+  it('shows a loading state while regeneration is in progress', () => {
+    render(<GenerateTopologyButton isLoading onGenerate={mockOnGenerate} />);
     expect(screen.getByTestId('significantEventsGenerateTopologyButton')).toBeDisabled();
   });
 });

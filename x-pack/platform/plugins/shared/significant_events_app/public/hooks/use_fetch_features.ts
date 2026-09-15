@@ -14,6 +14,8 @@ interface FetchFeaturesResult {
   features: Feature[];
 }
 
+export const FEATURES_QUERY_KEY = ['features', 'all'] as const;
+
 export const useFetchFeatures = () => {
   const { significantEventsRepositoryClient } = useKibana().dependencies.start.significantEvents;
   const showFetchErrorToast = useFetchErrorToast();
@@ -32,7 +34,7 @@ export const useFetchFeatures = () => {
   };
 
   return useQuery<FetchFeaturesResult | undefined, Error>({
-    queryKey: ['features', 'all'],
+    queryKey: FEATURES_QUERY_KEY,
     queryFn: fetchFeatures,
     onError: showFetchErrorToast,
   });
