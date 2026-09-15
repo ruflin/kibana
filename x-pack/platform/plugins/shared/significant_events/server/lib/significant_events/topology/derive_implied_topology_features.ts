@@ -74,9 +74,7 @@ const toWorkingFeature = (feature: FeatureUpsert): Feature => ({
 
 const findNode = (features: readonly Feature[], ref: string): Feature | undefined => {
   const key = normalizeKey(ref);
-  const nodes = features.filter(
-    (feature) => !feature.excluded && isTopologyNodeType(feature.type)
-  );
+  const nodes = features.filter((feature) => !feature.excluded && isTopologyNodeType(feature.type));
 
   return (
     nodes.find((feature) => feature.id === ref) ??
@@ -110,10 +108,7 @@ const dependencyPairExists = (
     return sourceNode?.uuid === source.uuid && targetNode?.uuid === target.uuid;
   });
 
-const isAlreadyPresent = (
-  features: readonly Feature[],
-  incoming: FeatureUpsert
-): boolean =>
+const isAlreadyPresent = (features: readonly Feature[], incoming: FeatureUpsert): boolean =>
   features.some(
     (feature) =>
       !feature.excluded &&

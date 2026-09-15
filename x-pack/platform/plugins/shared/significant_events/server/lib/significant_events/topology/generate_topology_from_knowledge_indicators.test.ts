@@ -46,7 +46,7 @@ const createReasoningResponse = (arguments_: Record<string, unknown>) =>
       },
     ],
     tokens: { prompt: 10, completion: 5, total: 15 },
-  }) as unknown as Awaited<ReturnType<typeof executeAsReasoningAgent>>;
+  } as unknown as Awaited<ReturnType<typeof executeAsReasoningAgent>>);
 
 describe('generateTopologyFromKnowledgeIndicators', () => {
   const logger = { warn: jest.fn() } as unknown as Logger;
@@ -122,7 +122,7 @@ describe('generateTopologyFromKnowledgeIndicators', () => {
       content: '',
       toolCalls: [],
       tokens: { prompt: 1, completion: 1, total: 2 },
-    } as Awaited<ReturnType<typeof executeAsReasoningAgent>>);
+    } as unknown as Awaited<ReturnType<typeof executeAsReasoningAgent>>);
 
     await expect(
       generateTopologyFromKnowledgeIndicators({

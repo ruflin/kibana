@@ -58,8 +58,9 @@ const generateTopologyRoute = createServerRoute({
 
     const kiClient = await scopedClients.getKnowledgeIndicatorClient();
     const routeLogger = logger.get('topology', 'generate');
+    const body = params?.body;
     const connectorId =
-      params.body?.connectorId ??
+      body?.connectorId ??
       (await resolveConnectorForFeature({
         searchInferenceEndpoints: server.searchInferenceEndpoints,
         featureId: SIGNIFICANT_EVENTS_KI_EXTRACTION_INFERENCE_FEATURE_ID,
@@ -68,7 +69,7 @@ const generateTopologyRoute = createServerRoute({
       }));
 
     return regenerateTopology({
-      requestedStreamNames: params.body?.streamNames,
+      requestedStreamNames: body?.streamNames,
       connectorId,
       kiClient,
       listStreamNames: async () => {
