@@ -164,23 +164,52 @@ describe('SettingsTab developer mode', () => {
     expect(setDeveloperMode).toHaveBeenCalledWith(true);
   });
 
-  it('keeps the tuning YAML panel visible when developer mode is off', () => {
+  it('hides the tuning YAML panel by default', () => {
     setup({ isDeveloperMode: false });
 
-    expect(screen.getByTestId('streams-settings-tuning-editor')).toBeInTheDocument();
-    expect(screen.queryByTestId('nightshiftDeveloperModeBadge')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('nightshiftSettingsTuningPanel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('streams-settings-tuning-editor')).not.toBeInTheDocument();
   });
 
-  it('keeps the tuning YAML panel visible when developer mode is on', () => {
+  it('shows the tuning YAML panel and Dev badge when developer mode is on', () => {
     setup({ isDeveloperMode: true });
 
+    expect(screen.getByTestId('nightshiftSettingsTuningPanel')).toBeInTheDocument();
     expect(screen.getByTestId('streams-settings-tuning-editor')).toBeInTheDocument();
-    expect(screen.queryByTestId('nightshiftDeveloperModeBadge')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('nightshiftDeveloperModeBadge').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('nightshiftSettingsTuningPanel')).toHaveTextContent('Dev');
   });
 
   it('disables the switch without advancedSettings.save', () => {
     setup({ canEditDeveloperMode: false, canSaveAdvancedSettings: false });
 
     expect(screen.getByTestId('nightshiftDeveloperModeSwitch')).toBeDisabled();
+  });
+
+  it('reverts a dirty YAML draft and drops it from the save bar when developer mode turns off', () => {
+    const { rerender } = setup({ isDeveloperMode: true });
+
+    fireEvent.change(screen.getByTestId('streams-settings-tuning-editor'), {
+      target: { value: 'sample_size: 99' },
+    });
+    expect(
+      screen.getByTestId('streams-significant-events-settings-bottom-bar')
+    ).toBeInTheDocument();
+
+    mockUseDeveloperMode.mockReturnValue({
+      isDeveloperMode: false,
+      setDeveloperMode,
+      canEditDeveloperMode: true,
+    });
+    rerender(
+      <I18nProvider>
+        <SettingsTab />
+      </I18nProvider>
+    );
+
+    expect(screen.queryByTestId('nightshiftSettingsTuningPanel')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('streams-significant-events-settings-bottom-bar')
+    ).not.toBeInTheDocument();
   });
 });
