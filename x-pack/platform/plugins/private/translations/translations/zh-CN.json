@@ -50732,7 +50732,6 @@
     "xpack.significantEventsApp.featureDetailsFlyout.noEvidenceAvailable": "没有可用的证据",
     "xpack.significantEventsApp.featureDetailsFlyout.noMetaAvailable": "无元信息",
     "xpack.significantEventsApp.featureDetailsFlyout.propertiesLabel": "属性",
-    "xpack.significantEventsApp.featureDetailsFlyout.rawDocumentLabel": "原始文档",
     "xpack.significantEventsApp.featureDetailsFlyout.subtypeLabel": "子类型",
     "xpack.significantEventsApp.featureDetailsFlyout.tagsLabel": "标签",
     "xpack.significantEventsApp.featureDetailsFlyout.typeLabel": "类型",

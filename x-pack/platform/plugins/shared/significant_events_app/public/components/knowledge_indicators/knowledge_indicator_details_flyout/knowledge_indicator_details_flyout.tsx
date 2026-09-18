@@ -8,6 +8,7 @@
 import {
   EuiBadge,
   EuiButtonIcon,
+  EuiCodeBlock,
   EuiContextMenuItem,
   EuiContextMenuPanel,
   EuiFlexGroup,
@@ -19,6 +20,8 @@ import {
   EuiPagination,
   EuiPopover,
   EuiSpacer,
+  EuiTab,
+  EuiTabs,
   EuiTitle,
   EuiToolTip,
   useGeneratedHtmlId,
@@ -34,6 +37,8 @@ import type { Feature } from '@kbn/significant-events-schema';
 import { upperFirst } from 'lodash';
 import React, { useCallback, useMemo, useState } from 'react';
 import { useKibana } from '../../../hooks/use_kibana';
+import { useDeveloperMode } from '../../../hooks/use_developer_mode';
+import { DeveloperModeBadge } from '../../developer_mode_badge/developer_mode_badge';
 import { useTimefilter } from '../../../hooks/use_timefilter';
 import { buildFeatureDiscoverParams } from '../../../util/discover_helpers';
 import { getKnowledgeIndicatorTitle } from '../utils/get_knowledge_indicator_title';
@@ -92,10 +97,12 @@ export function KnowledgeIndicatorDetailsFlyout({
     },
   } = useKibana();
   const canManage = getNightshiftCapabilities(nightshift).canManage;
+  const { isDeveloperMode } = useDeveloperMode();
   const { timeState } = useTimefilter();
   const flyoutTitleId = useGeneratedHtmlId({ prefix: 'knowledgeIndicatorDetailsFlyoutTitle' });
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
+  const [selectedTab, setSelectedTab] = useState<'details' | 'def'>('details');
 
   const streamName = getKnowledgeIndicatorStreamName(knowledgeIndicator);
 
@@ -409,10 +416,41 @@ export function KnowledgeIndicatorDetailsFlyout({
               </FlyoutMetadataCard>
             </EuiFlexItem>
           </EuiFlexGroup>
+          {isDeveloperMode && (
+            <>
+              <EuiSpacer size="s" />
+              <EuiTabs>
+                <EuiTab
+                  isSelected={selectedTab === 'details'}
+                  onClick={() => setSelectedTab('details')}
+                >
+                  {DETAILS_TAB_LABEL}
+                </EuiTab>
+                <EuiTab
+                  prepend={<DeveloperModeBadge />}
+                  isSelected={selectedTab === 'def'}
+                  onClick={() => setSelectedTab('def')}
+                  data-test-subj="nightshiftKnowledgeIndicatorDefTab"
+                >
+                  {DEF_TAB_LABEL}
+                </EuiTab>
+              </EuiTabs>
+            </>
+          )}
         </EuiFlyoutHeader>
 
         <EuiFlyoutBody>
-          {knowledgeIndicator.kind === 'feature' ? (
+          {isDeveloperMode && selectedTab === 'def' ? (
+            <EuiCodeBlock
+              language="json"
+              paddingSize="s"
+              fontSize="s"
+              isCopyable
+              data-test-subj="nightshiftKnowledgeIndicatorDefJson"
+            >
+              {JSON.stringify(knowledgeIndicator, null, 2)}
+            </EuiCodeBlock>
+          ) : knowledgeIndicator.kind === 'feature' ? (
             <KnowledgeIndicatorFeatureDetailsContent
               feature={knowledgeIndicator.feature}
               onOpenInDiscover={openFeatureInDiscover}
@@ -519,5 +557,19 @@ const DELETE_RULE_MODAL_TITLE = i18n.translate(
   'xpack.significantEventsApp.knowledgeIndicatorDetailsFlyout.deleteRuleModalTitle',
   {
     defaultMessage: 'Are you sure you want to delete this rule?',
+  }
+);
+
+const DETAILS_TAB_LABEL = i18n.translate(
+  'xpack.significantEventsApp.knowledgeIndicatorDetailsFlyout.detailsTabLabel',
+  {
+    defaultMessage: 'Details',
+  }
+);
+
+const DEF_TAB_LABEL = i18n.translate(
+  'xpack.significantEventsApp.knowledgeIndicatorDetailsFlyout.defTabLabel',
+  {
+    defaultMessage: 'def',
   }
 );

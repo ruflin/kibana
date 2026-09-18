@@ -50334,7 +50334,6 @@
     "xpack.significantEventsApp.featureDetailsFlyout.noEvidenceAvailable": "Aucune preuve disponible",
     "xpack.significantEventsApp.featureDetailsFlyout.noMetaAvailable": "Aucune méta-information",
     "xpack.significantEventsApp.featureDetailsFlyout.propertiesLabel": "Propriétés",
-    "xpack.significantEventsApp.featureDetailsFlyout.rawDocumentLabel": "Document brut",
     "xpack.significantEventsApp.featureDetailsFlyout.subtypeLabel": "Sous-type",
     "xpack.significantEventsApp.featureDetailsFlyout.tagsLabel": "Balises",
     "xpack.significantEventsApp.featureDetailsFlyout.typeLabel": "Type",

@@ -50728,7 +50728,6 @@
     "xpack.significantEventsApp.featureDetailsFlyout.noEvidenceAvailable": "証拠がありません",
     "xpack.significantEventsApp.featureDetailsFlyout.noMetaAvailable": "メタ情報なし",
     "xpack.significantEventsApp.featureDetailsFlyout.propertiesLabel": "プロパティ",
-    "xpack.significantEventsApp.featureDetailsFlyout.rawDocumentLabel": "生ドキュメント",
     "xpack.significantEventsApp.featureDetailsFlyout.subtypeLabel": "サブタイプ",
     "xpack.significantEventsApp.featureDetailsFlyout.tagsLabel": "タグ",
     "xpack.significantEventsApp.featureDetailsFlyout.typeLabel": "型",
