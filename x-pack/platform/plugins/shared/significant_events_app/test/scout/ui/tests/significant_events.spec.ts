@@ -63,7 +63,7 @@ test.describe(
       );
     });
 
-    test('renders all 7 navigation tabs', async ({ page }) => {
+    test('renders navigation tabs without Detections by default', async ({ page }) => {
       await page.gotoApp('significant_events/streams');
       const tabBar = page.testSubj.locator(APP_HEADER_TEST_SUBJECTS.tabs);
       await expect(tabBar).toBeVisible({ timeout: 60_000 });
@@ -72,13 +72,13 @@ test.describe(
         'Streams',
         'Knowledge Indicators',
         'Rules',
-        'Detections',
         'Significant Events',
         'Memory',
         'Settings',
       ]) {
         await expect(tabBar.getByRole('tab', { name: label })).toBeVisible();
       }
+      await expect(tabBar.getByRole('tab', { name: 'Detections' })).toHaveCount(0);
     });
 
     test('hides Significant Events tuning YAML by default', async ({ page }) => {
