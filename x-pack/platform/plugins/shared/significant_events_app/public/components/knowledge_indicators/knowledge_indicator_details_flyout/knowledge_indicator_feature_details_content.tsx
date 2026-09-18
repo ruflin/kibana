@@ -163,13 +163,6 @@ export function KnowledgeIndicatorFeatureDetailsContent({ feature, onOpenInDisco
           )}
         </InfoPanel>
       </EuiFlexItem>
-      <EuiFlexItem data-test-subj="significantEventsAppFeatureDetailsFlyoutRawDocument">
-        <InfoPanel title={RAW_DOCUMENT_LABEL}>
-          <EuiCodeBlock language="json" paddingSize="s" fontSize="s" isCopyable>
-            {JSON.stringify(feature, null, 2)}
-          </EuiCodeBlock>
-        </InfoPanel>
-      </EuiFlexItem>
     </EuiFlexGroup>
   );
 }
@@ -270,13 +263,6 @@ const NO_META_AVAILABLE = i18n.translate(
   'xpack.significantEventsApp.featureDetailsFlyout.noMetaAvailable',
   {
     defaultMessage: 'No meta information',
-  }
-);
-
-const RAW_DOCUMENT_LABEL = i18n.translate(
-  'xpack.significantEventsApp.featureDetailsFlyout.rawDocumentLabel',
-  {
-    defaultMessage: 'Raw document',
   }
 );
 

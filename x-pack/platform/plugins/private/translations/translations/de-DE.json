@@ -50562,7 +50562,6 @@
     "xpack.significantEventsApp.featureDetailsFlyout.noEvidenceAvailable": "Keine Hinweise verfügbar",
     "xpack.significantEventsApp.featureDetailsFlyout.noMetaAvailable": "Keine Meta-Informationen",
     "xpack.significantEventsApp.featureDetailsFlyout.propertiesLabel": "Eigenschaften",
-    "xpack.significantEventsApp.featureDetailsFlyout.rawDocumentLabel": "Rohdokument",
     "xpack.significantEventsApp.featureDetailsFlyout.subtypeLabel": "Subtyp",
     "xpack.significantEventsApp.featureDetailsFlyout.tagsLabel": "Tags",
     "xpack.significantEventsApp.featureDetailsFlyout.typeLabel": "Typ",
