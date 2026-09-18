@@ -834,7 +834,7 @@ export function SettingsTab() {
               <EuiText color="subdued" size="s">
                 {i18n.translate('xpack.significantEventsApp.settings.developerModeHelpText', {
                   defaultMessage:
-                    'The Significant Events tuning YAML editor is only visible while this is on.',
+                    'Extra tabs and the Significant Events tuning YAML editor are only visible while this is on.',
                 })}
               </EuiText>
             </EuiFlexItem>

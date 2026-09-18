@@ -12,6 +12,8 @@ import { i18n } from '@kbn/i18n';
 import { getNightshiftCapabilities } from '@kbn/nightshift-shared';
 import React, { useCallback, useEffect, useMemo } from 'react';
 import { useKibana } from '../../hooks/use_kibana';
+import { useDeveloperMode } from '../../hooks/use_developer_mode';
+import { DeveloperModeBadge } from '../../components/developer_mode_badge/developer_mode_badge';
 import { getFormattedError } from '../../util/errors';
 import { useSignificantEventsAppParams } from '../../hooks/use_significant_events_app_params';
 import { useSignificantEventsAppRouter } from '../../hooks/use_significant_events_app_router';
@@ -76,6 +78,7 @@ export function SignificantEventsPage() {
   } = useKibana();
 
   const { canShow, canManage, canConfigure } = getNightshiftCapabilities(nightshift);
+  const { isDeveloperMode } = useDeveloperMode();
 
   const { availability, isLoading: isAvailabilityLoading } = useSignificantEventsAvailability();
   const isCortexEnabled = useCortexEnabled();
@@ -196,6 +199,7 @@ export function SignificantEventsPage() {
         }),
         href: router.link('/{tab}', { path: { tab: 'detections' } }),
         isSelected: tab === 'detections',
+        append: <DeveloperModeBadge />,
       },
       {
         id: 'significant_events',
@@ -237,8 +241,13 @@ export function SignificantEventsPage() {
     [tab, router, isCortexEnabled]
   );
   const tabs = useMemo(
-    () => allTabs.filter((item) => item.id !== 'settings' || canConfigure),
-    [allTabs, canConfigure]
+    () =>
+      allTabs.filter((item) => {
+        if (item.id === 'settings') return canConfigure;
+        if (item.id === 'detections') return isDeveloperMode;
+        return true;
+      }),
+    [allTabs, canConfigure, isDeveloperMode]
   );
 
   if (isAvailabilityLoading) {
