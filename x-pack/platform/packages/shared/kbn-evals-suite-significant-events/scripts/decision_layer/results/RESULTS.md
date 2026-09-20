@@ -168,6 +168,6 @@ n=20 (holdout 8; train 12)
 - **B0 persist-all** is today's generator+validate path (no semantic gate).
 - A backend wins A1/A2 if it raises must-detect recall while cutting noise persist vs B0.
 - Jev/Laya rows are skipped unless `TYPESAFE_API_KEY` / `laya` weights are present.
-- `reranker` is a MiniLM cross-encoder stand-in for Jina listwise ranking on CPU.
+- `reranker` is MiniLM-L6 MS-MARCO, not Jina. Real Jina rows are `jina_*` (see `JINA.md`).
 - `embedding` is MiniLM cosine — the ELSER-shaped alternative.
 

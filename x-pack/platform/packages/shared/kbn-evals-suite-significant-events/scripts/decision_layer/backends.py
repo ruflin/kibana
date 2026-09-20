@@ -573,4 +573,7 @@ def build_backends() -> list[Backend]:
         LayaBackend(),
     ]
     backends.extend([EmbeddingBackend(), RerankerBackend()])
+    from jina_backends import build_jina_backends
+
+    backends.extend(build_jina_backends())
     return backends

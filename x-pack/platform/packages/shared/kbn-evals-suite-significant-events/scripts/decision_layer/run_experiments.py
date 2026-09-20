@@ -394,8 +394,10 @@ def write_markdown(summary: dict[str, Any], path: Path) -> None:
         "- **B0 persist-all** is today's generator+validate path (no semantic gate).",
         "- A backend wins A1/A2 if it raises must-detect recall while cutting noise persist vs B0.",
         "- Jev/Laya rows are skipped unless `TYPESAFE_API_KEY` / `laya` weights are present.",
-        "- `reranker` is a MiniLM cross-encoder stand-in for Jina listwise ranking on CPU.",
+        "- `reranker` is MiniLM-L6 MS-MARCO, not Jina. Real Jina rows are `jina_*`.",
         "- `embedding` is MiniLM cosine — the ELSER-shaped alternative.",
+        "- `jina_classify` / `jina_embed` / `jina_rerank` / `jina_rerank_v2` need `JINA_API_KEY`.",
+        "- See `JINA.md` for the fair Jina protocol (task adapters, listwise vs v2, calib-split).",
         "",
     ]
     path.write_text("\n".join(lines) + "\n")
@@ -404,14 +406,31 @@ def write_markdown(summary: dict[str, Any], path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-optional-models", action="store_true")
+    parser.add_argument(
+        "--backends",
+        default="",
+        help="Comma-separated backend names to keep (e.g. jina_classify,jina_rerank)",
+    )
     args = parser.parse_args()
 
     RESULTS.mkdir(exist_ok=True)
     examples = all_examples()
     backends = build_backends()
+    if args.backends:
+        wanted = {name.strip() for name in args.backends.split(",") if name.strip()}
+        backends = [backend for backend in backends if backend.name in wanted]
     if args.skip_optional_models:
         for backend in backends:
-            if backend.name in {"embedding", "reranker", "laya", "jev"}:
+            if backend.name in {
+                "embedding",
+                "reranker",
+                "laya",
+                "jev",
+                "jina_classify",
+                "jina_embed",
+                "jina_rerank",
+                "jina_rerank_v2",
+            }:
                 backend.available = False
                 backend.skip_reason = backend.skip_reason or "disabled by --skip-optional-models"
 

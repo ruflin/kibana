@@ -24,15 +24,22 @@ not from an LLM judge.
 | `heuristic` | nothing (SRE keyword rules) |
 | `tfidf` | numpy |
 | `embedding` | `sentence-transformers` + MiniLM |
-| `reranker` | `sentence-transformers` + MiniLM cross-encoder (Jina-shaped) |
+| `reranker` | MiniLM-L6 MS-MARCO cross-encoder (CPU proxy, **not** Jina) |
 | `jev` | `TYPESAFE_API_KEY` |
 | `laya` | `pip install laya` and HF weights |
+| `jina_classify` | `JINA_API_KEY` — v5-text-small `/v1/classify` |
+| `jina_embed` | `JINA_API_KEY` — v5-text-small `/v1/embeddings` |
+| `jina_rerank` | `JINA_API_KEY` — `jina-reranker-v3.5` |
+| `jina_rerank_v2` | `JINA_API_KEY` — v2-base short-context control |
+
+Jina comparison protocol: [`JINA.md`](./JINA.md).
 
 ## Run
 
 ```bash
 python3 run_experiments.py
+JINA_API_KEY=… python3 run_experiments.py --backends jina_classify,jina_embed,jina_rerank,jina_rerank_v2
 ```
 
 Writes `results/RESULTS.md` and JSON dumps. Optional models are used when
-importable and skipped otherwise.
+importable / keyed and skipped otherwise.
