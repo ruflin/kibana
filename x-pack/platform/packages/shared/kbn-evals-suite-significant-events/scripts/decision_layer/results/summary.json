@@ -1,0 +1,2435 @@
+{
+  "environment": {
+    "majority": {
+      "available": true,
+      "reason": ""
+    },
+    "heuristic": {
+      "available": true,
+      "reason": ""
+    },
+    "tfidf": {
+      "available": true,
+      "reason": ""
+    },
+    "jev": {
+      "available": false,
+      "reason": "TYPESAFE_API_KEY not set (Jev is waitlist/API)"
+    },
+    "laya": {
+      "available": false,
+      "reason": "laya package not installed"
+    },
+    "embedding": {
+      "available": true,
+      "reason": ""
+    },
+    "reranker": {
+      "available": true,
+      "reason": ""
+    }
+  },
+  "A1_pattern_triage": {
+    "task": "pattern_triage",
+    "n_total": 46,
+    "n_train": 27,
+    "n_calib": 9,
+    "n_test": 10,
+    "n_holdout": 19,
+    "backends": {
+      "majority": {
+        "n_scored": 19,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 0.1,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 0,
+        "category_accuracy": 0.3684210526315789,
+        "category_per_label": {
+          "error": 1.0,
+          "expected_noise": 0.0,
+          "resource": 0.0,
+          "security": 0.0
+        },
+        "severity_mae": 1.3684210526315792,
+        "interesting": {
+          "accuracy@0.5": 0.47368421052631576,
+          "brier": 0.3206266695545447,
+          "ece": 0.26705653021442494,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 1.0,
+              "precision": 0.47368421052631576,
+              "n_acted": 19
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 1.0,
+              "precision": 0.47368421052631576,
+              "n_acted": 19
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 1.0,
+              "precision": 0.47368421052631576,
+              "n_acted": 19
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 1.0,
+              "precision": 0.47368421052631576,
+              "n_acted": 19
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 1.0,
+              "precision": 0.47368421052631576,
+              "n_acted": 19
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        }
+      },
+      "heuristic": {
+        "n_scored": 19,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 0.03006899998437898,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 417,
+        "category_accuracy": 0.7368421052631579,
+        "category_per_label": {
+          "error": 0.8571428571428571,
+          "expected_noise": 0.7,
+          "resource": 0.0,
+          "security": 1.0
+        },
+        "severity_mae": 0.44210526315789467,
+        "interesting": {
+          "accuracy@0.5": 0.8947368421052632,
+          "brier": 0.0827421052631579,
+          "ece": 0.11736842105263162,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.3684210526315789,
+            "threshold": 0.5,
+            "precision": 1.0
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.3684210526315789,
+            "threshold": 0.5,
+            "precision": 1.0
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.3684210526315789,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.3684210526315789,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.3684210526315789,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.3684210526315789,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.3684210526315789,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.21052631578947367,
+              "precision": 1.0,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.21052631578947367,
+              "precision": 1.0,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.21052631578947367,
+              "precision": 1.0,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.15789473684210525,
+              "precision": 1.0,
+              "n_acted": 3
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.15789473684210525,
+              "precision": 1.0,
+              "n_acted": 3
+            }
+          ]
+        }
+      },
+      "tfidf": {
+        "n_scored": 19,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 0.2609752631374967,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 417,
+        "category_accuracy": 0.05263157894736842,
+        "category_per_label": {
+          "config": NaN,
+          "error": 0.0,
+          "expected_noise": 0.1,
+          "operational": NaN,
+          "resource": 0.0,
+          "security": 0.0
+        },
+        "severity_mae": 1.3307563368453554,
+        "interesting": {
+          "accuracy@0.5": 0.5263157894736842,
+          "brier": 0.2544980318145126,
+          "ece": 0.10836347614423048,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        }
+      },
+      "jev": {
+        "skipped": true,
+        "reason": "TYPESAFE_API_KEY not set (Jev is waitlist/API)"
+      },
+      "laya": {
+        "skipped": true,
+        "reason": "laya package not installed"
+      },
+      "embedding": {
+        "n_scored": 19,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 41.47267521054681,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 417,
+        "category_accuracy": 0.9473684210526315,
+        "category_per_label": {
+          "error": 1.0,
+          "expected_noise": 1.0,
+          "resource": 0.0,
+          "security": 1.0
+        },
+        "severity_mae": 1.2128141447870042,
+        "interesting": {
+          "accuracy@0.5": 0.2631578947368421,
+          "brier": 0.25155373108891804,
+          "ece": 0.23889734419552905,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.5789473684210527,
+              "precision": 0.2727272727272727,
+              "n_acted": 11
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        }
+      },
+      "reranker": {
+        "n_scored": 19,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 37.4736183684227,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 417,
+        "category_accuracy": 0.15789473684210525,
+        "category_per_label": {
+          "config": NaN,
+          "error": 0.42857142857142855,
+          "expected_noise": 0.0,
+          "operational": NaN,
+          "resource": 0.0,
+          "security": 0.0
+        },
+        "severity_mae": 0.9320902857274539,
+        "interesting": {
+          "accuracy@0.5": 0.47368421052631576,
+          "brier": 0.25228223188059323,
+          "ece": 0.03201716824581747,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.2631578947368421,
+              "precision": 0.4,
+              "n_acted": 5
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        }
+      }
+    }
+  },
+  "A2_ki_judge": {
+    "task": "ki_judge",
+    "n_total": 26,
+    "n_train": 15,
+    "n_calib": 5,
+    "n_test": 6,
+    "n_holdout": 11,
+    "backends": {
+      "majority": {
+        "n_scored": 11,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 0.1,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 0,
+        "category_accuracy": 0.2727272727272727,
+        "category_per_label": {
+          "error": 1.0,
+          "operational": 0.0,
+          "resource_health": 0.0,
+          "security": 0.0
+        },
+        "severity_mae": 1.0,
+        "grounded": {
+          "accuracy@0.5": 0.6363636363636364,
+          "brier": 0.24080808080808078,
+          "ece": 0.09696969696969693,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 1.0,
+              "precision": 0.6363636363636364,
+              "n_acted": 11
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 1.0,
+              "precision": 0.6363636363636364,
+              "n_acted": 11
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 1.0,
+              "precision": 0.6363636363636364,
+              "n_acted": 11
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 1.0,
+              "precision": 0.6363636363636364,
+              "n_acted": 11
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 1.0,
+              "precision": 0.6363636363636364,
+              "n_acted": 11
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "duplicate": {
+          "accuracy@0.5": 1.0,
+          "brier": 0.040000000000000015,
+          "ece": 0.2,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        }
+      },
+      "heuristic": {
+        "n_scored": 11,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 0.04050199994377512,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 429,
+        "category_accuracy": 0.8181818181818182,
+        "category_per_label": {
+          "error": 1.0,
+          "operational": 0.6666666666666666,
+          "resource_health": 1.0,
+          "security": 1.0
+        },
+        "severity_mae": 0.6818181818181818,
+        "grounded": {
+          "accuracy@0.5": 1.0,
+          "brier": 0.03530909090909093,
+          "ece": 0.18727272727272723,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.6363636363636364,
+            "threshold": 0.5,
+            "precision": 1.0
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.6363636363636364,
+            "threshold": 0.5,
+            "precision": 1.0
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.6363636363636364,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.6363636363636364,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.6363636363636364,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.6363636363636364,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.6363636363636364,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.6363636363636364,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.6363636363636364,
+              "precision": 1.0,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "duplicate": {
+          "accuracy@0.5": 1.0,
+          "brier": 0.0064,
+          "ece": 0.07999999999999999,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        }
+      },
+      "tfidf": {
+        "n_scored": 11,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 0.3672024545473753,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 429,
+        "category_accuracy": 0.2727272727272727,
+        "category_per_label": {
+          "configuration": NaN,
+          "error": 0.3333333333333333,
+          "operational": 0.0,
+          "resource_health": 1.0,
+          "security": 1.0
+        },
+        "severity_mae": 0.9609132024927424,
+        "grounded": {
+          "accuracy@0.5": 0.36363636363636365,
+          "brier": 0.3089484487967699,
+          "ece": 0.272830577748272,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "duplicate": {
+          "accuracy@0.5": 0.0,
+          "brier": 0.5798200473296599,
+          "ece": 0.7613800966644735,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 1.0,
+              "precision": 0.0,
+              "n_acted": 11
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 1.0,
+              "precision": 0.0,
+              "n_acted": 11
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 1.0,
+              "precision": 0.0,
+              "n_acted": 11
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 1.0,
+              "precision": 0.0,
+              "n_acted": 11
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 1.0,
+              "precision": 0.0,
+              "n_acted": 11
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.8181818181818182,
+              "precision": 0.0,
+              "n_acted": 9
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        }
+      },
+      "jev": {
+        "skipped": true,
+        "reason": "TYPESAFE_API_KEY not set (Jev is waitlist/API)"
+      },
+      "laya": {
+        "skipped": true,
+        "reason": "laya package not installed"
+      },
+      "embedding": {
+        "n_scored": 11,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 67.57449554548988,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 429,
+        "category_accuracy": 0.36363636363636365,
+        "category_per_label": {
+          "error": 0.6666666666666666,
+          "operational": 0.16666666666666666,
+          "resource_health": 1.0,
+          "security": 0.0
+        },
+        "severity_mae": 0.8653658207623361,
+        "grounded": {
+          "accuracy@0.5": 0.5454545454545454,
+          "brier": 0.24996574564498933,
+          "ece": 0.13529840899123385,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.7272727272727273,
+              "precision": 0.625,
+              "n_acted": 8
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "duplicate": {
+          "accuracy@0.5": 0.9090909090909091,
+          "brier": 0.24885404271439018,
+          "ece": 0.49885173683816736,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.09090909090909091,
+              "precision": 0.0,
+              "n_acted": 1
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        }
+      },
+      "reranker": {
+        "n_scored": 11,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 61.61622718181289,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 429,
+        "category_accuracy": 0.6363636363636364,
+        "category_per_label": {
+          "error": 0.6666666666666666,
+          "operational": 0.5,
+          "resource_health": 1.0,
+          "security": 1.0
+        },
+        "severity_mae": 0.8251270167556775,
+        "grounded": {
+          "accuracy@0.5": 0.36363636363636365,
+          "brier": 0.24496977960937574,
+          "ece": 0.15506928346373816,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "duplicate": {
+          "accuracy@0.5": 0.9090909090909091,
+          "brier": 0.2325791173535105,
+          "ece": 0.4819710227576169,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.09090909090909091,
+              "precision": 0.0,
+              "n_acted": 1
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        }
+      }
+    }
+  },
+  "A3_admission": {
+    "task": "admission",
+    "n_total": 20,
+    "n_train": 12,
+    "n_calib": 4,
+    "n_test": 4,
+    "n_holdout": 8,
+    "backends": {
+      "majority": {
+        "n_scored": 8,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 0.1,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 0,
+        "investigate": {
+          "accuracy@0.5": 0.625,
+          "brier": 0.2361111111111111,
+          "ece": 0.041666666666666685,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "page": {
+          "accuracy@0.5": 0.75,
+          "brier": 0.19444444444444448,
+          "ece": 0.08333333333333334,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "action_accuracy": 0.375,
+        "action_per_label": {
+          "investigate": 0.0,
+          "notify": 0.0,
+          "page": 0.0,
+          "suppress": 1.0
+        }
+      },
+      "heuristic": {
+        "n_scored": 8,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 0.0326811249919956,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 158,
+        "investigate": {
+          "accuracy@0.5": 0.875,
+          "brier": 0.12250000000000001,
+          "ece": 0.275,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.25,
+            "threshold": 0.8,
+            "precision": 1.0
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.25,
+            "threshold": 0.8,
+            "precision": 1.0
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.5,
+              "precision": 0.75,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.5,
+              "precision": 0.75,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.375,
+              "precision": 0.6666666666666666,
+              "n_acted": 3
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.375,
+              "precision": 0.6666666666666666,
+              "n_acted": 3
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.375,
+              "precision": 0.6666666666666666,
+              "n_acted": 3
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.375,
+              "precision": 0.6666666666666666,
+              "n_acted": 3
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.25,
+              "precision": 1.0,
+              "n_acted": 2
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.25,
+              "precision": 1.0,
+              "n_acted": 2
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.125,
+              "precision": 1.0,
+              "n_acted": 1
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.125,
+              "precision": 1.0,
+              "n_acted": 1
+            }
+          ]
+        },
+        "page": {
+          "accuracy@0.5": 0.75,
+          "brier": 0.18125000000000002,
+          "ece": 0.22500000000000003,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.5,
+              "precision": 0.5,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.5,
+              "precision": 0.5,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.5,
+              "precision": 0.5,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.5,
+              "precision": 0.5,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.5,
+              "precision": 0.5,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.5,
+              "precision": 0.5,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.5,
+              "precision": 0.5,
+              "n_acted": 4
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "action_accuracy": 0.375,
+        "action_per_label": {
+          "investigate": 0.0,
+          "notify": 0.0,
+          "page": 0.0,
+          "suppress": 1.0
+        }
+      },
+      "tfidf": {
+        "n_scored": 8,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 0.24238137504539736,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 158,
+        "investigate": {
+          "accuracy@0.5": 0.625,
+          "brier": 0.23500000000000001,
+          "ece": 0.025000000000000022,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "page": {
+          "accuracy@0.5": 0.75,
+          "brier": 0.1975,
+          "ece": 0.09999999999999998,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "action_accuracy": 0.5,
+        "action_per_label": {
+          "investigate": 0.0,
+          "notify": 1.0,
+          "page": 0.5,
+          "suppress": 0.3333333333333333,
+          "watch": NaN
+        }
+      },
+      "jev": {
+        "skipped": true,
+        "reason": "TYPESAFE_API_KEY not set (Jev is waitlist/API)"
+      },
+      "laya": {
+        "skipped": true,
+        "reason": "laya package not installed"
+      },
+      "embedding": {
+        "n_scored": 8,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 36.46148837498231,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 158,
+        "investigate": {
+          "accuracy@0.5": 0.25,
+          "brier": 0.2505239078755116,
+          "ece": 0.25153456977568567,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.875,
+              "precision": 0.2857142857142857,
+              "n_acted": 7
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "page": {
+          "accuracy@0.5": 0.25,
+          "brier": 0.2527660088889018,
+          "ece": 0.2555673950118944,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 1.0,
+              "precision": 0.25,
+              "n_acted": 8
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "action_accuracy": 0.25,
+        "action_per_label": {
+          "investigate": 0.0,
+          "notify": 0.5,
+          "page": 0.5,
+          "suppress": 0.0,
+          "watch": NaN
+        }
+      },
+      "reranker": {
+        "n_scored": 8,
+        "n_errors": 0,
+        "errors_sample": [],
+        "mean_latency_ms": 37.06952237502037,
+        "total_cost_usd": 0.0,
+        "total_input_tokens": 158,
+        "investigate": {
+          "accuracy@0.5": 0.625,
+          "brier": 0.24461111791419432,
+          "ece": 0.11141696572303772,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "page": {
+          "accuracy@0.5": 0.75,
+          "brier": 0.24024461256968677,
+          "ece": 0.23510774597525597,
+          "coverage_at_p95": {
+            "min_precision": 0.95,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "coverage_at_p90": {
+            "min_precision": 0.9,
+            "coverage": 0.0,
+            "threshold": NaN
+          },
+          "curve": [
+            {
+              "threshold": 0.5,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.55,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.6,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.65,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.7,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.75,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.8,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.85,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.9,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            },
+            {
+              "threshold": 0.95,
+              "coverage": 0.0,
+              "precision": NaN,
+              "n_acted": 0
+            }
+          ]
+        },
+        "action_accuracy": 0.25,
+        "action_per_label": {
+          "investigate": 0.0,
+          "notify": 0.0,
+          "page": 0.0,
+          "suppress": 0.6666666666666666
+        }
+      }
+    }
+  },
+  "B_pipeline": {
+    "n_test": 11,
+    "arms": {
+      "B0_persist_all": {
+        "persisted": 11,
+        "suppressed": 0,
+        "persist_rate": 1.0,
+        "must_detect": 3,
+        "must_detect_recall": 1.0,
+        "noise_persist_rate": 1.0
+      },
+      "B_majority_t0.6": {
+        "persisted": 11,
+        "suppressed": 0,
+        "persist_rate": 1.0,
+        "must_detect": 3,
+        "must_detect_recall": 1.0,
+        "noise_persist_rate": 1.0
+      },
+      "B_majority_t0.75": {
+        "persisted": 0,
+        "suppressed": 11,
+        "persist_rate": 0.0,
+        "must_detect": 3,
+        "must_detect_recall": 0.0,
+        "noise_persist_rate": 0.0
+      },
+      "B_heuristic_t0.6": {
+        "persisted": 7,
+        "suppressed": 4,
+        "persist_rate": 0.6363636363636364,
+        "must_detect": 3,
+        "must_detect_recall": 1.0,
+        "noise_persist_rate": 0.0
+      },
+      "B_heuristic_t0.75": {
+        "persisted": 7,
+        "suppressed": 4,
+        "persist_rate": 0.6363636363636364,
+        "must_detect": 3,
+        "must_detect_recall": 1.0,
+        "noise_persist_rate": 0.0
+      },
+      "B_tfidf_t0.6": {
+        "persisted": 0,
+        "suppressed": 11,
+        "persist_rate": 0.0,
+        "must_detect": 3,
+        "must_detect_recall": 0.0,
+        "noise_persist_rate": 0.0
+      },
+      "B_tfidf_t0.75": {
+        "persisted": 0,
+        "suppressed": 11,
+        "persist_rate": 0.0,
+        "must_detect": 3,
+        "must_detect_recall": 0.0,
+        "noise_persist_rate": 0.0
+      },
+      "B_jev": {
+        "skipped": true,
+        "reason": "TYPESAFE_API_KEY not set (Jev is waitlist/API)"
+      },
+      "B_laya": {
+        "skipped": true,
+        "reason": "laya package not installed"
+      },
+      "B_embedding_t0.6": {
+        "persisted": 0,
+        "suppressed": 11,
+        "persist_rate": 0.0,
+        "must_detect": 3,
+        "must_detect_recall": 0.0,
+        "noise_persist_rate": 0.0
+      },
+      "B_embedding_t0.75": {
+        "persisted": 0,
+        "suppressed": 11,
+        "persist_rate": 0.0,
+        "must_detect": 3,
+        "must_detect_recall": 0.0,
+        "noise_persist_rate": 0.0
+      },
+      "B_reranker_t0.6": {
+        "persisted": 0,
+        "suppressed": 11,
+        "persist_rate": 0.0,
+        "must_detect": 3,
+        "must_detect_recall": 0.0,
+        "noise_persist_rate": 0.0
+      },
+      "B_reranker_t0.75": {
+        "persisted": 0,
+        "suppressed": 11,
+        "persist_rate": 0.0,
+        "must_detect": 3,
+        "must_detect_recall": 0.0,
+        "noise_persist_rate": 0.0
+      }
+    }
+  },
+  "D_ablations": {
+    "heuristic": {
+      "long_criteria": {
+        "category_accuracy": 0.7916666666666666,
+        "n": 24
+      },
+      "short_criteria": {
+        "category_accuracy": 0.7916666666666666,
+        "n": 24
+      },
+      "high_cardinality_26": {
+        "category_accuracy": 0.7916666666666666,
+        "n": 24
+      },
+      "truncated_state": {
+        "category_accuracy": 0.875
+      }
+    },
+    "tfidf": {
+      "long_criteria": {
+        "category_accuracy": 0.125,
+        "n": 24
+      },
+      "short_criteria": {
+        "category_accuracy": 0.4166666666666667,
+        "n": 24
+      },
+      "high_cardinality_26": {
+        "category_accuracy": 0.0,
+        "n": 24
+      },
+      "truncated_state": {
+        "category_accuracy": 0.2916666666666667
+      }
+    },
+    "embedding": {
+      "long_criteria": {
+        "category_accuracy": 0.875,
+        "n": 24
+      },
+      "short_criteria": {
+        "category_accuracy": 0.75,
+        "n": 24
+      },
+      "high_cardinality_26": {
+        "category_accuracy": 0.875,
+        "n": 24
+      },
+      "truncated_state": {
+        "category_accuracy": 0.75
+      }
+    },
+    "reranker": {
+      "long_criteria": {
+        "category_accuracy": 0.375,
+        "n": 24
+      },
+      "short_criteria": {
+        "category_accuracy": 0.2916666666666667,
+        "n": 24
+      },
+      "high_cardinality_26": {
+        "category_accuracy": 0.375,
+        "n": 24
+      },
+      "truncated_state": {
+        "category_accuracy": 0.7083333333333334
+      }
+    }
+  },
+  "notes": {
+    "gold": "Eval-suite scenario criteria, not LLM-as-judge",
+    "jev": "Requires TYPESAFE_API_KEY",
+    "laya": "Optional self-hosted clone; 512-1024 token budget"
+  }
+}
