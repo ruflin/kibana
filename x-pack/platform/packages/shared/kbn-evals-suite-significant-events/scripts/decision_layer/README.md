@@ -34,6 +34,9 @@ not from an LLM judge.
 
 Jina comparison protocol: [`JINA.md`](./JINA.md).
 
+Product notes (pattern importance, KI duplicates, detection, Jev as a
+workflow step): [`PRODUCT_NOTES.md`](./PRODUCT_NOTES.md).
+
 ## Run
 
 ```bash
