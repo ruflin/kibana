@@ -29,6 +29,7 @@ const ALLOWED_KEYS_UPDATE_CLOUD = [
   'userSettings.locale',
   'userSettings.rememberSelectedSpace',
   'userSettings.lastSelectedSpaceId',
+  'userSettings.nightshiftDeveloperMode',
 ] as const satisfies readonly UserProfileUpdatePaths[];
 
 const MAX_STRING_FIELD_LENGTH = 1024;
@@ -68,6 +69,7 @@ const userProfileUpdateSchema = schema.object({
       lastSelectedSpaceId: schema.maybe(
         schema.nullable(schema.string({ maxLength: MAX_STRING_FIELD_LENGTH }))
       ),
+      nightshiftDeveloperMode: schema.maybe(schema.boolean()),
     })
   ),
 });

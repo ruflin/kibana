@@ -92,7 +92,12 @@ export function SettingsTab() {
   const canSaveAdvancedSettings = core.application.capabilities.advancedSettings?.save === true;
   const canConfigureEngines = canManage && canConfigure;
   const canEditSettings = canConfigureEngines && canSaveAdvancedSettings;
-  const { isDeveloperMode, setDeveloperMode, isSaving: isDeveloperModeSaving } = useDeveloperMode();
+  const {
+    isDeveloperMode,
+    canPersist: canPersistDeveloperMode,
+    setDeveloperMode,
+    isSaving: isDeveloperModeSaving,
+  } = useDeveloperMode();
   // Slack app routes are gated on the Streams feature privilege, not Nightshift.
   const canManageSlack = core.application.capabilities.streams?.manage === true;
 
@@ -825,7 +830,7 @@ export function SettingsTab() {
               <EuiText color="subdued" size="s">
                 {i18n.translate('xpack.significantEventsApp.settings.developerModeHelpText', {
                   defaultMessage:
-                    'Unlocks extra Nightshift Management surfaces in this Kibana space. Changes take effect immediately.',
+                    'Unlocks extra Nightshift Management surfaces for you in every Kibana space. Changes take effect immediately and do not affect other users.',
                 })}
               </EuiText>
             </EuiFlexItem>
@@ -842,7 +847,7 @@ export function SettingsTab() {
                     onChange={(e) => {
                       void setDeveloperMode(e.target.checked);
                     }}
-                    disabled={!canSaveAdvancedSettings || isDeveloperModeSaving}
+                    disabled={!canPersistDeveloperMode || isDeveloperModeSaving}
                   />
                 </EuiFormRow>
               </EuiForm>
