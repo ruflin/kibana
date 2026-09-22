@@ -97,14 +97,17 @@ const setDeveloperMode = jest.fn();
 const setup = ({
   isDeveloperMode = false,
   isSaving = false,
+  canPersist = true,
   canSaveAdvancedSettings = true,
 }: {
   isDeveloperMode?: boolean;
   isSaving?: boolean;
+  canPersist?: boolean;
   canSaveAdvancedSettings?: boolean;
 } = {}) => {
   mockUseDeveloperMode.mockReturnValue({
     isDeveloperMode,
+    canPersist,
     isSaving,
     setDeveloperMode,
   });
@@ -176,8 +179,14 @@ describe('SettingsTab developer mode', () => {
     expect(screen.getByTestId('streams-settings-tuning-editor')).toBeInTheDocument();
   });
 
-  it('disables the switch without advancedSettings.save', () => {
-    setup({ canSaveAdvancedSettings: false });
+  it('allows toggling without advancedSettings.save', () => {
+    setup({ canSaveAdvancedSettings: false, canPersist: true });
+
+    expect(screen.getByTestId('nightshiftDeveloperModeSwitch')).toBeEnabled();
+  });
+
+  it('disables the switch when the user has no profile', () => {
+    setup({ canPersist: false });
 
     expect(screen.getByTestId('nightshiftDeveloperModeSwitch')).toBeDisabled();
   });

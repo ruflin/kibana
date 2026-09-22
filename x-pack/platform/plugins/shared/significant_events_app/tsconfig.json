@@ -1,7 +1,15 @@
 {
   "extends": "@kbn/tsconfig-base/tsconfig.json",
   "compilerOptions": {
-    "outDir": "target/types"
+    "outDir": "target/types",
+    "types": [
+      "node",
+      "jest",
+      "@emotion/jest",
+      "@testing-library/jest-dom",
+      "@kbn/ambient-ui-types",
+      "@kbn/core-user-settings-types"
+    ]
   },
   "include": [
     "common/**/*",
@@ -22,6 +30,8 @@
     "@kbn/core",
     "@kbn/core-http-browser",
     "@kbn/core-ui-settings-browser",
+    "@kbn/core-user-profile-common",
+    "@kbn/core-user-settings-types",
     "@kbn/cps",
     "@kbn/cps-utils",
     "@kbn/data-plugin",

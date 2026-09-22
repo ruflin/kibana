@@ -66,6 +66,12 @@ export interface UserSettingsData {
    * `agentBuilderAnnouncementModalSeen`; read for backward compatibility.
    */
   agentBuilderAnnouncementModalSeenBySpaceJson?: string;
+  /**
+   * When true, Nightshift Management shows developer-only surfaces for this user
+   * (all spaces). Replaces the former space-scoped UI setting
+   * `observability:nightshiftDeveloperMode`.
+   */
+  nightshiftDeveloperMode?: boolean;
 }
 
 // Register the known Kibana user settings fields with the core user-profile common package.

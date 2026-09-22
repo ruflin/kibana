@@ -9,42 +9,44 @@ import { useMemo } from 'react';
 import useObservable from 'react-use/lib/useObservable';
 import useAsyncFn from 'react-use/lib/useAsyncFn';
 import { i18n } from '@kbn/i18n';
-import { OBSERVABILITY_NIGHTSHIFT_DEVELOPER_MODE } from '@kbn/management-settings-ids';
 import { useKibana } from './use_kibana';
 import { getFormattedError } from '../util/errors';
 
 export interface UseDeveloperModeResult {
+  /** Whether developer mode is on for the current user. */
   isDeveloperMode: boolean;
+  /** False when the current session has no user profile (anonymous / some proxies). */
+  canPersist: boolean;
   isSaving: boolean;
   setDeveloperMode: (enabled: boolean) => Promise<void>;
 }
 
+/**
+ * Reads/writes Nightshift developer mode from the current user's profile
+ * (`userSettings.nightshiftDeveloperMode`), so the preference is per user
+ * rather than per Kibana space.
+ */
 export const useDeveloperMode = (): UseDeveloperModeResult => {
   const { core } = useKibana();
-  const settingsClient = core.settings.client;
-  const developerMode$ = useMemo(
-    () => settingsClient.get$<boolean>(OBSERVABILITY_NIGHTSHIFT_DEVELOPER_MODE, false),
-    [settingsClient]
-  );
-  const isDeveloperMode = useObservable(
-    developerMode$,
-    settingsClient.get<boolean>(OBSERVABILITY_NIGHTSHIFT_DEVELOPER_MODE, false)
-  );
+  const { userProfile, notifications } = core;
+
+  const profileData$ = useMemo(() => userProfile.getUserProfile$(), [userProfile]);
+  const profileEnabled$ = useMemo(() => userProfile.getEnabled$(), [userProfile]);
+
+  const profileData = useObservable(profileData$, null);
+  const isProfileEnabled = useObservable(profileEnabled$, false);
+
+  const isDeveloperMode = profileData?.userSettings?.nightshiftDeveloperMode === true;
+  const canPersist = isProfileEnabled === true;
 
   const [{ loading: isSaving }, setDeveloperMode] = useAsyncFn(
     async (enabled: boolean): Promise<void> => {
       try {
-        const wasSaved = await settingsClient.set(OBSERVABILITY_NIGHTSHIFT_DEVELOPER_MODE, enabled);
-        if (!wasSaved) {
-          throw new Error(
-            i18n.translate(
-              'xpack.significantEventsApp.settings.developerModeSaveFailedErrorMessage',
-              { defaultMessage: 'The developer mode setting could not be saved.' }
-            )
-          );
-        }
+        await userProfile.partialUpdate({
+          userSettings: { nightshiftDeveloperMode: enabled },
+        });
       } catch (error) {
-        core.notifications.toasts.addDanger({
+        notifications.toasts.addDanger({
           title: i18n.translate(
             'xpack.significantEventsApp.settings.developerModeSaveFailedTitle',
             {
@@ -55,11 +57,12 @@ export const useDeveloperMode = (): UseDeveloperModeResult => {
         });
       }
     },
-    [core.notifications.toasts, settingsClient]
+    [notifications.toasts, userProfile]
   );
 
   return {
-    isDeveloperMode: isDeveloperMode ?? false,
+    isDeveloperMode,
+    canPersist,
     isSaving,
     setDeveloperMode,
   };

@@ -393,6 +393,34 @@ describe('Update profile routes', () => {
       });
     });
 
+    it('allows Elastic Cloud users to update nightshiftDeveloperMode.', async () => {
+      session.get.mockResolvedValue({
+        error: null,
+        value: sessionMock.createValue({ userProfileId: 'u_some_id' }),
+      });
+      authc.getCurrentUser.mockReturnValue(mockAuthenticatedUser({ elastic_cloud_user: true }));
+
+      await expect(
+        routeHandler(
+          getMockContext(),
+          httpServerMock.createKibanaRequest({
+            body: {
+              userSettings: {
+                nightshiftDeveloperMode: true,
+              },
+            },
+          }),
+          kibanaResponseFactory
+        )
+      ).resolves.toEqual(expect.objectContaining({ status: 200, payload: undefined }));
+
+      expect(userProfileService.update).toHaveBeenCalledWith('u_some_id', {
+        userSettings: {
+          nightshiftDeveloperMode: true,
+        },
+      });
+    });
+
     it('updates profile.', async () => {
       session.get.mockResolvedValue({
         error: null,
