@@ -346,7 +346,8 @@ export function KnowledgeIndicatorsTable() {
       >
         <EuiInMemoryTable<KnowledgeIndicator>
           css={css`
-            min-width: 700px;
+            /* Checkbox + name column + fixed columns. Narrower than this, the name column collapses. */
+            min-width: 1100px;
 
             & thead tr {
               background-color: ${euiTheme.colors.backgroundBaseSubdued};
