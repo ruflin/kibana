@@ -719,6 +719,19 @@ describe('resolveEsArgs()', () => {
 
   test('should use projectIdOverride when provided in UIAM mode', () => {
     const overrideId = 'custom_project_id_123';
+  test('should keep explicitly provided metering args in UIAM mode', () => {
+    const esArgs = resolveEsArgs([], {
+      ssl: true,
+      projectType,
+      basePath: baseEsPath,
+      uiam: true,
+      esArgs: ['metering.url=http://metering-stub:8080', 'metering.report_period=5m'],
+    });
+
+    expect(findEnvValue(esArgs, 'metering.url')).toBe('http://metering-stub:8080');
+    expect(findEnvValue(esArgs, 'metering.report_period')).toBe('5m');
+  });
+
     const esArgs = resolveEsArgs(
       [],
       {

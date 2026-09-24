@@ -726,8 +726,13 @@ export function resolveEsArgs(
       // `serverless.project_id`, and, if not configured _explicitly_ with an HTTP URL, expects CA certs in a
       // fixed location (`http-certs/ca.crt`) that we cannot override. Any HTTP URL works — we reuse the SP base
       // URL just to avoid introducing another constant — and use the longest possible interval to reduce noise.
-      esArgs.set('metering.url', MOCK_IDP_SP_BASE_URL);
-      esArgs.set('metering.report_period', '60m');
+      // Explicit `-E metering.*` args (e.g. pointing at a local usage API stub) take precedence.
+      if (!esArgs.has('metering.url')) {
+        esArgs.set('metering.url', MOCK_IDP_SP_BASE_URL);
+      }
+      if (!esArgs.has('metering.report_period')) {
+        esArgs.set('metering.report_period', '60m');
+      }
 
       esArgs.set(
         `xpack.security.authc.realms.saml.${MOCK_IDP_REALM_NAME}.private_attributes`,
