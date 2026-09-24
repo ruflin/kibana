@@ -35,7 +35,9 @@ import {
   getESp12Volume,
   getServerlessNodes,
   getSharedServerlessParams,
+  getServerlessTelemetryEsArgs,
 } from './docker';
+import { APM_SERVER_CONTAINER_NAME, APM_SERVER_DEFAULT_IMAGE } from './docker_apm_server';
 import { ToolingLog, ToolingLogCollectingWriter } from '@kbn/tooling-log';
 import { CA_CERT_PATH, ES_P12_PATH } from '@kbn/dev-utils';
 import {
@@ -717,8 +719,6 @@ describe('resolveEsArgs()', () => {
     `);
   });
 
-  test('should use projectIdOverride when provided in UIAM mode', () => {
-    const overrideId = 'custom_project_id_123';
   test('should keep explicitly provided metering args in UIAM mode', () => {
     const esArgs = resolveEsArgs([], {
       ssl: true,
@@ -732,6 +732,19 @@ describe('resolveEsArgs()', () => {
     expect(findEnvValue(esArgs, 'metering.report_period')).toBe('5m');
   });
 
+  test('should let explicit telemetry args override the serverless telemetry defaults', () => {
+    const esArgs = resolveEsArgs(getServerlessTelemetryEsArgs({ telemetry: false }), {
+      projectType,
+      basePath: baseEsPath,
+      esArgs: ['telemetry.tracing.enabled=true'],
+    });
+
+    expect(findEnvValue(esArgs, 'telemetry.metrics.enabled')).toBe('false');
+    expect(findEnvValue(esArgs, 'telemetry.tracing.enabled')).toBe('true');
+  });
+
+  test('should use projectIdOverride when provided in UIAM mode', () => {
+    const overrideId = 'custom_project_id_123';
     const esArgs = resolveEsArgs(
       [],
       {
@@ -996,17 +1009,67 @@ describe('runServerlessCluster()', () => {
 
     // docker version (1)
     // docker ps (1)
-    // docker container rm (7 = 2 ES nodes, 2 linked ES nodes, 3 UIAM containers)
+    // docker container rm (8 = 2 ES nodes, 2 linked ES nodes, 3 UIAM containers, 1 APM Server)
     // docker network create (1)
     // docker pull (1)
     // docker inspect (1)
     // docker run (2)
     // docker logs (1)
-    expect(execa.mock.calls).toHaveLength(15);
+    expect(execa.mock.calls).toHaveLength(16);
 
     // UIAM containers should not be started when `--uiam` is not passed
     expect(runUiamContainerMock).not.toHaveBeenCalled();
     expect(initializeUiamContainersMock).not.toHaveBeenCalled();
+
+    const runCalls = execa.mock.calls.filter(([, args]: [string, string[]]) => args[0] === 'run');
+    expect(runCalls).toHaveLength(2);
+    for (const [, args] of runCalls) {
+      expect(args).toEqual(
+        expect.arrayContaining([
+          'telemetry.metrics.enabled=false',
+          'telemetry.tracing.enabled=false',
+        ])
+      );
+    }
+  });
+
+  test('should start an APM Server before the ES nodes and enable ES telemetry with `--telemetry`', async () => {
+    waitUntilClusterReadyMock.mockResolvedValue();
+    mockFs({
+      [baseEsPath]: {},
+    });
+    execa.mockImplementation(() => Promise.resolve({ stdout: '' }));
+
+    const nodeNames = await runServerlessCluster(log, {
+      projectType,
+      basePath: baseEsPath,
+      ssl: false,
+      telemetry: true,
+    });
+
+    expect(nodeNames).toEqual(['es01', 'es02', APM_SERVER_CONTAINER_NAME]);
+    expect(execa).toHaveBeenCalledWith(
+      'docker',
+      ['pull', APM_SERVER_DEFAULT_IMAGE],
+      expect.anything()
+    );
+
+    const runCalls = execa.mock.calls.filter(([, args]: [string, string[]]) => args[0] === 'run');
+    expect(runCalls).toHaveLength(3);
+
+    const [[, apmServerArgs], ...esNodeCalls] = runCalls;
+    expect(apmServerArgs).toEqual(
+      expect.arrayContaining([
+        '--network-alias',
+        'apm-server.elastic-agent',
+        'output.elasticsearch.hosts=["http://es01:9200"]',
+      ])
+    );
+    for (const [, args] of esNodeCalls) {
+      expect(args).toEqual(
+        expect.arrayContaining(['telemetry.metrics.enabled=true', 'telemetry.tracing.enabled=true'])
+      );
+    }
   });
 
   test('should start 2 serverless ES nodes and two UIAM containers when in UIAM mode', async () => {
@@ -1020,13 +1083,13 @@ describe('runServerlessCluster()', () => {
 
     // docker version (1)
     // docker ps (1)
-    // docker container rm (7 = 2 ES nodes, 2 linked ES nodes, 3 UIAM containers)
+    // docker container rm (8 = 2 ES nodes, 2 linked ES nodes, 3 UIAM containers, 1 APM Server)
     // docker network create (1)
     // docker pull (3 = 1 for ES nodes, 2 for UIAM containers)
     // docker inspect (2 = image info call for ES nodes is memoized in the previous test, 2 for UIAM containers)
     // docker run (2)
     // docker logs (1)
-    expect(execa.mock.calls).toHaveLength(18);
+    expect(execa.mock.calls).toHaveLength(19);
 
     expect(runUiamContainerMock).toHaveBeenCalledTimes(2);
     expect(runUiamContainerMock).toHaveBeenCalledWith(
@@ -1182,6 +1245,20 @@ describe('teardownServerlessClusterSync()', () => {
     expect(execa.commandSync.mock.calls[1][0]).toEqual(`docker kill ${containers.join(' ')}`);
   });
 
+  test('should kill the APM Server container when telemetry is enabled', () => {
+    const containers = ['es01', 'es02', APM_SERVER_CONTAINER_NAME];
+    execa.commandSync.mockImplementation(() => ({
+      stdout: containers.join('\n'),
+    }));
+
+    teardownServerlessClusterSync(log, { ...defaultOptions, telemetry: true });
+
+    expect(execa.commandSync.mock.calls[0][0]).toEqual(
+      `docker ps --filter status=running --filter ancestor=${ES_SERVERLESS_DEFAULT_IMAGE} --filter ancestor=${APM_SERVER_DEFAULT_IMAGE} --quiet`
+    );
+    expect(execa.commandSync.mock.calls[1][0]).toEqual(`docker kill ${containers.join(' ')}`);
+  });
+
   test('should not kill if no serverless nodes', () => {
     execa.commandSync.mockImplementation(() => ({
       stdout: '\n',
@@ -1220,12 +1297,12 @@ describe('runDockerContainer()', () => {
     await expect(runDockerContainer(log, {})).resolves.toBeUndefined();
     // docker version (1)
     // docker ps (1)
-    // docker container rm (7 = 2 ES nodes, 2 linked ES nodes, 3 UIAM containers)
+    // docker container rm (8 = 2 ES nodes, 2 linked ES nodes, 3 UIAM containers, 1 APM Server)
     // docker network create (1)
     // docker pull (1)
     // docker inspect (1)
     // docker run (1)
-    expect(execa.mock.calls).toHaveLength(13);
+    expect(execa.mock.calls).toHaveLength(14);
   });
 });
 

@@ -38,6 +38,11 @@ import {
 } from '@kbn/mock-idp-utils';
 
 import { initializeUiamContainers, runUiamContainer, getUiamContainers } from './docker_uiam';
+import {
+  APM_SERVER_CONTAINER_NAME,
+  getApmServerImage,
+  runApmServerContainer,
+} from './docker_apm_server';
 import { getServerlessImageTag, getCommitUrl } from './extract_image_info';
 import { readStringSecrets } from './read_string_secrets';
 import { waitForSecurityIndex } from './wait_for_security_index';
@@ -192,6 +197,8 @@ export interface ServerlessOptions extends EsClusterExecOptions, BaseOptions {
   uiamOAuth?: boolean;
   /** Configuration for a linked project in Cross Project Search (CPS) mode */
   linkedProject?: { projectId: string; port: number };
+  /** Start an APM Server that collects ES traces and metrics and indexes them into the local cluster */
+  telemetry?: boolean;
 }
 
 interface ServerlessEsNodeArgs {
@@ -333,6 +340,21 @@ const DEFAULT_SERVERLESS_ESARGS: Array<[string, string]> = [
 
   ['ES_JAVA_OPTS', '-Xms1g -Xmx1g'],
 ];
+
+/**
+ * The serverless ES image enables telemetry exporters that target `apm-server.elastic-agent:8200`, a host that
+ * only resolves when the APM Server container is started (`telemetry: true`). Without it, exporting only
+ * produces connection errors, so it is turned off. Explicit `-E telemetry.*` args still take precedence.
+ */
+export function getServerlessTelemetryEsArgs({
+  telemetry,
+}: Pick<ServerlessOptions, 'telemetry'>): Array<[string, string]> {
+  const enabled = telemetry ? 'true' : 'false';
+  return [
+    ['telemetry.metrics.enabled', enabled],
+    ['telemetry.tracing.enabled', enabled],
+  ];
+}
 
 const DEFAULT_SSL_ESARGS: Array<[string, string]> = [
   ['xpack.security.http.ssl.enabled', 'true'],
@@ -580,7 +602,9 @@ export async function cleanUpDanglingContainers(log: ToolingLog) {
     const serverlessContainerNames = SERVERLESS_NODES.concat(
       linkedNodes,
       getUiamContainers({ includeOAuth: true })
-    ).map(({ name }) => name);
+    )
+      .map(({ name }) => name)
+      .concat(APM_SERVER_CONTAINER_NAME);
 
     for (const name of serverlessContainerNames) {
       await execa('docker', ['container', 'rm', name, '--force']).catch(() => {
@@ -596,10 +620,10 @@ export async function cleanUpDanglingContainers(log: ToolingLog) {
 
 export async function detectRunningNodes(log: ToolingLog, options: BaseOptions) {
   const linkedNodes = getServerlessNodes('-linked', 10);
-  const namesCmd = SERVERLESS_NODES.concat(
-    linkedNodes,
-    getUiamContainers({ includeOAuth: true })
-  ).flatMap(({ name }) => ['--filter', `name=${name}`]);
+  const namesCmd = SERVERLESS_NODES.concat(linkedNodes, getUiamContainers({ includeOAuth: true }))
+    .map(({ name }) => name)
+    .concat(APM_SERVER_CONTAINER_NAME)
+    .flatMap((name) => ['--filter', `name=${name}`]);
 
   const { stdout } = await execa('docker', ['ps', '--quiet'].concat(namesCmd));
   const runningNodeIds = stdout.split(/\r?\n/).filter((s) => s);
@@ -1028,6 +1052,7 @@ export async function runServerlessCluster(log: ToolingLog, options: ServerlessO
           setupDockerImage({ log, image })
         )
       : []),
+    ...(options.telemetry ? [setupDockerImage({ log, image: getApmServerImage() })] : []),
   ]);
   log.info(`[runServerlessCluster] Docker image(s) ready (${elapsed()})`);
 
@@ -1037,6 +1062,17 @@ export async function runServerlessCluster(log: ToolingLog, options: ServerlessO
 
   const portCmd = resolvePort(options);
 
+  // Started before ES so the exporters can reach it as soon as the nodes boot.
+  const apmServerNames = options.telemetry
+    ? [
+        await runApmServerContainer(log, {
+          esHost: SERVERLESS_NODES[0].name,
+          esPort: options.port || DEFAULT_PORT,
+          ssl: options.ssl,
+        }),
+      ]
+    : [];
+
   log.info('[runServerlessCluster] Starting ES nodes...');
   // This is where nodes are started
   const nodeNames = await Promise.all(
@@ -1045,7 +1081,13 @@ export async function runServerlessCluster(log: ToolingLog, options: ServerlessO
         ...node,
         image: esServerlessImage,
         params: node.params.concat(
-          resolveEsArgs(DEFAULT_SERVERLESS_ESARGS.concat(node.esArgs ?? []), options),
+          resolveEsArgs(
+            DEFAULT_SERVERLESS_ESARGS.concat(
+              getServerlessTelemetryEsArgs(options),
+              node.esArgs ?? []
+            ),
+            options
+          ),
           i === 0 ? portCmd : [],
           volumeCmd
         ),
@@ -1053,6 +1095,7 @@ export async function runServerlessCluster(log: ToolingLog, options: ServerlessO
       return node.name;
     })
   );
+  nodeNames.push(...apmServerNames);
   log.info(`[runServerlessCluster] All ES nodes started (${elapsed()})`);
 
   // UIAM containers must start sequentially: uiam-cosmosdb first, then uiam.
@@ -1193,9 +1236,10 @@ export async function runLinkedServerlessCluster(log: ToolingLog, options: Serve
   });
   const portCmd = resolvePort(linkedOptions);
 
-  const linkedClusterEsArgs: Array<[string, string]> = DEFAULT_SERVERLESS_ESARGS.concat([
-    ['cluster.name', `stateless${LINKED_CLUSTER_NAME_SUFFIX}`],
-  ]);
+  const linkedClusterEsArgs: Array<[string, string]> = DEFAULT_SERVERLESS_ESARGS.concat(
+    [['cluster.name', `stateless${LINKED_CLUSTER_NAME_SUFFIX}`]],
+    getServerlessTelemetryEsArgs(options)
+  );
 
   const nodeNames = await Promise.all(
     linkedNodes.map(async (node, i) => {
@@ -1343,6 +1387,7 @@ export function teardownServerlessClusterSync(log: ToolingLog, options: Serverle
     ...(options.uiam
       ? getUiamContainers({ includeOAuth: options.uiamOAuth }).map(({ image }) => image)
       : []),
+    ...(options.telemetry ? [getApmServerImage()] : []),
   ];
   const { stdout } = execa.commandSync(
     `docker ps --filter status=running ${imagesToKillContainersFor
