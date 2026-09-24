@@ -81,6 +81,9 @@ export const serverless: Command = {
       --uiam              Configure ES serverless with Universal Identity and Access Management (UIAM) support [default: true].
       --uiam-oauth        Start an additional UIAM OAuth container for OAuth flow support [default: false].
       --eis               Enable EIS mode: sets the EIS inference URL, resolves and sets the CCM API key (implies --waitForReady)
+      --telemetry         Start an APM Server that collects ES traces and metrics into the local cluster and accepts
+                          other telemetry (e.g. Kibana's OTLP exporters) on http://localhost:8200 [default: false].
+                          Without it, ES telemetry exporting is disabled.
 
       -E                  Additional key=value settings to pass to ES
       -F                  Absolute paths for files to mount into containers
@@ -90,6 +93,7 @@ export const serverless: Command = {
       es serverless --projectType elasticsearch_general_purpose --tag git-fec36430fba2-x86_64 # loads ${ES_SERVERLESS_REPO_ELASTICSEARCH}:git-fec36430fba2-x86_64
       es serverless --projectType observability --image docker.elastic.co/kibana-ci/elasticsearch-serverless:latest-verified
       es serverless --projectType observability --productTier complete --eis
+      es serverless --projectType observability --telemetry
     `;
   },
   run: async (defaults = {}) => {
@@ -130,6 +134,7 @@ export const serverless: Command = {
         'uiam',
         'uiamOAuth',
         'eis',
+        'telemetry',
       ],
 
       default: {
@@ -138,6 +143,7 @@ export const serverless: Command = {
         ssl: true,
         uiam: true,
         uiamOAuth: false,
+        telemetry: false,
       },
     }) as unknown as ServerlessCliOptions;
 

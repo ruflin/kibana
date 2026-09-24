@@ -46,6 +46,35 @@ Run an official Docker release
 node scripts/es docker --tag 8.8.2
 ```
 
+### Serverless telemetry
+
+The serverless ES image exports traces (APM agent) and metrics (OTLP) to `http://apm-server.elastic-agent:8200`, which does not exist locally. By default `node scripts/es serverless` turns that exporting off (`telemetry.metrics.enabled=false`, `telemetry.tracing.enabled=false`) to avoid `UnknownHostException` log noise.
+
+Pass `--telemetry` to collect it instead:
+
+```
+node scripts/es serverless --projectType observability --telemetry
+```
+
+This starts an APM Server container (`es-serverless-apm-server`) on the `elastic` Docker network under the `apm-server.elastic-agent` alias and indexes everything it receives into the local serverless cluster, so ES traces and metrics show up under the `elasticsearch` service in Kibana's APM UI and in the `traces-*` / `metrics-*` data streams. Override the image with `APM_SERVER_DOCKER_IMAGE` if the default `<kibana-version>-SNAPSHOT` tag is unavailable.
+
+The APM Server also listens on `http://localhost:8200` (APM intake and OTLP gRPC), so Kibana can ship its own telemetry to the same place via `config/kibana.dev.yml`:
+
+```yaml
+telemetry.tracing:
+  enabled: true
+  exporters:
+    - grpc:
+        url: http://localhost:8200
+telemetry.metrics:
+  enabled: true
+  exporters:
+    - grpc:
+        url: http://localhost:8200
+```
+
+Explicit `-E telemetry.*` and `-E metering.*` settings always take precedence over these defaults.
+
 ## API
 
 ### run
