@@ -331,7 +331,7 @@ export function SettingsTab() {
 
       <StaleEventCleanupSection canManage={canManage} />
 
-      <CostEstimate />
+      {isDeveloperMode && <CostEstimate />}
 
       <EuiSpacer />
 
