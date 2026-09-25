@@ -35,9 +35,9 @@ node scripts/capture_sigevents_env_snapshot.js \
 | `--run-id` | Run identifier for GCS repo name and base path. | Today's date `YYYY-MM-DD` |
 | `--logs-index` | Logs index to include in the snapshot + replay. | `logs.otel` |
 | `--alert-indices` | Alert index to include in the snapshot + replay. Can be repeated. | `.internal.alerts-streams.alerts-default-*` |
-| `--es-url` | Elasticsearch URL | from `config/kibana.dev.yml` |
-| `--es-username` | Elasticsearch username | from `config/kibana.dev.yml` |
-| `--es-password` | Elasticsearch password | from `config/kibana.dev.yml` |
+| `--es-url` | Elasticsearch URL | `config/kibana.dev.yml`, then local stateful (`http`) or serverless (`https`) |
+| `--es-username` | Elasticsearch username | `elastic`, then `elastic_serverless` |
+| `--es-password` | Elasticsearch password | `changeme` |
 
 ## How it works
 

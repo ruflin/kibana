@@ -6,7 +6,6 @@
  */
 
 import { run } from '@kbn/dev-cli-runner';
-import { Client } from '@elastic/elasticsearch';
 import type { Feature, SignificantEvent } from '@kbn/significant-events-schema';
 import {
   SIGEVENTS_SNAPSHOT_RUN,
@@ -18,7 +17,7 @@ import {
   loadDetectionsFromSnapshot,
 } from '../../src/data_generators/replay';
 import { getAllDatasetIds, getDatasetById, getDefaultDatasetIds } from '../../src/datasets';
-import { readKibanaConfig } from '../lib/kibana';
+import { createEsClient, getEsConnectionConfig } from '../lib/get_connection_config';
 
 const MANAGED_STREAM_SEARCH_PATTERN = 'logs*';
 
@@ -149,20 +148,9 @@ run(
       );
     }
 
-    const kibanaConfig = readKibanaConfig(log);
-    const { elasticsearch } = kibanaConfig;
-
-    const esUrl = String(
-      flags['es-url'] ||
-        (Array.isArray(elasticsearch.hosts) ? elasticsearch.hosts[0] : elasticsearch.hosts)
-    );
-    const username = String(flags['es-username'] || elasticsearch.username);
-    const password = String(flags['es-password'] || elasticsearch.password);
-
-    const esClient = new Client({
-      node: esUrl,
-      auth: { username, password },
-    });
+    const esConfig = await getEsConnectionConfig(flags, log);
+    const { esUrl, username } = esConfig;
+    const esClient = createEsClient(esConfig);
 
     const gcs = datasetConfig.gcs;
 
@@ -362,9 +350,9 @@ run(
         --run-id           Snapshot run ID (default: SIGEVENTS_SNAPSHOT_RUN env var or 2026-02-25)
         --stream-name      Stream name to filter KI features by (default: logs)
         --service-field    ES keyword field for the app/service breakdown aggregation (default: resource.attributes.app.keyword)
-        --es-url           Elasticsearch URL (default: from kibana.dev.yml)
-        --es-username      ES username (default: from kibana.dev.yml)
-        --es-password      ES password (default: from kibana.dev.yml)
+        --es-url           Elasticsearch URL (default: kibana.dev.yml or local stateful/serverless)
+        --es-username      ES username (default: elastic, then elastic_serverless)
+        --es-password      ES password (default: changeme)
       `,
     },
   }

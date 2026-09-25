@@ -52,9 +52,9 @@ node scripts/restore_sigevents_env_snapshot.js \
 | `--logs-index` | Logs index to replay. | `logs.otel` |
 | `--alert-indices` | Alert index to replay. Can be repeated. | `.internal.alerts-streams.alerts-default-*` |
 | `--clean` | Delete conflicting indices before restoring without prompting | `false` |
-| `--es-url` | Elasticsearch URL | from `config/kibana.dev.yml` |
-| `--es-username` | Elasticsearch username | from `config/kibana.dev.yml` |
-| `--es-password` | Elasticsearch password | from `config/kibana.dev.yml` |
+| `--es-url` | Elasticsearch URL | `config/kibana.dev.yml`, then local stateful (`http`) or serverless (`https`) |
+| `--es-username` | Elasticsearch username | `elastic`, then `elastic_serverless` |
+| `--es-password` | Elasticsearch password | `changeme` |
 
 ## How it works
 

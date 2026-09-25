@@ -6,7 +6,7 @@
  */
 
 import { run } from '@kbn/dev-cli-runner';
-import { Client } from '@elastic/elasticsearch';
+import type { Client } from '@elastic/elasticsearch';
 import {
   SIGEVENTS_SNAPSHOT_RUN,
   replaySignificantEventsSnapshot,
@@ -14,7 +14,7 @@ import {
 } from '../../src/data_generators/replay';
 import type { GcsConfig } from '../../src/data_generators/replay';
 import { getAllDatasetIds, resolveRequestedDatasets } from '../../src/datasets';
-import { readKibanaConfig } from '../lib/kibana';
+import { createEsClient, getEsConnectionConfig } from '../lib/get_connection_config';
 import { planProbeDatasets } from './dataset_selection';
 
 const MANAGED_STREAM_SEARCH_PATTERN = 'logs*';
@@ -80,20 +80,9 @@ run(
       );
     }
 
-    const kibanaConfig = readKibanaConfig(log);
-    const { elasticsearch } = kibanaConfig;
-
-    const esUrl = String(
-      flags['es-url'] ||
-        (Array.isArray(elasticsearch.hosts) ? elasticsearch.hosts[0] : elasticsearch.hosts)
-    );
-    const username = String(flags['es-username'] || elasticsearch.username);
-    const password = String(flags['es-password'] || elasticsearch.password);
-
-    const esClient = new Client({
-      node: esUrl,
-      auth: { username, password },
-    });
+    const esConfig = await getEsConnectionConfig(flags, log);
+    const { esUrl } = esConfig;
+    const esClient = createEsClient(esConfig);
 
     const esqlProbes = (
       Array.isArray(flags.esql) ? flags.esql : flags.esql ? [flags.esql] : []
@@ -243,9 +232,9 @@ run(
                           mapping (duration-family mapping fields), patterns (top body.text)
         --esql            ES|QL probe query, repeatable; run against "logs*" after replay
         --run-id          Snapshot run ID (default: SIGEVENTS_SNAPSHOT_RUN env or pinned constant)
-        --es-url          Elasticsearch URL (default: from kibana.dev.yml)
-        --es-username     ES username (default: from kibana.dev.yml)
-        --es-password     ES password (default: from kibana.dev.yml)
+        --es-url          Elasticsearch URL (default: kibana.dev.yml or local stateful/serverless)
+        --es-username     ES username (default: elastic, then elastic_serverless)
+        --es-password     ES password (default: changeme)
       `,
     },
   }

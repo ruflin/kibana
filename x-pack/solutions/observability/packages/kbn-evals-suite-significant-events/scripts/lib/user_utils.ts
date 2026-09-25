@@ -5,9 +5,11 @@
  * 2.0.
  */
 
-import { Client, errors } from '@elastic/elasticsearch';
+import type { Client } from '@elastic/elasticsearch';
+import { errors } from '@elastic/elasticsearch';
 import type { ToolingLog } from '@kbn/tooling-log';
 import type { ConnectionConfig } from './get_connection_config';
+import { createEsClient } from './get_connection_config';
 
 const TEMP_USER = 'restore_sigevents_env_snapshot_tmp';
 const TEMP_PASSWORD = 'restore_sigevents_env_snapshot_tmp_pass!';
@@ -74,10 +76,7 @@ export async function withTempSuperuser<T>(
     log.info(
       `withTempSuperuser: created temp user "${TEMP_USER}" with system_indices_superuser role`
     );
-    const sysClient = new Client({
-      node: config.esUrl,
-      auth: { username: TEMP_USER, password: TEMP_PASSWORD },
-    });
+    const sysClient = createEsClient(config, { username: TEMP_USER, password: TEMP_PASSWORD });
     return await fn(sysClient);
   } finally {
     await deleteUser(esClient, log, TEMP_USER);

@@ -10,7 +10,11 @@
 import type { ConnectionAuth, BasicAuth } from '@kbn/local-stack-connection';
 import { isApiKeyAuth, resolveLocalStack } from '@kbn/local-stack-connection';
 import type { ToolingLog } from '@kbn/tooling-log';
-import type { ElasticsearchConfig } from './read_kibana_config';
+export interface ElasticsearchConfig {
+  hosts: string;
+  username: string;
+  password: string;
+}
 
 export interface StackConnection {
   elasticsearch: ElasticsearchConfig;
