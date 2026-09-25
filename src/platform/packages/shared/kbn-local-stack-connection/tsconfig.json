@@ -14,6 +14,7 @@
     "target/**/*"
   ],
   "kbn_references": [
+    "@kbn/dev-cli-errors",
     "@kbn/dev-utils",
     "@kbn/repo-info",
     "@kbn/safer-lodash-set",

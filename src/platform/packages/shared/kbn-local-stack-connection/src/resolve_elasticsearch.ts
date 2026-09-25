@@ -9,6 +9,7 @@
 
 import type { ConnectionOptions } from 'tls';
 import { get, uniq } from 'lodash';
+import { createFailError } from '@kbn/dev-cli-errors';
 import type { ToolingLog } from '@kbn/tooling-log';
 import type { ConnectionAuth } from './auth';
 import { describeAuth } from './auth';
@@ -148,7 +149,7 @@ export const resolveElasticsearch = async ({
     }
   }
 
-  throw new Error(
+  throw createFailError(
     [
       'Could not connect to Elasticsearch. Tried:',
       ...attempts.map((attempt) => `  - ${attempt}`),
