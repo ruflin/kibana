@@ -12,11 +12,11 @@ import execa from 'execa';
 import Path from 'path';
 import chalk from 'chalk';
 import { REPO_ROOT } from '@kbn/repo-info';
+import { isApiKeyAuth, resolveElasticsearch } from '@kbn/local-stack-connection';
 import { assertDockerAvailable } from './util/assert_docker_available';
 import { getDockerComposeYaml } from './get_docker_compose_yaml';
 import { getEdotCollectorConfiguration } from './get_edot_collector_configuration';
 import { writeFile } from './util/file_utils';
-import { readKibanaConfig } from './read_kibana_config';
 import { untilContainerReady } from './util/until_container_ready';
 
 const DATA_DIR = Path.join(REPO_ROOT, 'data', 'edot_collector');
@@ -79,13 +79,13 @@ export async function ensureEdotCollector({
 
   await assertDockerAvailable();
 
-  // Read Kibana configuration to get Elasticsearch credentials
-  const kibanaConfig = readKibanaConfig(log, configPath);
-  const elasticsearchConfig = kibanaConfig.elasticsearch;
+  const elasticsearch = await resolveElasticsearch({ log, kibanaConfigPath: configPath });
+  if (isApiKeyAuth(elasticsearch.auth)) {
+    throw new Error('API key auth is not supported by the EDOT Collector setup, use basic auth.');
+  }
 
-  const elasticsearchHost = normalizeElasticsearchHost(elasticsearchConfig.hosts);
-  const elasticsearchUsername = elasticsearchConfig.username;
-  const elasticsearchPassword = elasticsearchConfig.password;
+  const elasticsearchHost = normalizeElasticsearchHost(elasticsearch.url);
+  const { username: elasticsearchUsername, password: elasticsearchPassword } = elasticsearch.auth;
 
   log.debug(`Stopping existing containers`);
   await down();
