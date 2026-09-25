@@ -25,11 +25,23 @@ After sourcing, the following are available:
 
 ## Auto-Detection
 
-Tries these permutations automatically:
-- URLs: `http://localhost:5601`, `https://localhost:5601`
-- Auth: `elastic:changeme`, `elastic_serverless:changeme`
+Detection runs `node scripts/local_stack.js env` (`@kbn/local-stack-connection`), the same logic the
+Node scripts use:
+- URLs: `server.*` from `config/kibana.dev.yml`, then `http://localhost:5601` and `https://localhost:5601`
+- The random dev base path is detected
+- Auth: `elastic:changeme` (stateful), then `elastic_serverless:changeme` (serverless)
+- Local https is verified against the Kibana dev CA (`curl --cacert`), not skipped with `-k`
 
-Override with environment variables `KIBANA_URL` and/or `KIBANA_AUTH` before sourcing.
+Override with environment variables `KIBANA_URL` and/or `KIBANA_AUTH` (or `KIBANA_USERNAME` /
+`KIBANA_PASSWORD` / `KIBANA_API_KEY`) before sourcing.
+
+For Elasticsearch, or scripts that are not written in bash, evaluate the exports directly:
+
+```bash
+eval "$(node scripts/local_stack.js env --skip-kibana)"
+curl -s ${LOCAL_STACK_CA_CERT:+--cacert "$LOCAL_STACK_CA_CERT"} \
+  -u "$ELASTICSEARCH_USERNAME:$ELASTICSEARCH_PASSWORD" "$ELASTICSEARCH_HOST/_cluster/health"
+```
 
 ## Session Auth (Acting as a Browser User)
 

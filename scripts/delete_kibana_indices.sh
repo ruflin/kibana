@@ -18,19 +18,28 @@ save_and_exit ( ) {
     exit 0
 }
 
-# Parse the YAML file using grep and sed to extract the required values
-ELASTICSEARCH_HOSTS=$(grep -E '^elasticsearch.hosts: ' "$CONFIG_FILE" | sed 's/.*: //')
-ELASTICSEARCH_USERNAME=$(grep -E '^elasticsearch.username: ' "$CONFIG_FILE" | sed 's/.*: //')
-ELASTICSEARCH_PASSWORD=$(grep -E '^elasticsearch.password: ' "$CONFIG_FILE" | sed 's/.*: //')
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Set default values if the extracted values are empty
-[ -z "$ELASTICSEARCH_HOSTS" ] && ELASTICSEARCH_HOSTS="http://localhost:9200"
-[ -z "$ELASTICSEARCH_USERNAME" ] && ELASTICSEARCH_USERNAME="system_indices_superuser"
-[ -z "$ELASTICSEARCH_PASSWORD" ] && ELASTICSEARCH_PASSWORD="changeme"
+# system_indices_superuser:changeme exists on both `node scripts/es snapshot` and
+# `node scripts/es serverless`, and may delete the restricted .kibana* indices.
+if ! ENV_OUTPUT="$(node "$REPO_ROOT/scripts/local_stack.js" env --skip-kibana --config "$CONFIG_FILE" \
+  --es-username "${ELASTICSEARCH_USERNAME:-system_indices_superuser}" \
+  --es-password "${ELASTICSEARCH_PASSWORD:-changeme}")"; then
+    echo "$ENV_OUTPUT" >&2
+    exit 1
+fi
+eval "$ENV_OUTPUT"
+
+CURL_TLS_FLAGS=()
+if [ -n "$LOCAL_STACK_INSECURE" ]; then
+    CURL_TLS_FLAGS=(-k)
+elif [ -n "$LOCAL_STACK_CA_CERT" ]; then
+    CURL_TLS_FLAGS=(--cacert "$LOCAL_STACK_CA_CERT")
+fi
 
 # Get the list of indices from the _cat/indices API
 echo "Getting list of indices..."
-INDICES=$(curl -s -X GET "${ELASTICSEARCH_HOSTS}/_cat/indices/.kibana*?format=txt" \
+INDICES=$(curl -s ${CURL_TLS_FLAGS[@]+"${CURL_TLS_FLAGS[@]}"} -X GET "${ELASTICSEARCH_HOST}/_cat/indices/.kibana*?format=txt" \
      -u "${ELASTICSEARCH_USERNAME}:${ELASTICSEARCH_PASSWORD}" | awk '{print $3}')
 if [ $? -ne 0 ]; then
     echo "Failed to get the list of indices."
@@ -47,7 +56,7 @@ fi
 
 # Execute the DELETE call with curl using the extracted list of indices
 echo "Deleting indices: $INDICES_CSV"
-HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "${ELASTICSEARCH_HOSTS}/$INDICES_CSV" \
+HTTP_STATUS=$(curl -s ${CURL_TLS_FLAGS[@]+"${CURL_TLS_FLAGS[@]}"} -o /dev/null -w "%{http_code}" -X DELETE "${ELASTICSEARCH_HOST}/$INDICES_CSV" \
      -u "${ELASTICSEARCH_USERNAME}:${ELASTICSEARCH_PASSWORD}")
 if [ $? -ne 0 ] && [ "$HTTP_STATUS" != "404" ]; then
     echo "Failed to delete indices."
