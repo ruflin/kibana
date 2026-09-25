@@ -32,10 +32,16 @@ const mockLog: ToolingLog = {
   success: jest.fn(),
 } as any;
 
+const connection = {
+  url: 'http://localhost:5601',
+  auth: { username: 'elastic', password: 'changeme' },
+  insecure: false,
+};
+
 describe('createConnectors', () => {
   beforeEach(() => {
     jest.resetAllMocks();
-    detectKibanaMock.mockResolvedValue({ url: 'http://localhost:5601', auth: 'elastic:changeme' });
+    detectKibanaMock.mockResolvedValue(connection);
     listConnectorsMock.mockResolvedValue([]);
   });
 
@@ -59,15 +65,12 @@ describe('createConnectors', () => {
 
     const results = await createConnectors({ log: mockLog, dryRun: false });
 
-    expect(createConnectorMock).toHaveBeenCalledWith(
-      { url: 'http://localhost:5601', auth: 'elastic:changeme' },
-      {
-        connector_type_id: '.slack2',
-        name: 'Slack (testing)',
-        config: {},
-        secrets: { authType: 'bearer', token: 'xoxb-xxx' },
-      }
-    );
+    expect(createConnectorMock).toHaveBeenCalledWith(connection, {
+      connector_type_id: '.slack2',
+      name: 'Slack (testing)',
+      config: {},
+      secrets: { authType: 'bearer', token: 'xoxb-xxx' },
+    });
     expect(results).toEqual([
       { name: 'Slack (testing)', specId: '.slack2', status: 'created', connectorId: '123' },
     ]);

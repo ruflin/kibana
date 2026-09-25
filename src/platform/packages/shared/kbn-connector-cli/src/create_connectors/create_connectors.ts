@@ -34,9 +34,7 @@ export async function createConnectors({
     log.info(chalk.yellow('DRY RUN — no connectors will be created'));
   }
 
-  log.info('Detecting Kibana...');
-  const connection = await detectKibana();
-  log.info(`Connected to Kibana at ${chalk.cyan(connection.url)}`);
+  const connection = await detectKibana(log);
 
   const existing = await listConnectors(connection);
   const existingNames = new Set(existing.map((c) => c.name));

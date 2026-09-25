@@ -18,6 +18,7 @@ project:
   sourceRoot: src/platform/packages/shared/kbn-connector-cli
 dependsOn:
   - '@kbn/dev-cli-runner'
+  - '@kbn/local-stack-connection'
   - '@kbn/tooling-log'
 tags:
   - shared-common
