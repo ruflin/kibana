@@ -3222,6 +3222,26 @@ module.exports = {
       },
     },
     {
+      // Developer scripts resolve local stateful and serverless stacks with
+      // @kbn/local-stack-connection instead of detecting them individually.
+      files: ['**/scripts/**/*.{js,mjs,ts}'],
+      excludedFiles: [
+        '**/*.test.{js,mjs,ts}',
+        // Pending migration to @kbn/local-stack-connection.
+        'scripts/sync_logs.js',
+        'scripts/workflows_import_export.js',
+        'x-pack/platform/plugins/shared/notification_center/scripts/seed_notifications/seed.ts',
+        'x-pack/solutions/observability/plugins/apm/scripts/shared/get_es_client.ts',
+        'x-pack/solutions/observability/plugins/synthetics/scripts/tasks/*.ts',
+        'x-pack/solutions/security/packages/kbn-evals-suite-attack-discovery/scripts/upload_dataset.js',
+        'x-pack/solutions/security/plugins/security_solution/scripts/data/lib/clients.ts',
+        'x-pack/solutions/security/plugins/security_solution/scripts/endpoint/common/fleet_server/fleet_server_services.ts',
+      ],
+      rules: {
+        '@kbn/eslint/no_hardcoded_local_stack_connection': 'error',
+      },
+    },
+    {
       // These files are allowed to reference 'npx playwright' — either because they define
       // the rule itself, test it with invalid-code fixtures, or mention it in an error message
       // to explain what went wrong.

@@ -14,6 +14,33 @@ This directory is excluded from the build and tools within it should help users 
 - call out to source code in the [`src`](../src) or [`packages`](../packages) directories
 - react to the `--help` flag
 - run everywhere OR check and fail fast when a required OS or toolchain is not available
+- connect to Elasticsearch and Kibana through [`@kbn/local-stack-connection`](../src/platform/packages/shared/kbn-local-stack-connection), see below
+
+### Connecting to a local stack
+
+Scripts must work against both local stacks without extra flags:
+
+| | `node scripts/es snapshot` + `node scripts/kibana --dev` | `node scripts/es serverless` + `node scripts/kibana --dev --serverless=<type>` |
+|---|---|---|
+| Elasticsearch | `http://localhost:9200` | `https://localhost:9200` (Kibana dev CA) |
+| Superuser | `elastic:changeme` | `elastic_serverless:changeme` |
+
+Do not hardcode these values or disable TLS verification (the `@kbn/eslint/no_hardcoded_local_stack_connection` rule flags this in `scripts` directories). Use `@kbn/local-stack-connection` instead:
+
+- `resolveElasticsearch`, `resolveKibana`, and `resolveLocalStack` find a working URL and credentials, including the dev base path of Kibana.
+- `LOCAL_STACK_FLAG_OPTIONS` adds the standard `--es-url`, `--es-username`, `--es-password`, `--es-api-key`, `--kibana-url`, `--kibana-username`, `--kibana-password`, `--kibana-api-key`, and `--insecure` flags.
+- `ELASTICSEARCH_HOST`, `ELASTICSEARCH_USERNAME`, `ELASTICSEARCH_PASSWORD`, `ELASTICSEARCH_API_KEY`, `KIBANA_URL`, `KIBANA_USERNAME`, `KIBANA_PASSWORD`, and `KIBANA_API_KEY` override detection for every script.
+- Local https is verified against the Kibana dev CA. Never set `NODE_TLS_REJECT_UNAUTHORIZED=0`; `@kbn/setup-node-env` exits on the warning it emits.
+
+Shell scripts and third-party tools can use the same detection:
+
+```sh
+eval "$(node scripts/local_stack.js env)"
+curl -s ${LOCAL_STACK_CA_CERT:+--cacert "$LOCAL_STACK_CA_CERT"} \
+  -u "$ELASTICSEARCH_USERNAME:$ELASTICSEARCH_PASSWORD" "$ELASTICSEARCH_HOST/_cluster/health"
+```
+
+For Kibana APIs in bash, source `scripts/kibana_api_common.sh` and use `kibana_curl`.
 
 ## Functional Test Scripts
 
