@@ -826,6 +826,7 @@ packages:
   - 'src/platform/packages/shared/kbn-lens-embeddable-utils'
   - 'src/platform/packages/shared/kbn-lens-test-helpers'
   - 'src/platform/packages/shared/kbn-licensing-types'
+  - 'src/platform/packages/shared/kbn-local-stack-connection'
   - 'src/platform/packages/shared/kbn-lock-manager'
   - 'src/platform/packages/shared/kbn-logging'
   - 'src/platform/packages/shared/kbn-logging-mocks'

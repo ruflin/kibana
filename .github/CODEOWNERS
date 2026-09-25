@@ -638,6 +638,7 @@ src/platform/packages/shared/kbn-lens-common-2 @elastic/kibana-dashboards
 src/platform/packages/shared/kbn-lens-embeddable-utils @elastic/kibana-dashboards
 src/platform/packages/shared/kbn-lens-test-helpers @elastic/kibana-dashboards
 src/platform/packages/shared/kbn-licensing-types @elastic/kibana-core
+src/platform/packages/shared/kbn-local-stack-connection @elastic/kibana-operations
 src/platform/packages/shared/kbn-lock-manager @elastic/nightshift-context-and-research-team
 src/platform/packages/shared/kbn-logging @elastic/kibana-core
 src/platform/packages/shared/kbn-logging-mocks @elastic/kibana-core

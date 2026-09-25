@@ -5633,6 +5633,9 @@ importers:
       '@kbn/lint-ts-projects-cli':
         specifier: workspace:*
         version: link:packages/kbn-lint-ts-projects-cli
+      '@kbn/local-stack-connection':
+        specifier: workspace:*
+        version: link:src/platform/packages/shared/kbn-local-stack-connection
       '@kbn/managed-vscode-config':
         specifier: workspace:*
         version: link:packages/kbn-managed-vscode-config
@@ -8112,6 +8115,8 @@ importers:
   src/platform/packages/shared/kbn-lens-test-helpers: {}
 
   src/platform/packages/shared/kbn-licensing-types: {}
+
+  src/platform/packages/shared/kbn-local-stack-connection: {}
 
   src/platform/packages/shared/kbn-lock-manager: {}
 
