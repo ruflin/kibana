@@ -12,6 +12,7 @@
     "@kbn/repo-info",
     "@kbn/object-utils",
     "@kbn/edot-collector",
+    "@kbn/local-stack-connection",
   ]
 }
 

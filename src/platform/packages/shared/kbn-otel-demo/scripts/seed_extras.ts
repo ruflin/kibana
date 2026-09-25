@@ -8,8 +8,7 @@
  */
 
 import { run } from '@kbn/dev-cli-runner';
-import { readKibanaConfig } from '../src/read_kibana_config';
-import { resolveKibanaUrl } from '../src/util/resolve_kibana_url';
+import { resolveStackConnection } from '../src/resolve_stack_connection';
 import { seedCodeSearch } from '../src/seed_code_search';
 import { otelDemoConfig } from '../src/demos/otel_demo/config';
 import { getCodeScenarioById } from '../src/code_scenarios';
@@ -25,10 +24,10 @@ run(
       throw new Error(`Unknown code scenario: ${codeScenarioId}`);
     }
 
-    const { elasticsearch, server, kibanaCredentials } = readKibanaConfig(log, configPath);
-
-    const kibanaBaseUrl = `http://${server.host}:${server.port}`;
-    const kibanaUrl = await resolveKibanaUrl(kibanaBaseUrl, log);
+    const { elasticsearch, kibanaUrl, kibanaCredentials } = await resolveStackConnection(
+      log,
+      configPath
+    );
 
     if (!skipCodeSearch) {
       await seedCodeSearch({

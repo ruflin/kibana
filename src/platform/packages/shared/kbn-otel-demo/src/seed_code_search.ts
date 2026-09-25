@@ -7,11 +7,13 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
+import { getFetchDispatcher } from '@kbn/local-stack-connection';
 import type { ToolingLog } from '@kbn/tooling-log';
 import execa from 'execa';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fetch } from 'undici';
 import { REPO_ROOT } from '@kbn/repo-info';
 import type { ElasticsearchConfig } from './read_kibana_config';
 import { applyCodeScenario } from './apply_code_scenario';
@@ -129,7 +131,9 @@ function setIndexedVersion(version: string): void {
 
 async function chunksIndexHasDocs(esHosts: string, username: string, password: string) {
   try {
-    const res = await fetch(`${esHosts}/code-open-telemetry_opentelemetry-demo_chunks/_count`, {
+    const url = `${esHosts}/code-open-telemetry_opentelemetry-demo_chunks/_count`;
+    const res = await fetch(url, {
+      dispatcher: getFetchDispatcher(url),
       headers: {
         Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`,
       },

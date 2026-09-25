@@ -7,8 +7,9 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
+import { getFetchDispatcher } from '@kbn/local-stack-connection';
 import type { ToolingLog } from '@kbn/tooling-log';
-import fetch from 'node-fetch';
+import { fetch } from 'undici';
 
 interface CreateDataViewOptions {
   kibanaUrl: string;
@@ -42,6 +43,7 @@ export async function createDataView({
   try {
     const response = await fetch(url, {
       method: 'POST',
+      dispatcher: getFetchDispatcher(url),
       headers: {
         'Content-Type': 'application/json',
         'kbn-xsrf': 'true',

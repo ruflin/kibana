@@ -24,10 +24,9 @@ import {
 import { getFullOtelCollectorConfig } from './get_otel_collector_config';
 import { getEdotK8sCollectorConfig } from './get_edot_k8s_collector_config';
 import { writeFile } from './util/file_utils';
-import { readKibanaConfig } from './read_kibana_config';
+import { resolveStackConnection } from './resolve_stack_connection';
 import { enableStreams } from './util/enable_streams';
 import { createDataView } from './util/create_data_view';
-import { resolveKibanaUrl } from './util/resolve_kibana_url';
 import { buildCustomImages } from './util/build_custom_images';
 import { resolveEdotCollectorVersion } from './util/resolve_edot_collector_version';
 import type { DemoType, FailureScenario } from './types';
@@ -177,24 +176,15 @@ export async function deployDemo({
   log.info('Ensuring minikube is running...');
   await ensureMinikubeRunning();
 
-  // Read Kibana configuration to get Elasticsearch and Kibana server credentials
-  const kibanaConfig = readKibanaConfig(log, configPath);
   const {
     elasticsearch: elasticsearchConfig,
-    server: serverConfig,
+    kibanaUrl,
     kibanaCredentials,
-  } = kibanaConfig;
+  } = await resolveStackConnection(log, configPath);
 
   const elasticsearchHost = normalizeElasticsearchHost(elasticsearchConfig.hosts);
   const elasticsearchUsername = elasticsearchConfig.username;
   const elasticsearchPassword = elasticsearchConfig.password;
-
-  // Build the base Kibana URL from config
-  const kibanaHostname = `http://${serverConfig.host}:${serverConfig.port}${serverConfig.basePath}`;
-
-  // Resolve the actual Kibana URL by detecting any dev mode base path
-  // When running `pnpm start` without `--no-base-path`, Kibana uses a random 3-letter prefix
-  const kibanaUrl = await resolveKibanaUrl(kibanaHostname, log);
 
   log.info(`Kibana: ${kibanaUrl}`);
   log.info(`Elasticsearch: ${elasticsearchHost}`);
@@ -735,9 +725,10 @@ export async function patchScenarios({
       ]);
     }
 
-    const { elasticsearch, server, kibanaCredentials } = readKibanaConfig(log, configPath);
-    const kibanaHostname = `http://${server.host}:${server.port}${server.basePath}`;
-    const kibanaUrl = await resolveKibanaUrl(kibanaHostname, log);
+    const { elasticsearch, kibanaUrl, kibanaCredentials } = await resolveStackConnection(
+      log,
+      configPath
+    );
     await seedCodeSearch({
       elasticsearch,
       kibanaCredentials,

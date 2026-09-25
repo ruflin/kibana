@@ -55,6 +55,8 @@ export { ensureMinikubeRunning, waitForPodsReady } from './src/util/assert_minik
 
 // Configuration utilities
 export { readKibanaConfig } from './src/read_kibana_config';
+export type { StackConnection } from './src/resolve_stack_connection';
+export { resolveStackConnection } from './src/resolve_stack_connection';
 export type {
   KibanaConfig,
   ElasticsearchConfig,
