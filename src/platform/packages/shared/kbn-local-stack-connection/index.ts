@@ -14,6 +14,7 @@ export {
   LOCAL_STACK_FLAGS_HELP,
 } from './src/cli_flags';
 export type { KibanaFetchInit } from './src/kibana_fetch';
+export { runLocalStackCli } from './src/local_stack_cli';
 export { kibanaFetch } from './src/kibana_fetch';
 export type { KibanaConnection, ResolveKibanaOptions } from './src/resolve_kibana';
 export { KIBANA_REQUEST_HEADERS, resolveKibana } from './src/resolve_kibana';
