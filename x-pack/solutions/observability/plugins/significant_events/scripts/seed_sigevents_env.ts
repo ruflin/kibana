@@ -99,6 +99,7 @@ run(
     const esClient = new Client({
       node: config.esUrl,
       auth: { username: config.username, password: config.password },
+      tls: config.esTls,
     });
 
     if (flags.clean === true) {
@@ -153,10 +154,12 @@ run(
                                  and the data stream) before re-seeding
         --run-discovery          Run detection, seed post-detection evidence, then run AI discovery
                                  and verify an active event (requires a configured inference connector)
-        --es-url <url>           Elasticsearch URL (default: from kibana.dev.yml)
-        --es-username <user>     ES username (default: elastic)
+        --es-url <url>           Elasticsearch URL (default: kibana.dev.yml, then localhost:9200 over
+                                 http and https; env: ELASTICSEARCH_HOST)
+        --es-username <user>     ES username (default: elastic, then elastic_serverless)
         --es-password <pass>     ES password (default: changeme)
-        --kibana-url <url>       Kibana base URL (default: from kibana.dev.yml, auto-detects dev base path)
+        --kibana-url <url>       Kibana base URL (default: kibana.dev.yml, then localhost:5601;
+                                 auto-detects the dev base path; env: KIBANA_URL)
 
         Notes:
           The target stream is auto-enabled (POST /api/streams/_enable) if not yet active.

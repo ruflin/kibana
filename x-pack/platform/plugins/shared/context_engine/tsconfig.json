@@ -57,6 +57,7 @@
     "@kbn/deeplinks-workflows",
     "@kbn/deeplinks-analytics",
     "@kbn/dev-cli-runner",
+    "@kbn/local-stack-connection",
     "@kbn/index-management-shared-types",
     "@kbn/code-editor",
     "@kbn/ui-callout",
