@@ -71,18 +71,14 @@ Each log entry is enriched with:
 
 ## Configuration
 
-The script reads Elasticsearch credentials from `config/kibana.dev.yml`:
+Elasticsearch and Kibana are detected with `@kbn/local-stack-connection`, so the script works
+against both `node scripts/es snapshot` (`http`, `elastic`) and `node scripts/es serverless`
+(`https`, `elastic_serverless`) without extra configuration. The hosts from
+`config/kibana.dev.yml` (or `--config`) are used when set, and the dev base path is detected.
 
-```yaml
-elasticsearch.hosts: ["http://localhost:9200"]
-elasticsearch.username: "elastic"
-elasticsearch.password: "changeme"
-```
-
-Or via environment variables:
-- `ELASTICSEARCH_HOSTS`
-- `ELASTICSEARCH_USERNAME`
-- `ELASTICSEARCH_PASSWORD`
+To target another cluster, set the environment variables:
+- `ELASTICSEARCH_HOST`, `ELASTICSEARCH_USERNAME`, `ELASTICSEARCH_PASSWORD`
+- `KIBANA_URL`, `KIBANA_USERNAME`, `KIBANA_PASSWORD` (Kibana defaults to the Elasticsearch user)
 
 ## CLI Options
 

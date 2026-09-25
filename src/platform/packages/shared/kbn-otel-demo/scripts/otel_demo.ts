@@ -180,8 +180,9 @@ run(
         - aws-retail-store: AWS Retail Store Sample
         - rust-k8s-demo: Rust K8s Demo
       
-      Reads Elasticsearch connection details from kibana.dev.yml and supports
-      failure scenario injection for testing observability.
+      Detects the local stateful or serverless Elasticsearch and Kibana (honoring kibana.dev.yml
+      and ELASTICSEARCH_* / KIBANA_* env vars) and supports failure scenario injection for
+      testing observability.
     `,
     flags: {
       string: ['config', 'logs-index', 'scenario', 'demo', 'version', 'code-scenario'],
