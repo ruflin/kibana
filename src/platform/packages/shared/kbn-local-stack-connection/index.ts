@@ -8,6 +8,17 @@
  */
 
 export type { ApiKeyAuth, BasicAuth, ConnectionAuth } from './src/auth';
+export {
+  getLocalStackOptionsFromFlags,
+  LOCAL_STACK_FLAG_OPTIONS,
+  LOCAL_STACK_FLAGS_HELP,
+} from './src/cli_flags';
+export type { KibanaFetchInit } from './src/kibana_fetch';
+export { kibanaFetch } from './src/kibana_fetch';
+export type { KibanaConnection, ResolveKibanaOptions } from './src/resolve_kibana';
+export { KIBANA_REQUEST_HEADERS, resolveKibana } from './src/resolve_kibana';
+export type { LocalStackConnection, ResolveLocalStackOptions } from './src/resolve_local_stack';
+export { resolveLocalStack } from './src/resolve_local_stack';
 export { describeAuth, getAuthorizationHeader, isApiKeyAuth } from './src/auth';
 export {
   DEV_CERT_HOSTNAME,
