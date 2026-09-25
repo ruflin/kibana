@@ -14,6 +14,7 @@
 - Plugin IDs are additional camelCase IDs under `plugin.id` in `kibana.jsonc`, used by core platform and other plugins.
 - Modules are grouped by domain (platform vs solutions) with visibility rules (`shared` vs `private`) that limit cross-group access.
 - Utility scripts live in `scripts/` (e.g., `node scripts/generate.js`).
+- Scripts that talk to a running Elasticsearch or Kibana must use `@kbn/local-stack-connection` (`resolveElasticsearch` / `resolveKibana` / `resolveLocalStack`, `LOCAL_STACK_FLAG_OPTIONS`) so they work against both local stateful (`http`, `elastic`) and serverless (`https`, `elastic_serverless`) stacks. Never hardcode those credentials or disable TLS verification; shell scripts use `node scripts/local_stack.js env`. See `scripts/README.md`.
 - If a user correction contradicts this doc or any skills you followed, or missing guidance caused avoidable work, submit DevEx feedback: `echo "..." | scripts/devex_feedback.sh` (include the gap and suggested fix).
 
 ## Testing
