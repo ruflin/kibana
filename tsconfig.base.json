@@ -1755,6 +1755,8 @@
       "@kbn/llm-tasks-plugin/*": ["./x-pack/platform/plugins/shared/ai_infra/llm_tasks/*"],
       "@kbn/llm-trace-waterfall": ["./x-pack/platform/packages/shared/llm-trace-waterfall"],
       "@kbn/llm-trace-waterfall/*": ["./x-pack/platform/packages/shared/llm-trace-waterfall/*"],
+      "@kbn/local-stack-connection": ["./src/platform/packages/shared/kbn-local-stack-connection"],
+      "@kbn/local-stack-connection/*": ["./src/platform/packages/shared/kbn-local-stack-connection/*"],
       "@kbn/locator-examples-plugin": ["./examples/locator_examples"],
       "@kbn/locator-examples-plugin/*": ["./examples/locator_examples/*"],
       "@kbn/locator-explorer-plugin": ["./examples/locator_explorer"],
