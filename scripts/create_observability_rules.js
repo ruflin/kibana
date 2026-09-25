@@ -7,11 +7,11 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
-require('@babel/register')({
-  extensions: ['.ts', '.js'],
-  presets: [['@babel/preset-env', { targets: { node: 'current' } }], '@babel/preset-typescript'],
-});
+require('@kbn/setup-node-env');
 
 var run = require('@kbn/observability-alerting-test-data').run;
 
-run();
+run().catch(function (error) {
+  console.error(error.message);
+  process.exitCode = 1;
+});

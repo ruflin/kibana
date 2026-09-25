@@ -5,12 +5,10 @@
  * 2.0.
  */
 
-import axios from 'axios';
-import { ALERT_ACTION_INDEX, HEADERS, PASSWORD, USERNAME } from './constants';
-import { getKibanaUrl } from './get_kibana_url';
+import { ALERT_ACTION_INDEX } from './constants';
+import { kibanaPost } from './kibana_client';
 
 export const createIndexConnector = async () => {
-  const INDEX_CONNECTOR_API = `${await getKibanaUrl()}/api/actions/connector`;
   const indexConnectorParams = {
     name: 'Test Index Connector',
     config: {
@@ -20,11 +18,5 @@ export const createIndexConnector = async () => {
     connector_type_id: '.index',
   };
 
-  return axios.post(INDEX_CONNECTOR_API, indexConnectorParams, {
-    headers: HEADERS,
-    auth: {
-      username: USERNAME,
-      password: PASSWORD,
-    },
-  });
+  return kibanaPost<{ id: string }>('/api/actions/connector', indexConnectorParams);
 };

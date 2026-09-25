@@ -19,5 +19,7 @@
     "@kbn/observability-plugin",
     "@kbn/rule-data-utils",
     "@kbn/alerting-comparators",
+    "@kbn/local-stack-connection",
+    "@kbn/tooling-log",
   ]
 }
