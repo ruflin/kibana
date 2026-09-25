@@ -17,7 +17,35 @@ const es = await resolveElasticsearch({ log, url: flags['es-url'] });
 const client = new Client(getEsClientOptions(es));
 ```
 
+Scripts that need both Elasticsearch and Kibana can use the shared CLI flags:
+
+```ts
+import { run } from '@kbn/dev-cli-runner';
+import {
+  getLocalStackOptionsFromFlags,
+  kibanaFetch,
+  LOCAL_STACK_FLAG_OPTIONS,
+  resolveLocalStack,
+} from '@kbn/local-stack-connection';
+
+run(
+  async ({ log, flags }) => {
+    const { elasticsearch, kibana } = await resolveLocalStack({
+      log,
+      ...getLocalStackOptionsFromFlags(flags),
+    });
+    await kibanaFetch(kibana, '/api/status');
+  },
+  { flags: LOCAL_STACK_FLAG_OPTIONS }
+);
+```
+
+`LOCAL_STACK_FLAG_OPTIONS` adds `--es-url`, `--es-username`, `--es-password`, `--es-api-key`,
+`--kibana-url`, `--kibana-username`, `--kibana-password`, `--kibana-api-key`, and `--insecure`.
+
 ## Resolution order
+
+### Elasticsearch
 
 1. Explicit options (`url` may contain `user:pass@`, `username`, `password`, `apiKey`)
 2. `ELASTICSEARCH_HOST`, `ELASTICSEARCH_USERNAME`, `ELASTICSEARCH_PASSWORD`, `ELASTICSEARCH_API_KEY`
@@ -28,6 +56,17 @@ Local URLs are tried over both http and https. Without explicit credentials, `el
 `elastic_serverless` are tried. The `kibana_system` credentials in `kibana.dev.yml` are never used,
 since they lack the privileges scripts need. When `kibana.dev.yml` points to a remote cluster, there
 is no fallback to localhost.
+
+### Kibana
+
+1. Explicit options (`url` may contain `user:pass@` and a base path)
+2. `KIBANA_URL`, `KIBANA_USERNAME`, `KIBANA_PASSWORD`, `KIBANA_API_KEY` (and the legacy
+   `KIBANA_AUTH=user:pass`)
+3. `server.host`, `server.port`, `server.basePath`, and `server.ssl.enabled` in `config/kibana.dev.yml`
+4. `http://localhost:5601`, then `https://localhost:5601`
+
+The random base path of the dev base path proxy is detected by following the redirect of `/`.
+`resolveLocalStack` tries the Elasticsearch credentials first, then the default superusers.
 
 ## TLS
 
