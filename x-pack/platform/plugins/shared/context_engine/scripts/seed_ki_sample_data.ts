@@ -208,6 +208,7 @@ run(
     const esClient = new Client({
       node: config.esUrl,
       auth: { username: config.username, password: config.password },
+      tls: config.esTls,
     });
 
     if (flags.clean === true || cleanOnly) {
@@ -278,10 +279,12 @@ run(
         --clean                Delete existing AI index + backing stores, then re-seed
         --clean-only           Delete existing AI index + backing stores and exit (no re-seed)
         --skip-kibana          Only write to Elasticsearch; skip Context Engine registration
-        --es-url <url>         Elasticsearch URL (default: http://localhost:9200)
-        --es-username <user>   ES username (default: elastic)
+        --es-url <url>         Elasticsearch URL (default: kibana.dev.yml, then localhost:9200 over
+                               http and https; env: ELASTICSEARCH_HOST)
+        --es-username <user>   ES username (default: elastic, then elastic_serverless)
         --es-password <pass>   ES password (default: changeme)
-        --kibana-url <url>     Kibana base URL (default: from kibana.dev.yml)
+        --kibana-url <url>     Kibana base URL (default: kibana.dev.yml, then localhost:5601; the dev
+                               base path is detected; env: KIBANA_URL)
 
         Usage:
           node scripts/seed_ki_sample_data.js

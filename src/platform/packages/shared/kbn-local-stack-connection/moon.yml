@@ -17,6 +17,7 @@ project:
   owner: '@elastic/kibana-operations'
   sourceRoot: src/platform/packages/shared/kbn-local-stack-connection
 dependsOn:
+  - '@kbn/dev-cli-errors'
   - '@kbn/dev-utils'
   - '@kbn/repo-info'
   - '@kbn/safer-lodash-set'

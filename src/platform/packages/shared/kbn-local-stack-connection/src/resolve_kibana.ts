@@ -9,6 +9,7 @@
 
 import type { ConnectionOptions } from 'tls';
 import { isEqual, uniq, uniqWith } from 'lodash';
+import { createFailError } from '@kbn/dev-cli-errors';
 import type { ToolingLog } from '@kbn/tooling-log';
 import type { BasicAuth, ConnectionAuth } from './auth';
 import { describeAuth } from './auth';
@@ -252,7 +253,7 @@ export const resolveKibana = async ({
     }
   }
 
-  throw new Error(
+  throw createFailError(
     [
       'Could not connect to Kibana. Tried:',
       ...attempts.map((attempt) => `  - ${attempt}`),

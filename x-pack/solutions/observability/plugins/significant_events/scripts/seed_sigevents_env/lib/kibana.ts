@@ -5,7 +5,10 @@
  * 2.0.
  */
 
+import type { Response } from 'undici';
+import { fetch } from 'undici';
 import type { ConnectionConfig } from './get_connection_config';
+import { getKibanaDispatcher } from './get_connection_config';
 
 export function generateAuthHeader(config: ConnectionConfig): string {
   return `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`;
@@ -25,6 +28,7 @@ export async function kibanaRequest(
   try {
     response = await fetch(`${config.kibanaUrl}${spacePath}`, {
       method,
+      dispatcher: getKibanaDispatcher(config),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       headers: {
         'Content-Type': 'application/json',
