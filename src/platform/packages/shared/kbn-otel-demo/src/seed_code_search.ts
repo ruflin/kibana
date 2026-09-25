@@ -15,7 +15,7 @@ import os from 'os';
 import path from 'path';
 import { fetch } from 'undici';
 import { REPO_ROOT } from '@kbn/repo-info';
-import type { ElasticsearchConfig } from './read_kibana_config';
+import type { ElasticsearchConfig } from './resolve_stack_connection';
 import { applyCodeScenario } from './apply_code_scenario';
 import { getCodeScenarioById } from './code_scenarios';
 import { ensureOtelDemoAtVersion, OTEL_DEMO_REPOSITORY, SCS_CACHE_DIR } from './otel_demo_source';

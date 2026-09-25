@@ -7,7 +7,7 @@
 
 import { run } from '@kbn/dev-cli-runner';
 import type { ToolingLog } from '@kbn/tooling-log';
-import { Client } from '@elastic/elasticsearch';
+import type { Client } from '@elastic/elasticsearch';
 import moment from 'moment';
 import {
   patchScenarios,
@@ -29,7 +29,11 @@ import {
   KI_FEATURE_EXTRACTION_TIMEOUT_MS,
   DISCOVERY_WAIT_MS,
 } from '../lib/constants';
-import { getConnectionConfig, type ConnectionConfig } from '../lib/get_connection_config';
+import {
+  createEsClient,
+  getConnectionConfig,
+  type ConnectionConfig,
+} from '../lib/get_connection_config';
 import { createSnapshot, generateGcsBasePath, registerGcsRepository } from '../lib/gcs';
 import { captureDiscoveryForScenario } from '../lib/capture_discovery';
 import { sleep } from '../lib/sleep';
@@ -57,10 +61,7 @@ import { parseDurationFlag } from '../lib/snapshot_utils';
 run(
   async ({ log, flags }) => {
     const config = await getConnectionConfig(flags, log);
-    const esClient = new Client({
-      node: config.esUrl,
-      auth: { username: config.username, password: config.password },
-    });
+    const esClient = createEsClient(config);
 
     const logsIndex = String(flags['logs-index'] || DEFAULT_LOGS_INDEX);
 
@@ -254,10 +255,10 @@ run(
         --baseline-wait    Duration to wait for baseline traffic, e.g. 3m, 90s, 1h (default: 3m)
         --failure-wait     Duration to wait after applying failure scenario, e.g. 15m, 300s (default: 5m)
         --extraction-timeout  Max duration to wait for KI feature extraction, e.g. 15m, 30m (default: 15m)
-        --es-url           Elasticsearch URL (default: from kibana.dev.yml)
-        --kibana-url       Kibana URL (default: from kibana.dev.yml, with basePath)
-        --es-username      ES username (default: from kibana.dev.yml)
-        --es-password      ES password (default: from kibana.dev.yml)
+        --es-url           Elasticsearch URL (default: kibana.dev.yml or local stateful/serverless)
+        --kibana-url       Kibana URL (default: kibana.dev.yml or localhost:5601, base path detected)
+        --es-username      ES username (default: elastic, then elastic_serverless)
+        --es-password      ES password (default: changeme)
       `,
     },
   }

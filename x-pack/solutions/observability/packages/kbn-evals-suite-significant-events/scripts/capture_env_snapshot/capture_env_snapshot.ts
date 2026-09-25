@@ -6,12 +6,13 @@
  */
 
 import type { ToolingLog } from '@kbn/tooling-log';
-import { Client, errors } from '@elastic/elasticsearch';
+import type { Client } from '@elastic/elasticsearch';
+import { errors } from '@elastic/elasticsearch';
 import type { MappingTypeMapping } from '@elastic/elasticsearch/lib/api/types';
 import moment from 'moment';
 import { extractDataStreamName } from '@kbn/es-snapshot-loader';
 import type { ConnectionConfig } from '../lib/get_connection_config';
-import { getConnectionConfig } from '../lib/get_connection_config';
+import { createEsClient, getConnectionConfig } from '../lib/get_connection_config';
 import { createSnapshot, generateGcsBasePath, registerGcsRepository } from '../lib/gcs';
 import {
   GCS_BUCKET,
@@ -114,10 +115,7 @@ export async function captureEnvSnapshot({
   flags: Record<string, unknown>;
 }): Promise<void> {
   const config = await getConnectionConfig(flags, log);
-  const esClient = new Client({
-    node: config.esUrl,
-    auth: { username: config.username, password: config.password },
-  });
+  const esClient = createEsClient(config);
 
   const runId = String(flags['run-id'] || moment().format('YYYY-MM-DD'));
   const { snapshotName, alertIndices, logsIndex } = parseCommonSnapshotFlags(flags);

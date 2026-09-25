@@ -7,12 +7,13 @@
 
 import { randomUUID } from 'crypto';
 import type { ToolingLog } from '@kbn/tooling-log';
-import { Client, errors } from '@elastic/elasticsearch';
+import type { Client } from '@elastic/elasticsearch';
+import { errors } from '@elastic/elasticsearch';
 import type { MappingTypeMapping } from '@elastic/elasticsearch/lib/api/types';
 import type { LoadResult } from '@kbn/es-snapshot-loader';
 import { createGcsRepository, replaySnapshot, restoreSnapshot } from '@kbn/es-snapshot-loader';
 import type { ConnectionConfig } from '../lib/get_connection_config';
-import { getConnectionConfig } from '../lib/get_connection_config';
+import { createEsClient, getConnectionConfig } from '../lib/get_connection_config';
 import { GCS_BUCKET, SIGNIFICANT_EVENTS_DATA_STREAMS } from '../lib/constants';
 import {
   ensureCleanEnvironment,
@@ -204,10 +205,7 @@ export const restoreEnvSnapshot = async ({
   flags: Record<string, unknown>;
 }): Promise<void> => {
   const config = await getConnectionConfig(flags, log);
-  const esClient = new Client({
-    node: config.esUrl,
-    auth: { username: config.username, password: config.password },
-  });
+  const esClient = createEsClient(config);
 
   const gcsBucket = String(flags['gcs-bucket'] || GCS_BUCKET);
   const gcsBasePath = String(flags['gcs-base-path'] || '');

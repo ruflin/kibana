@@ -62,10 +62,10 @@ run(({ log, flags }) => restoreEnvSnapshot({ log, flags }), {
       ].join(
         ', '
       )}) indices before restoring without prompting. Without this flag the script will prompt interactively (or fail in non-TTY environments).
-      --es-url                Elasticsearch URL (default: from kibana.dev.yml)
-      --es-username           ES username (default: from kibana.dev.yml)
-      --es-password           ES password (default: from kibana.dev.yml)
-      --kibana-url            Kibana base URL (default: from kibana.dev.yml)
+      --es-url                Elasticsearch URL (default: kibana.dev.yml or local stateful/serverless)
+      --es-username           ES username (default: elastic, then elastic_serverless)
+      --es-password           ES password (default: changeme)
+      --kibana-url            Kibana base URL (default: kibana.dev.yml or localhost:5601, base path detected)
     `,
   },
 });

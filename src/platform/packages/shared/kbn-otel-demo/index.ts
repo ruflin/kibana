@@ -54,15 +54,8 @@ export { listScenarioIds as listDemoScenarioIds } from './src/demo_registry';
 export { ensureMinikubeRunning, waitForPodsReady } from './src/util/assert_minikube_available';
 
 // Configuration utilities
-export { readKibanaConfig } from './src/read_kibana_config';
-export type { StackConnection } from './src/resolve_stack_connection';
+export type { ElasticsearchConfig, StackConnection } from './src/resolve_stack_connection';
 export { resolveStackConnection } from './src/resolve_stack_connection';
-export type {
-  KibanaConfig,
-  ElasticsearchConfig,
-  KibanaServerConfig,
-} from './src/read_kibana_config';
-export { resolveKibanaUrl } from './src/util/resolve_kibana_url';
 
 // Backward compatibility exports for OTel Demo (default demo)
 import { OTEL_DEMO_SCENARIOS } from './src/demos/otel_demo/scenarios';

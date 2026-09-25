@@ -5,10 +5,20 @@
  * 2.0.
  */
 
-import fetch from 'node-fetch';
+import { Agent, fetch } from 'undici';
 import type { ConnectionConfig } from './get_connection_config';
 
-export { readKibanaConfig, resolveKibanaUrl } from '@kbn/otel-demo';
+const dispatchers = new WeakMap<ConnectionConfig, Agent | undefined>();
+
+const getDispatcher = (config: ConnectionConfig): Agent | undefined => {
+  if (!dispatchers.has(config)) {
+    dispatchers.set(
+      config,
+      config.kibanaTls ? new Agent({ connect: config.kibanaTls }) : undefined
+    );
+  }
+  return dispatchers.get(config);
+};
 
 export function generateAuthHeader(config: ConnectionConfig): string {
   return `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`;
@@ -22,6 +32,7 @@ export async function kibanaRequest(
 ): Promise<{ status: number; data: unknown }> {
   const response = await fetch(`${config.kibanaUrl}${path}`, {
     method,
+    dispatcher: getDispatcher(config),
     headers: {
       'Content-Type': 'application/json',
       Authorization: generateAuthHeader(config),
