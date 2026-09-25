@@ -552,3 +552,15 @@ A bad proposal is skipped, not fatal. Every rejection comes back as a `skipped`
 entry with a reason: `invalid`, `action_not_allowed`, `duplicate`, `conflict`,
 or `limit_exceeded`.
 
+## Local scripts
+
+- `scripts/seed_ki_sample_data.ts` — bulk-index sample KIs and register an AI index.
+- `scripts/setup_obs_services_ai_index.py` — enable Context Engine, create the
+  `obs-services` AI index, and load a workflow that `STATS BY service.name` and
+  upserts one entity KI per service.
+
+```
+python3 x-pack/platform/plugins/shared/context_engine/scripts/setup_obs_services_ai_index.py
+python3 .../setup_obs_services_ai_index.py --source 'traces-apm*' --limit 20 --run
+```
+
