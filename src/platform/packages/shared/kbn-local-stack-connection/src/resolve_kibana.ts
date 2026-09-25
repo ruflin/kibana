@@ -258,7 +258,7 @@ export const resolveKibana = async ({
       'Could not connect to Kibana. Tried:',
       ...attempts.map((attempt) => `  - ${attempt}`),
       '',
-      'Start Kibana with `yarn start` or `yarn serverless-{es,oblt,security}`, or pass --kibana-url /',
+      'Start Kibana with `node scripts/kibana --dev [--serverless=<type>]`, or pass --kibana-url /',
       '--kibana-username / --kibana-password (or KIBANA_URL / KIBANA_USERNAME / KIBANA_PASSWORD /',
       'KIBANA_API_KEY).',
     ].join('\n')

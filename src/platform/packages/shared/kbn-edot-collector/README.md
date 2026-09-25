@@ -14,7 +14,7 @@ node scripts/edot_collector.js
 
 This will:
 
-1. Read Elasticsearch connection details from `config/kibana.dev.yml`
+1. Detect Elasticsearch: the host from `config/kibana.dev.yml` if set, otherwise the local stateful (`http`, `elastic`) or serverless (`https`, `elastic_serverless`) stack
 2. Generate an OpenTelemetry Collector configuration
 3. Start a Docker container named `kibana-edot-collector` with the EDOT Collector running in Gateway mode
 4. Expose OTLP endpoints for application instrumentation

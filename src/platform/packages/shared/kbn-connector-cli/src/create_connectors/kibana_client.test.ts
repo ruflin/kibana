@@ -8,7 +8,8 @@
  */
 
 import http from 'http';
-import { detectKibana, listConnectors, createConnector } from './kibana_client';
+import type { KibanaConnection } from './kibana_client';
+import { listConnectors, createConnector } from './kibana_client';
 
 let server: http.Server | undefined;
 let port: number;
@@ -24,6 +25,12 @@ function createTestServer(handler: http.RequestListener): Promise<void> {
   });
 }
 
+const connection = (): KibanaConnection => ({
+  url: `http://localhost:${port}`,
+  auth: { username: 'elastic', password: 'changeme' },
+  insecure: false,
+});
+
 afterEach((done) => {
   if (server) {
     const s = server;
@@ -34,41 +41,6 @@ afterEach((done) => {
   }
 });
 
-describe('detectKibana', () => {
-  it('detects a running Kibana and returns connection info', async () => {
-    await createTestServer((req, res) => {
-      if (req.url === '/api/status') {
-        res.writeHead(200);
-        res.end('{}');
-      } else if (req.url === '/internal/security/me') {
-        const auth = req.headers.authorization;
-        if (auth === 'Basic ' + Buffer.from('elastic:changeme').toString('base64')) {
-          res.writeHead(200);
-          res.end('{}');
-        } else {
-          res.writeHead(401);
-          res.end();
-        }
-      } else {
-        res.writeHead(404);
-        res.end();
-      }
-    });
-
-    const result = await detectKibana({ urls: [`http://localhost:${port}`] });
-    expect(result).toEqual({
-      url: `http://localhost:${port}`,
-      auth: 'elastic:changeme',
-    });
-  });
-
-  it('throws when no Kibana is reachable', async () => {
-    await expect(detectKibana({ urls: ['http://localhost:1'] })).rejects.toThrow(
-      /Could not detect a running Kibana/
-    );
-  });
-});
-
 describe('listConnectors', () => {
   it('returns parsed connector list', async () => {
     const connectors = [{ id: '1', name: 'GitHub (testing)', connector_type_id: '.github' }];
@@ -77,10 +49,7 @@ describe('listConnectors', () => {
       res.end(JSON.stringify(connectors));
     });
 
-    const result = await listConnectors({
-      url: `http://localhost:${port}`,
-      auth: 'elastic:changeme',
-    });
+    const result = await listConnectors(connection());
     expect(result).toEqual(connectors);
   });
 });
@@ -98,15 +67,12 @@ describe('createConnector', () => {
       });
     });
 
-    const result = await createConnector(
-      { url: `http://localhost:${port}`, auth: 'elastic:changeme' },
-      {
-        connector_type_id: '.github',
-        name: 'GitHub (testing)',
-        config: { serverUrl: 'https://example.com' },
-        secrets: { authType: 'bearer', token: 'ghp_xxx' },
-      }
-    );
+    const result = await createConnector(connection(), {
+      connector_type_id: '.github',
+      name: 'GitHub (testing)',
+      config: { serverUrl: 'https://example.com' },
+      secrets: { authType: 'bearer', token: 'ghp_xxx' },
+    });
 
     expect(result).toEqual({ id: 'new-id', name: 'Test' });
     const parsed = JSON.parse(receivedBody);
@@ -121,15 +87,12 @@ describe('createConnector', () => {
     });
 
     await expect(
-      createConnector(
-        { url: `http://localhost:${port}`, auth: 'elastic:changeme' },
-        {
-          connector_type_id: '.bad',
-          name: 'Bad',
-          config: {},
-          secrets: { authType: 'bearer', token: 'x' },
-        }
-      )
+      createConnector(connection(), {
+        connector_type_id: '.bad',
+        name: 'Bad',
+        config: {},
+        secrets: { authType: 'bearer', token: 'x' },
+      })
     ).rejects.toThrow(/400/);
   });
 });

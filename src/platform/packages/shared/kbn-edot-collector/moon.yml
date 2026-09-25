@@ -20,6 +20,7 @@ dependsOn:
   - '@kbn/tooling-log'
   - '@kbn/dev-cli-runner'
   - '@kbn/repo-info'
+  - '@kbn/local-stack-connection'
 tags:
   - shared-server
   - package

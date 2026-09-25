@@ -5,9 +5,7 @@
  * 2.0.
  */
 
-import axios from 'axios';
-import { HEADERS, PASSWORD, USERNAME } from './constants';
-import { getKibanaUrl } from './get_kibana_url';
+import { kibanaPost } from './kibana_client';
 
 export const createDataView = async ({
   indexPattern,
@@ -16,7 +14,6 @@ export const createDataView = async ({
   indexPattern: string;
   id: string;
 }) => {
-  const DATA_VIEW_CREATION_API = `${await getKibanaUrl()}/api/content_management/rpc/create`;
   const dataViewParams = {
     contentTypeId: 'index-pattern',
     data: {
@@ -34,11 +31,5 @@ export const createDataView = async ({
     version: 1,
   };
 
-  return axios.post(DATA_VIEW_CREATION_API, dataViewParams, {
-    headers: HEADERS,
-    auth: {
-      username: USERNAME,
-      password: PASSWORD,
-    },
-  });
+  return kibanaPost('/api/content_management/rpc/create', dataViewParams);
 };

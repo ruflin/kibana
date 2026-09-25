@@ -15,6 +15,7 @@
   ],
   "kbn_references": [
     "@kbn/dev-cli-runner",
+    "@kbn/local-stack-connection",
     "@kbn/tooling-log"
   ]
 }
