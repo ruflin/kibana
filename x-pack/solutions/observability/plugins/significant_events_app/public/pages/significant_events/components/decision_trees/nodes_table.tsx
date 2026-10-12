@@ -6,6 +6,7 @@
  */
 
 import React from 'react';
+import { css } from '@emotion/react';
 import { EuiBadge, EuiBasicTable, type EuiBasicTableColumn } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
 import type { DecisionNodeView } from '@kbn/nightshift-decision-trees';
@@ -60,6 +61,9 @@ export function NodesTable({ nodes }: NodesTableProps) {
 
   return (
     <EuiBasicTable
+      css={css`
+        min-width: 600px;
+      `}
       items={nodes}
       columns={columns}
       tableLayout="auto"

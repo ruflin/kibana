@@ -756,9 +756,17 @@ export const SignificantEventsTab = () => {
           />
         </EuiFlexItem>
       )}
-      <EuiFlexItem grow={false}>
+      <EuiFlexItem
+        grow={false}
+        css={css`
+          overflow-x: auto;
+          min-width: 0;
+        `}
+      >
         <EuiBasicTable<SignificantEventResponse>
           css={css`
+            min-width: 1000px;
+
             & thead tr {
               background-color: ${euiTheme.colors.backgroundBaseSubdued};
             }

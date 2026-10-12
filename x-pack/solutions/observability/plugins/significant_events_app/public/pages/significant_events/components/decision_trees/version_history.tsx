@@ -6,6 +6,7 @@
  */
 
 import React from 'react';
+import { css } from '@emotion/react';
 import { EuiBadge, EuiBasicTable, type EuiBasicTableColumn, EuiText } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
 import { FormattedRelative } from '@kbn/i18n-react';
@@ -83,6 +84,9 @@ export function VersionHistory({
 
   return (
     <EuiBasicTable
+      css={css`
+        min-width: 800px;
+      `}
       items={versions}
       columns={columns}
       tableLayout="auto"
