@@ -123,6 +123,7 @@ export const DetectionsTab = () => {
         name: i18n.translate('xpack.significantEventsApp.detectionsTab.ruleColumn', {
           defaultMessage: 'Rule',
         }),
+        truncateText: true,
         render: (_: unknown, detection: Detection) => (
           <EuiButtonEmpty
             data-test-subj="significantEventsAppColumnsButton"
@@ -219,13 +220,22 @@ export const DetectionsTab = () => {
           />
         </EuiFlexItem>
       )}
-      <EuiFlexItem grow={false}>
+      <EuiFlexItem
+        grow={false}
+        css={css`
+          overflow-x: auto;
+          min-width: 0;
+        `}
+      >
         <EuiBasicTable
           css={css`
+            min-width: 900px;
+
             & thead tr {
               background-color: ${euiTheme.colors.backgroundBaseSubdued};
             }
           `}
+          tableLayout="fixed"
           tableCaption={i18n.translate('xpack.significantEventsApp.detectionsTab.tableCaption', {
             defaultMessage: 'Detections',
           })}

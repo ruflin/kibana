@@ -226,8 +226,16 @@ export function StreamsTreeTable({
 
   return (
     <EuiFlexGroup direction="column" gutterSize="m">
-      <EuiFlexItem>
+      <EuiFlexItem
+        className={css`
+          overflow-x: auto;
+          min-width: 0;
+        `}
+      >
         <EuiInMemoryTable<TableRow>
+          className={css`
+            min-width: 1000px;
+          `}
           selection={selection}
           loading={loading}
           data-test-subj="streamsTable"

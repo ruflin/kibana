@@ -89,6 +89,16 @@ import { formatLastOccurredAt } from './utils';
 
 const DEFAULT_PAGINATION = { index: 0, size: 10 };
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+// Fixed-width columns plus a floor for the title column. Narrower than this the table scrolls
+// instead of squeezing the title into a single-character column.
+const TABLE_MIN_WIDTH = '1100px';
+const titleLinkStyles = css`
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
 
 export function QueriesTable() {
   const router = useSignificantEventsAppRouter();
@@ -255,13 +265,17 @@ export function QueriesTable() {
       {
         field: 'query.title',
         name: TITLE_COLUMN,
+        truncateText: true,
         render: (_: unknown, item: SignificantEventQueryRow) => (
-          <EuiLink
-            data-test-subj="significantEventsAppColumnsLink"
-            onClick={() => handleSelectQuery(item)}
-          >
-            {item.query.title}
-          </EuiLink>
+          <EuiToolTip content={item.query.title} display="block" disableScreenReaderOutput>
+            <EuiLink
+              data-test-subj="significantEventsAppColumnsLink"
+              css={titleLinkStyles}
+              onClick={() => handleSelectQuery(item)}
+            >
+              {item.query.title}
+            </EuiLink>
+          </EuiToolTip>
         ),
       },
       {
@@ -508,13 +522,22 @@ export function QueriesTable() {
           )}
         </EuiFlexGroup>
       </EuiFlexItem>
-      <EuiFlexItem grow={false}>
+      <EuiFlexItem
+        grow={false}
+        css={css`
+          overflow-x: auto;
+          min-width: 0;
+        `}
+      >
         <EuiBasicTable
           css={css`
+            min-width: ${TABLE_MIN_WIDTH};
+
             & thead tr {
               background-color: ${euiTheme.colors.backgroundBaseSubdued};
             }
           `}
+          tableLayout="fixed"
           tableCaption={TABLE_CAPTION}
           columns={columns}
           itemId={(item) => item.query.id}
