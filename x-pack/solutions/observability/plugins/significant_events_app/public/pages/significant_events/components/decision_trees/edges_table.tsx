@@ -6,6 +6,7 @@
  */
 
 import React from 'react';
+import { css } from '@emotion/react';
 import { EuiBadge, EuiBasicTable, type EuiBasicTableColumn } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
 import type { DecisionEdgeView } from '@kbn/nightshift-decision-trees';
@@ -59,6 +60,9 @@ export function EdgesTable({ edges }: EdgesTableProps) {
 
   return (
     <EuiBasicTable
+      css={css`
+        min-width: 600px;
+      `}
       items={edges}
       columns={columns}
       tableLayout="auto"
