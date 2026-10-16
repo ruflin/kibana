@@ -15,7 +15,10 @@ import {
 import { significantEventsApiTest as apiTest } from '../../fixtures';
 import { COMMON_API_HEADERS } from '../../fixtures/constants';
 
-const STREAMS = ['.significant_events-knowledge_indicators', '.significant_events-detections'];
+const KNOWLEDGE_INDICATORS_STREAM = '.significant_events-knowledge_indicators';
+// Detections are signals in the shared Alerting v2 stream, next to other producers' documents.
+const RULE_EVENTS_STREAM = '.rule-events';
+const STREAMS = [KNOWLEDGE_INDICATORS_STREAM, RULE_EVENTS_STREAM];
 const RESET_PATH = 'internal/significant_events/maintenance/_reset';
 const STATUS_PATH = 'internal/significant_events/maintenance/_status';
 
@@ -45,7 +48,7 @@ apiTest.describe(
         cluster: [],
         indices: [
           {
-            names: ['.significant_events-*'],
+            names: ['.significant_events-*', RULE_EVENTS_STREAM],
             privileges: canDelete ? ['read', 'delete', 'maintenance'] : ['read', 'maintenance'],
           },
         ],
@@ -67,26 +70,38 @@ apiTest.describe(
         path: `/s/${spaceB}/internal/significant_events/maintenance/_pause`,
         headers: COMMON_API_HEADERS,
       });
-      for (const index of STREAMS) {
-        for (const [offset, id] of ids.entries()) {
-          await esClient.index({
-            index,
-            id,
-            op_type: 'create',
-            refresh: true,
-            document: {
-              '@timestamp': new Date().toISOString(),
-              id: 'same-ki-id',
-              type: 'feature',
-              'source.id': 'same-source-id',
-              ...(offset < 2 ? { 'kibana.space_ids': [offset === 0 ? spaceA : spaceB] } : {}),
-              feature: { type: 'entity', slug: 'same-slug', properties: {}, confidence: 90 },
-              detection_id: id,
-              rule_uuid: 'same-rule-id',
-              change_point_type: 'spike',
-            },
-          });
-        }
+      for (const [offset, id] of ids.entries()) {
+        await esClient.index({
+          index: KNOWLEDGE_INDICATORS_STREAM,
+          id,
+          op_type: 'create',
+          refresh: true,
+          document: {
+            '@timestamp': new Date().toISOString(),
+            id: 'same-ki-id',
+            type: 'feature',
+            'source.id': 'same-source-id',
+            ...(offset < 2 ? { 'kibana.space_ids': [offset === 0 ? spaceA : spaceB] } : {}),
+            feature: { type: 'entity', slug: 'same-slug', properties: {}, confidence: 90 },
+          },
+        });
+        // A detection in each space, and a rule execution signal in the reset space that is kept.
+        await esClient.index({
+          index: RULE_EVENTS_STREAM,
+          id,
+          op_type: 'create',
+          refresh: true,
+          document: {
+            '@timestamp': new Date().toISOString(),
+            type: 'signal',
+            source: offset < 2 ? 'elastic.significant_events.detection' : 'internal',
+            space_id: offset === 1 ? spaceB : spaceA,
+            status: 'breached',
+            group_hash: 'same-rule-id',
+            rule: { id: 'same-rule-id' },
+            data: { detection_id: id, change_point_type: 'spike' },
+          },
+        });
       }
     });
 
@@ -159,10 +174,30 @@ apiTest.describe(
           rules: 0,
           dataStreams: 2,
         });
+        expect(
+          (
+            await esClient.count({
+              index: KNOWLEDGE_INDICATORS_STREAM,
+              query: { term: { 'kibana.space_ids': spaceA } },
+            })
+          ).count
+        ).toBe(0);
+        expect(
+          (
+            await esClient.count({
+              index: RULE_EVENTS_STREAM,
+              query: {
+                bool: {
+                  filter: [
+                    { term: { space_id: spaceA } },
+                    { term: { source: 'elastic.significant_events.detection' } },
+                  ],
+                },
+              },
+            })
+          ).count
+        ).toBe(0);
         for (const index of STREAMS) {
-          expect(
-            (await esClient.count({ index, query: { term: { 'kibana.space_ids': spaceA } } })).count
-          ).toBe(0);
           expect(
             (await esClient.count({ index, query: { ids: { values: [ids[1], ids[2]] } } })).count
           ).toBe(2);

@@ -9,7 +9,12 @@ import { errors } from '@elastic/elasticsearch';
 import type { Client } from '@elastic/elasticsearch';
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
 import type { ToolingLog } from '@kbn/tooling-log';
-import { SIGNIFICANT_EVENTS_ALERT_SOURCE, type StreamQuery } from '@kbn/significant-events-schema';
+import {
+  SIGNIFICANT_EVENTS_ALERT_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_PROCESSED_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_SOURCE,
+  type StreamQuery,
+} from '@kbn/significant-events-schema';
 import type { SeedBaseContext } from '../types';
 import type { ConnectionConfig } from '../lib/get_connection_config';
 import { kibanaRequest } from '../lib/kibana';
@@ -48,20 +53,26 @@ async function cleanDetectionAndEventHistory(
     return;
   }
 
+  // Detections and scan markers sit on the rule series and go with the rule's signals below;
+  // processed markers carry no rule, so they are found through the rule's detection ids.
   let detectionIds: string[] = [];
   try {
-    const detections = await esClient.search<{ detection_id?: string }>({
-      index: '.significant_events-detections',
+    const detections = await esClient.search<{ data?: { detection_id?: string } }>({
+      index: '.rule-events',
       size: 1000,
-      _source: ['detection_id'],
+      _source: ['data.detection_id'],
       query: {
         bool: {
-          filter: [{ terms: { rule_uuid: ruleIds } }, { term: { 'kibana.space_ids': space } }],
+          filter: [
+            { terms: { 'rule.id': ruleIds } },
+            { term: { source: SIGNIFICANT_EVENTS_DETECTION_SOURCE } },
+            { term: { space_id: space } },
+          ],
         },
       },
     });
     detectionIds = detections.hits.hits
-      .map(({ _source: source }) => source?.detection_id)
+      .map(({ _source: source }) => source?.data?.detection_id)
       .filter((id): id is string => typeof id === 'string');
   } catch (err) {
     if (!(err instanceof errors.ResponseError) || err.meta.statusCode !== 404) {
@@ -69,22 +80,22 @@ async function cleanDetectionAndEventHistory(
     }
   }
 
-  const detectionShould: QueryDslQueryContainer[] = [{ terms: { rule_uuid: ruleIds } }];
   if (detectionIds.length > 0) {
-    detectionShould.push({ terms: { detection_id: detectionIds } });
-  }
-  await deleteByQuery(
-    esClient,
-    '.significant_events-detections',
-    {
-      bool: {
-        filter: [{ term: { 'kibana.space_ids': space } }],
-        should: detectionShould,
-        minimum_should_match: 1,
+    await deleteByQuery(
+      esClient,
+      '.rule-events',
+      {
+        bool: {
+          filter: [
+            { term: { source: SIGNIFICANT_EVENTS_DETECTION_PROCESSED_SOURCE } },
+            { terms: { 'data.detection_id': detectionIds } },
+            { term: { space_id: space } },
+          ],
+        },
       },
-    },
-    log
-  );
+      log
+    );
+  }
   await deleteByQuery(
     esClient,
     '.rule-events',

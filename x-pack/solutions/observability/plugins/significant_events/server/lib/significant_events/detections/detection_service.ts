@@ -6,21 +6,21 @@
  */
 
 import type { ElasticsearchClient } from '@kbn/core/server';
+import type { AlertEventsClientApi } from '@kbn/alerting-v2-plugin/server';
 import { DetectionClient } from './detection_client';
-import type { DetectionDataStreamClient } from './detection_client';
 
 export class DetectionService {
   getClient({
-    dataStreamClient,
+    getAlertEventsClient,
     esClient,
     space,
   }: {
-    dataStreamClient: DetectionDataStreamClient;
+    getAlertEventsClient: () => Promise<Pick<AlertEventsClientApi, 'createSignalEvents'>>;
     esClient: ElasticsearchClient;
     space: string;
   }): DetectionClient {
     return new DetectionClient({
-      dataStreamClient,
+      getAlertEventsClient,
       esClient,
       space,
     });

@@ -12,7 +12,6 @@ import {
   DISCOVERIES_DATA_STREAM,
   DISCOVERIES_TEMP_INDEX_PATTERN,
   getSnapshotDetectionsIndex,
-  DETECTIONS_DATA_STREAM,
   DETECTIONS_TEMP_INDEX_PATTERN,
   getSnapshotKnowledgeIndicatorsIndex,
   KNOWLEDGE_INDICATORS_TEMP_INDEX_PATTERN,
@@ -76,8 +75,7 @@ describe('sigevents_snapshot_indices', () => {
   });
 
   describe('detections', () => {
-    it('exposes the source data stream, cleanup pattern, and per-scenario index', () => {
-      expect(DETECTIONS_DATA_STREAM).toBe('.significant_events-detections');
+    it('exposes the cleanup pattern and per-scenario index', () => {
       expect(DETECTIONS_TEMP_INDEX_PATTERN).toBe('sigevents-detections-*');
       expect(getSnapshotDetectionsIndex('healthy-baseline')).toBe(
         'sigevents-detections-healthy-baseline'

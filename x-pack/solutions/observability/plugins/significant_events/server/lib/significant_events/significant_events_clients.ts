@@ -7,13 +7,7 @@
 
 import type { AlertEventsClientApi } from '@kbn/alerting-v2-plugin/server';
 import type { ElasticsearchClient } from '@kbn/core/server';
-import type { DataStreamsStart } from '@kbn/core-data-streams-server';
-import {
-  DetectionService,
-  detectionsDataStream,
-  type StoredDetection,
-  type detectionsMappings,
-} from './detections';
+import { DetectionService } from './detections';
 import type { DetectionClient } from './detections';
 import { RuleEventsClient } from './events/rule_events_client';
 import type { TriggerEmitter } from '../../workflows/triggers/emit';
@@ -38,14 +32,12 @@ export function createSignificantEventsServices(): SignificantEventsServices {
 
 export function createSignificantEventsClients({
   services,
-  dataStreams,
   esClient,
   space,
   triggerEmitter,
   getAlertEventsClient,
 }: {
   services: SignificantEventsServices;
-  dataStreams: DataStreamsStart;
   esClient: ElasticsearchClient;
   space: string;
   triggerEmitter?: TriggerEmitter;
@@ -60,14 +52,7 @@ export function createSignificantEventsClients({
 
   return {
     getDetectionClient: async () =>
-      services.detection.getClient({
-        dataStreamClient: await dataStreams.initializeClient<
-          typeof detectionsMappings,
-          StoredDetection
-        >(detectionsDataStream.name),
-        esClient,
-        space,
-      }),
+      services.detection.getClient({ getAlertEventsClient, esClient, space }),
     getEventSearchClient: async () => eventSearchClient,
     emitTrigger: triggerEmitter,
   };

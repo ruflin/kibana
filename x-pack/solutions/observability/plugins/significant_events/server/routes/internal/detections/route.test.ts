@@ -93,35 +93,40 @@ describe('detection marker routes', () => {
 describe('while Significant Events is paused', () => {
   // Handler resources the routes use; only the maintenance state and the write client matter.
   const createResources = (state: string) => {
-    const bulkCreate = jest.fn().mockResolvedValue(undefined);
+    const detectionClient = {
+      createDetections: jest.fn().mockResolvedValue(undefined),
+      markProcessed: jest.fn().mockResolvedValue(undefined),
+      markScanned: jest.fn().mockResolvedValue(undefined),
+    };
     const resources = {
       request: {},
       server: {},
       getScopedClients: jest.fn().mockResolvedValue({
         licensing: {},
-        getDetectionClient: jest.fn().mockResolvedValue({ bulkCreate }),
+        getDetectionClient: jest.fn().mockResolvedValue(detectionClient),
       }),
       maintenanceService: { getState: jest.fn().mockResolvedValue(state) },
     };
-    return { resources, bulkCreate };
+    return { resources, detectionClient };
   };
 
   const writes = [
     {
       name: 'create detections',
       invoke: (state: string) => {
-        const { resources, bulkCreate } = createResources(state);
+        const { resources, detectionClient } = createResources(state);
         const params = { ...resources, params: { body: { detections: [detection] } } };
         const result = createRoute.handler(
           params as unknown as Parameters<typeof createRoute.handler>[0]
         );
-        return { result, bulkCreate };
+        return { result, write: detectionClient.createDetections };
       },
+      expectedArgs: { detections: [detection], timestamp: expect.any(String) },
     },
     {
       name: 'mark detections processed',
       invoke: (state: string) => {
-        const { resources, bulkCreate } = createResources(state);
+        const { resources, detectionClient } = createResources(state);
         const params = {
           ...resources,
           params: { body: { detection_ids: ['d-1'], processed_by: 'exec-1' } },
@@ -129,13 +134,18 @@ describe('while Significant Events is paused', () => {
         const result = markProcessedRoute.handler(
           params as unknown as Parameters<typeof markProcessedRoute.handler>[0]
         );
-        return { result, bulkCreate };
+        return { result, write: detectionClient.markProcessed };
+      },
+      expectedArgs: {
+        detectionIds: ['d-1'],
+        processedBy: 'exec-1',
+        timestamp: expect.any(String),
       },
     },
     {
       name: 'mark rules scanned',
       invoke: (state: string) => {
-        const { resources, bulkCreate } = createResources(state);
+        const { resources, detectionClient } = createResources(state);
         const params = {
           ...resources,
           params: { body: { rule_uuids: ['rule-1'], scanned_by: 'exec-1' } },
@@ -143,22 +153,24 @@ describe('while Significant Events is paused', () => {
         const result = markScannedRoute.handler(
           params as unknown as Parameters<typeof markScannedRoute.handler>[0]
         );
-        return { result, bulkCreate };
+        return { result, write: detectionClient.markScanned };
       },
+      expectedArgs: { ruleUuids: ['rule-1'], scannedBy: 'exec-1', timestamp: expect.any(String) },
     },
   ];
 
   it.each(writes)('rejects with 409 and writes nothing to $name', async ({ invoke }) => {
-    const { result, bulkCreate } = invoke('paused');
+    const { result, write } = invoke('paused');
 
     await expect(result).rejects.toMatchObject({ output: { statusCode: 409 } });
-    expect(bulkCreate).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
   });
 
-  it.each(writes)('writes to $name when it is not paused', async ({ invoke }) => {
-    const { result, bulkCreate } = invoke('enabled');
+  it.each(writes)('writes to $name when it is not paused', async ({ invoke, expectedArgs }) => {
+    const { result, write } = invoke('enabled');
 
     await expect(result).resolves.toEqual({ count: 1 });
-    expect(bulkCreate).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledWith(expectedArgs);
   });
 });

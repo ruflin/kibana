@@ -6,10 +6,12 @@
  */
 
 import { esql, type ComposerQuery } from '@elastic/esql';
+import type { ESQLAstExpression } from '@elastic/esql/types';
 import type {
   MappingRuntimeFields,
   QueryDslQueryContainer,
 } from '@elastic/elasticsearch/lib/api/types';
+import { SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES } from '@kbn/significant-events-schema';
 import {
   METRIC_SERIES_BUCKET_FIELD,
   METRIC_SERIES_VALUE_FIELD,
@@ -105,7 +107,20 @@ export interface RuleEventsSignalFilterParams {
   ruleUuid?: string;
 }
 
-/** Shared DSL filter for signal docs in {@link RULE_EVENTS_INDEX}. */
+/**
+ * ES|QL predicate that drops the detection pipeline's own signals. Detections and their markers are
+ * appended to the same rule series as the KI rule's executions, so every reader of a rule's alert
+ * volume must exclude them or the detector would read its own output.
+ */
+export const excludeDetectionSignalsWhere = (): ESQLAstExpression =>
+  esql.exp`${esql.col('source')} IS NULL OR ${esql.col(
+    'source'
+  )} NOT IN (${SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES.map((source) => esql.str(source))})`;
+
+/**
+ * Shared DSL filter for the signal docs rule execution writes in {@link RULE_EVENTS_INDEX}. Excludes
+ * the detection pipeline's own signals (see {@link excludeDetectionSignalsWhere}).
+ */
 export function buildRuleEventsSignalFilter({
   spaceId,
   lookback,
@@ -116,6 +131,9 @@ export function buildRuleEventsSignalFilter({
     { term: { type: 'signal' } },
     { term: { space_id: spaceId } },
     { range: { '@timestamp': { gte: lookback } } },
+    {
+      bool: { must_not: [{ terms: { source: [...SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES] } }] },
+    },
   ];
   if (ruleUuid) {
     filter.push({ term: { 'rule.id': ruleUuid } });

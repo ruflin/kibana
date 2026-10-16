@@ -23,7 +23,7 @@ describe('buildSignalFiringsHistogramQuery', () => {
   it('filters to signal firings for the rule within the window', () => {
     const q = print('1h');
     expect(q).toContain('FROM .rule-events');
-    expect(q).toContain('type == "signal"');
+    expect(q).toContain('type == "signal" AND source == "internal"');
     expect(q).toContain('rule.id == "rule-1"');
     expect(q).toContain('"2026-06-01T00:00:00.000Z"::DATETIME');
     expect(q).toContain('"2026-06-02T00:00:00.000Z"::DATETIME');
@@ -55,7 +55,7 @@ describe('buildSignalFiringsSummaryQuery', () => {
     const q = buildSignalFiringsSummaryQuery({ ruleId: RULE_ID, gteMs: GTE, lteMs: LTE }).print(
       'basic'
     );
-    expect(q).toContain('type == "signal"');
+    expect(q).toContain('type == "signal" AND source == "internal"');
     expect(q).toContain('rule.id == "rule-1"');
     expect(q).toContain('STATS last_firing = MAX(@timestamp)');
   });

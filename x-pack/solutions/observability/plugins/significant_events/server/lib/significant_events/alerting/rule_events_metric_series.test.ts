@@ -6,6 +6,7 @@
  */
 
 import { esql } from '@elastic/esql';
+import { SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES } from '@kbn/significant-events-schema';
 import { toEsqlRequest } from '../../streams/esql';
 import {
   METRIC_SERIES_RUNTIME_MAPPINGS,
@@ -43,6 +44,11 @@ describe('buildRuleEventsSignalFilter', () => {
       { term: { type: 'signal' } },
       { term: { space_id: 'default' } },
       { range: { '@timestamp': { gte: 'now-40m' } } },
+      {
+        bool: {
+          must_not: [{ terms: { source: [...SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES] } }],
+        },
+      },
       { terms: { 'rule.id': ['rule-a', 'rule-b'] } },
     ]);
   });

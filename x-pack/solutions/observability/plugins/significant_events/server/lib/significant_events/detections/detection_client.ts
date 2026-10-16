@@ -5,39 +5,53 @@
  * 2.0.
  */
 
-import type { IDataStreamClient } from '@kbn/core-data-streams-server';
-import { esql } from '@elastic/esql';
+import { esql, type ComposerQuery, type ComposerSortShorthand } from '@elastic/esql';
 import type { ESQLAstExpression } from '@elastic/esql/types';
 import type { ElasticsearchClient } from '@kbn/core/server';
+import type { AlertEventsClientApi, CreateSignalEventData } from '@kbn/alerting-v2-plugin/server';
+import {
+  detectionFromSignalSource,
+  SIGNIFICANT_EVENTS_DETECTION_PROCESSED_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_SCANNED_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_SOURCE,
+  type Detection,
+  type DetectionSignalSource,
+} from '@kbn/significant-events-schema';
 import {
   type CommonSearchOptions,
   type PaginatedSearchOptions,
   type PaginatedResponse,
-  throwOnBulkCreateErrors,
 } from '../query_utils';
 import {
   andWhere,
-  runLatestSourceEsqlQuery,
-  runPaginatedLatestSourceEsqlQuery,
-  runFindByIdEsqlQuery,
-  runFindByIdsEsqlQuery,
-  runGetProcessedMarkerIds,
+  applyTimeRange,
+  esqlToObjects,
+  executeCountQuery,
+  executeEsqlQuery,
+  pickLatestPerGroup,
+  queryEsql,
+  withWhere,
 } from '../latest_source_query';
-import {
-  DETECTIONS_DATA_STREAM,
-  type Detection,
-  type StoredDetection,
-  type detectionsMappings,
-} from './data_stream';
-import { FIELD_DETECTION_ID, FIELD_RULE_UUID } from '../field_names';
+import { RULE_EVENTS_INDEX } from '../alerting/rule_events_metric_series';
 
-export type DetectionDataStreamClient = IDataStreamClient<
-  typeof detectionsMappings,
-  StoredDetection
->;
+/**
+ * A detection as the Detection workflow submits it. `change_point_type` is not narrowed to
+ * `CHANGE_POINT_TYPES`: Elasticsearch can also report `indeterminable`, which is persisted like
+ * any other non-stationary observation.
+ */
+export interface DetectionInput {
+  detection_id: string;
+  rule_uuid: string;
+  rule_name?: string;
+  source_id?: string;
+  change_point_type: string;
+  p_value: number;
+  severity_score?: number;
+  alert_index?: string;
+  workflow_execution_id?: string;
+}
 
-// _source holds all stored fields; `processed` is derived at query time, not stored.
-// Using Omit<Detection, 'processed'> avoids the string | string[] widening from GetFieldsOf.
+// `processed` is derived at query time from processed markers, never stored.
 type RawDetection = Omit<Detection, 'processed'>;
 
 export interface DetectionsSearchOptions extends CommonSearchOptions {
@@ -62,82 +76,199 @@ const ESQL_MAX_ROWS = 10_000;
 // rule doesn't produce an unbounded scroll.
 const DETECTION_HISTORY_LIMIT = 20;
 
-// Detections carry `change_point_type`; processed markers carry `processed_by` instead.
-// Every detection read filters on this so marker docs never surface as detections.
-const detectionFilter = (): ESQLAstExpression =>
-  esql.exp`${esql.col('change_point_type')} IS NOT NULL`;
+const DEFAULT_PAGE = 1;
+const DEFAULT_PER_PAGE = 25;
 
+// `rule.id` is the rule UUID of a detection and of a scan marker; processed markers carry none.
+const ruleIdColumn = () => esql.col(['rule', 'id']);
+
+const dataField = (key: string): ESQLAstExpression =>
+  esql.exp`FIELD_EXTRACT(${esql.col('data')}, ${esql.str(key)})`;
+
+/** The detection pipeline's signals of one kind in one space of `.rule-events`. */
+const fromSignals = (space: string, source: string): ComposerQuery =>
+  esql.from([RULE_EVENTS_INDEX], ['_id', '_source']).where`${esql.col('space_id')} == ${esql.str(
+    space
+  )} AND ${esql.col('type')} == ${esql.str('signal')} AND ${esql.col('source')} == ${esql.str(
+    source
+  )}`;
+
+const detectionIdIn = (detectionIds: string[]): ESQLAstExpression =>
+  esql.exp`${dataField('detection_id')} IN (${detectionIds.map((id) => esql.str(id))})`;
+
+const ruleIdIn = (ruleUuids: string[]): ESQLAstExpression =>
+  esql.exp`${ruleIdColumn()} IN (${ruleUuids.map((id) => esql.str(id))})`;
+
+const toDetectionData = ({
+  rule_uuid: _ruleUuid,
+  ...data
+}: DetectionInput): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
+
+/**
+ * Reads and writes change-point detections, stored as Alerting v2 `type: signal` events in
+ * `.rule-events`. A detection is appended to the series of the rule it was observed on (`rule.id`),
+ * with its payload under `data`. Processed and scan markers are signals with their own sources, so
+ * every read selects one kind by `source`.
+ */
 export class DetectionClient {
   constructor(
     private readonly clients: {
-      dataStreamClient: Pick<DetectionDataStreamClient, 'create'>;
+      getAlertEventsClient: () => Promise<Pick<AlertEventsClientApi, 'createSignalEvents'>>;
       esClient: ElasticsearchClient;
       space: string;
     }
   ) {}
 
   // Detection reads group the latest revision per rule (rule_uuid), not per detection id —
-  // detection_id is now unique-per-detection, so grouping by it would never collapse.
-  private buildWhere(options: DetectionsSearchOptions): ESQLAstExpression {
-    let where: ESQLAstExpression = detectionFilter();
-
-    const ruleUuidLiterals = options.rule_uuid?.map((ruleUuid) => esql.str(ruleUuid));
-    if (ruleUuidLiterals?.length) {
-      where = andWhere(where, esql.exp`${esql.col('rule_uuid')} IN (${ruleUuidLiterals})`);
+  // detection_id is unique-per-detection, so grouping by it would never collapse.
+  private buildWhere(options: DetectionsSearchOptions): ESQLAstExpression | undefined {
+    let where: ESQLAstExpression | undefined;
+    if (options.rule_uuid?.length) {
+      where = ruleIdIn(options.rule_uuid);
     }
-
     if (options.rule_name) {
-      where = andWhere(where, esql.exp`${esql.col('rule_name')} == ${esql.str(options.rule_name)}`);
+      where = andWhere(
+        where,
+        esql.exp`${dataField('rule_name')} == ${esql.str(options.rule_name)}`
+      );
     }
-
     return where;
+  }
+
+  private buildLatestQuery(options: DetectionsSearchOptions): ComposerQuery {
+    const query = applyTimeRange({
+      query: fromSignals(this.clients.space, SIGNIFICANT_EVENTS_DETECTION_SOURCE),
+      from: options.from,
+      to: options.to,
+    });
+    const ofRules = withWhere(query, this.buildWhere(options))
+      .pipe`EVAL rule_uuid = ${ruleIdColumn()}`;
+    return pickLatestPerGroup(ofRules, 'rule_uuid');
+  }
+
+  private async readDetections(query: ComposerQuery): Promise<RawDetection[]> {
+    const sources = await executeEsqlQuery<DetectionSignalSource>({
+      esClient: this.clients.esClient,
+      query: query.keep('_source'),
+    });
+    return sources.map(detectionFromSignalSource);
+  }
+
+  /** Detections matching `where`, oldest first unless `limit` asks for the most recent N. */
+  private async findDetections({
+    where,
+    limit,
+    latestFirst = false,
+  }: {
+    where?: ESQLAstExpression;
+    limit?: number;
+    latestFirst?: boolean;
+  }): Promise<RawDetection[]> {
+    let query = withWhere(
+      fromSignals(this.clients.space, SIGNIFICANT_EVENTS_DETECTION_SOURCE),
+      where
+    ).sort(['@timestamp', latestFirst ? 'DESC' : 'ASC']);
+    if (limit !== undefined) {
+      query = query.limit(limit);
+    }
+    const hits = await this.readDetections(query);
+    return latestFirst ? hits.reverse() : hits;
   }
 
   // `processed` is derived: a detection is processed iff a marker references its exact id.
   private async getProcessedIds(detectionIds: string[]): Promise<Set<string>> {
-    return runGetProcessedMarkerIds({
-      esClient: this.clients.esClient,
-      space: this.clients.space,
-      index: DETECTIONS_DATA_STREAM,
-      idField: FIELD_DETECTION_ID,
-      idValues: detectionIds,
-      chunkSize: PROCESSED_MARKER_CHUNK_SIZE,
-    });
+    const processed = new Set<string>();
+    for (let i = 0; i < detectionIds.length; i += PROCESSED_MARKER_CHUNK_SIZE) {
+      const batch = detectionIds.slice(i, i + PROCESSED_MARKER_CHUNK_SIZE);
+      const query = fromSignals(this.clients.space, SIGNIFICANT_EVENTS_DETECTION_PROCESSED_SOURCE)
+        .pipe`EVAL detection_id = ${dataField('detection_id')}`.where`${detectionIdIn(batch)}`
+        .pipe`STATS marker_count = COUNT(*) BY detection_id`.keep('detection_id');
+      const rows = esqlToObjects<{ detection_id?: string }>(
+        await queryEsql({ esClient: this.clients.esClient, query })
+      );
+      for (const { detection_id: id } of rows) {
+        if (id) processed.add(id);
+      }
+    }
+    return processed;
   }
 
-  /** Appends detections and markers through the Core data stream client, which writes as `kibana_system`. */
-  async bulkCreate(documents: StoredDetection[]): Promise<void> {
-    if (documents.length === 0) {
+  private async writeSignals(events: CreateSignalEventData[]): Promise<void> {
+    if (events.length === 0) {
       return;
     }
-    const response = await this.clients.dataStreamClient.create({
-      space: this.clients.space,
-      documents,
-    });
-    throwOnBulkCreateErrors(response);
+    const alertEventsClient = await this.clients.getAlertEventsClient();
+    await alertEventsClient.createSignalEvents(events);
+  }
+
+  /** Appends detections to the series of the rule each one was observed on. */
+  async createDetections({
+    detections,
+    timestamp,
+  }: {
+    detections: DetectionInput[];
+    timestamp: string;
+  }): Promise<void> {
+    await this.writeSignals(
+      detections.map((detection) => ({
+        source: SIGNIFICANT_EVENTS_DETECTION_SOURCE,
+        rule_id: detection.rule_uuid,
+        timestamp,
+        data: toDetectionData(detection),
+      }))
+    );
+  }
+
+  /** Records that detections were processed, which sets their derived `processed` flag. */
+  async markProcessed({
+    detectionIds,
+    processedBy,
+    timestamp,
+  }: {
+    detectionIds: string[];
+    processedBy: string;
+    timestamp: string;
+  }): Promise<void> {
+    await this.writeSignals(
+      detectionIds.map((detectionId) => ({
+        source: SIGNIFICANT_EVENTS_DETECTION_PROCESSED_SOURCE,
+        fingerprint: detectionId,
+        timestamp,
+        data: { detection_id: detectionId, processed_by: processedBy },
+      }))
+    );
+  }
+
+  /** Records that rules were scanned without a new detection, for scan scheduling. */
+  async markScanned({
+    ruleUuids,
+    scannedBy,
+    timestamp,
+  }: {
+    ruleUuids: string[];
+    scannedBy: string;
+    timestamp: string;
+  }): Promise<void> {
+    await this.writeSignals(
+      ruleUuids.map((ruleUuid) => ({
+        source: SIGNIFICANT_EVENTS_DETECTION_SCANNED_SOURCE,
+        rule_id: ruleUuid,
+        timestamp,
+        data: { scanned_by: scannedBy },
+      }))
+    );
   }
 
   async findById(detectionId: string): Promise<{ hits: Detection[] }> {
-    const { hits } = await runFindByIdEsqlQuery<RawDetection>({
-      esClient: this.clients.esClient,
-      space: this.clients.space,
-      index: DETECTIONS_DATA_STREAM,
-      idField: FIELD_DETECTION_ID,
-      idValue: detectionId,
-      where: detectionFilter(),
-    });
-    return { hits: await this.withDerivedProcessed(hits) };
+    return this.findByIds([detectionId]);
   }
 
   async findByIds(detectionIds: string[]): Promise<{ hits: Detection[] }> {
-    const { hits } = await runFindByIdsEsqlQuery<RawDetection>({
-      esClient: this.clients.esClient,
-      space: this.clients.space,
-      index: DETECTIONS_DATA_STREAM,
-      idField: FIELD_DETECTION_ID,
-      idValues: detectionIds,
-      where: detectionFilter(),
-    });
+    if (detectionIds.length === 0) {
+      return { hits: [] };
+    }
+    const hits = await this.findDetections({ where: detectionIdIn(detectionIds) });
     return { hits: await this.withDerivedProcessed(hits) };
   }
 
@@ -145,45 +276,42 @@ export class DetectionClient {
   // rule_uuid (not detection_id) because detection_id is unique per detection — the list
   // collapses to the latest per rule, and the flyout expands the full history here.
   async findHistoryByRuleUuid(ruleUuid: string): Promise<{ hits: Detection[] }> {
-    const { hits } = await runFindByIdEsqlQuery<RawDetection>({
-      esClient: this.clients.esClient,
-      space: this.clients.space,
-      index: DETECTIONS_DATA_STREAM,
-      idField: FIELD_RULE_UUID,
-      idValue: ruleUuid,
-      where: detectionFilter(),
+    const hits = await this.findDetections({
+      where: ruleIdIn([ruleUuid]),
       // Most recent N transitions, returned chronologically (oldest→newest of that window).
       limit: DETECTION_HISTORY_LIMIT,
+      latestFirst: true,
     });
     return { hits: await this.withDerivedProcessed(hits) };
   }
 
   async findLatest(options: DetectionsSearchOptions = {}): Promise<{ hits: Detection[] }> {
-    const result = await runLatestSourceEsqlQuery<RawDetection>({
-      esClient: this.clients.esClient,
-      space: this.clients.space,
-      options,
-      index: DETECTIONS_DATA_STREAM,
-      where: this.buildWhere(options),
-      groupBy: FIELD_RULE_UUID,
-    });
-    return { hits: await this.withDerivedProcessed(result.hits) };
+    const hits = await this.readDetections(this.buildLatestQuery(options));
+    return { hits: await this.withDerivedProcessed(hits) };
   }
 
   async findLatestPaginated(
     options: DetectionsPaginatedSearchOptions = {}
   ): Promise<PaginatedResponse<Detection>> {
-    const result = await runPaginatedLatestSourceEsqlQuery<RawDetection>({
-      esClient: this.clients.esClient,
-      space: this.clients.space,
-      options,
-      index: DETECTIONS_DATA_STREAM,
-      where: this.buildWhere(options),
-      groupBy: FIELD_RULE_UUID,
-      sort: [['@timestamp', 'DESC']],
-    });
+    const page = options.page ?? DEFAULT_PAGE;
+    const perPage = options.perPage ?? DEFAULT_PER_PAGE;
+    const sort: ComposerSortShorthand = ['@timestamp', 'DESC'];
 
-    return { ...result, hits: await this.withDerivedProcessed(result.hits) };
+    const [total, hits] = await Promise.all([
+      executeCountQuery({
+        esClient: this.clients.esClient,
+        query: this.buildLatestQuery(options).pipe`STATS total = COUNT(*)`.keep('total'),
+      }),
+      this.readDetections(
+        this.buildLatestQuery(options)
+          .sort(sort)
+          .limit(page * perPage)
+      ),
+    ]);
+
+    const start = (page - 1) * perPage;
+    const pageHits = start >= hits.length ? [] : hits.slice(start, start + perPage);
+    return { hits: await this.withDerivedProcessed(pageHits), page, perPage, total };
   }
 
   /**
@@ -193,8 +321,7 @@ export class DetectionClient {
    * unprocessed detections, and discovery falls back to the next one when the newest is processed,
    * so the whole history of each rule is marked, not only its latest detection.
    *
-   * `source_id` is stored but not mapped, so it cannot be filtered in the query: the latest
-   * detection of every rule is read to find the source's rules, then their histories are read.
+   * The latest detection of every rule is read to find the source's rules, then their histories.
    */
   async markSourceDetectionsProcessed({
     sourceId,
@@ -232,13 +359,11 @@ export class DetectionClient {
 
     const timestamp = new Date().toISOString();
     for (let start = 0; start < detectionIds.length; start += SOURCE_SWEEP_PAGE_SIZE) {
-      await this.bulkCreate(
-        detectionIds.slice(start, start + SOURCE_SWEEP_PAGE_SIZE).map((detectionId) => ({
-          '@timestamp': timestamp,
-          detection_id: detectionId,
-          processed_by: processedBy,
-        }))
-      );
+      await this.markProcessed({
+        detectionIds: detectionIds.slice(start, start + SOURCE_SWEEP_PAGE_SIZE),
+        processedBy,
+        timestamp,
+      });
     }
     return detectionIds.length;
   }
@@ -263,17 +388,12 @@ export class DetectionClient {
     const seen = new Set<string>();
     let after: string | undefined;
     for (;;) {
-      const { hits } = await runFindByIdsEsqlQuery<RawDetection>({
-        esClient: this.clients.esClient,
-        space: this.clients.space,
-        index: DETECTIONS_DATA_STREAM,
-        idField: FIELD_RULE_UUID,
-        idValues: [ruleUuid],
+      const hits = await this.findDetections({
         where:
           after === undefined
-            ? detectionFilter()
+            ? ruleIdIn([ruleUuid])
             : andWhere(
-                detectionFilter(),
+                ruleIdIn([ruleUuid]),
                 esql.exp`${esql.col('@timestamp')} >= TO_DATETIME(${esql.str(after)})`
               ),
         limit: pageSize,

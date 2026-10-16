@@ -11,6 +11,7 @@ import {
   makeService,
   makeV2RulesClient,
   requestInSpace,
+  spaceOfResetQuery,
 } from './maintenance_service.test_helpers';
 
 function setupSpaces() {
@@ -93,7 +94,7 @@ describe('maintenance across spaces', () => {
       esClient.deleteByQuery.mock.invocationCallOrder[0]
     );
     for (const [params] of esClient.deleteByQuery.mock.calls) {
-      expect(params.query).toEqual({ term: { 'kibana.space_ids': 'b' } });
+      expect(spaceOfResetQuery(params.query)).toBe('b');
     }
     expect(spaceDocuments.get('a')?.get('.significant_events-knowledge_indicators')).toBe(1);
     expect(spaceDocuments.get('b')?.get('.significant_events-knowledge_indicators')).toBe(0);

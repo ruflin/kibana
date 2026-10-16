@@ -90,8 +90,7 @@ import {
   createSignificantEventsClients,
   createSignificantEventsServices,
 } from './lib/significant_events/significant_events_clients';
-import { detectionsDataStream } from './lib/significant_events/detections';
-import { deleteLegacyEventsDataStream } from './lib/significant_events/events';
+import { deleteLegacyDataStreams } from './lib/significant_events/delete_legacy_data_streams';
 import { registerStreamsAgentBuilder } from './agent_builder/register';
 import { registerSignificantEventsSkills } from './agent_builder/skills/register_skills';
 import { registerAgentBuilderSmlTypes } from './agent_builder/sml/register_sml_types';
@@ -191,7 +190,6 @@ export class SignificantEventsPlugin
       });
     });
 
-    core.dataStreams.registerDataStream(detectionsDataStream);
     core.dataStreams.registerDataStream(knowledgeIndicatorsDataStream);
 
     this.ebtTelemetryService.setup(core.analytics);
@@ -246,7 +244,6 @@ export class SignificantEventsPlugin
 
       const significantEventsClients = createSignificantEventsClients({
         services: significantEventsServices,
-        dataStreams: coreStart.dataStreams,
         esClient: scopedClusterClient.asCurrentUser,
         space,
         getAlertEventsClient,
@@ -602,9 +599,9 @@ export class SignificantEventsPlugin
 
       this.server.relayClient = plugins.actions.getRelayClient();
 
-      // Significant Events history moved to `.rule-events`; remove the retired stream without
-      // backfilling its history into the shared Alerting v2 stream.
-      void deleteLegacyEventsDataStream({
+      // Significant Events history and detections moved to `.rule-events`; remove the retired
+      // streams without backfilling their history into the shared Alerting v2 stream.
+      void deleteLegacyDataStreams({
         esClient: core.elasticsearch.client.asInternalUser,
         logger: this.logger,
       });

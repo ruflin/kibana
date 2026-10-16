@@ -53,6 +53,7 @@ export type {
   ActionPolicyClientApi,
   AlertEventsClientApi,
 } from './types';
+export type { CreateSignalEventData } from './lib/alert_events_client';
 export type { ArtifactTypeDefinition, ArtifactReferenceDescriptor } from './lib/artifact_types';
 export type { FindRulesArgs } from './lib/rules_client';
 export type { FindActionPoliciesArgs } from './lib/action_policy_client';

@@ -5,8 +5,7 @@
  * 2.0.
  */
 
-export { DETECTIONS_DATA_STREAM, detectionsDataStream, detectionsMappings } from './data_stream';
-export type { Detection, StoredDetection } from './data_stream';
+export type { Detection } from '@kbn/significant-events-schema';
 export { DetectionClient } from './detection_client';
-export type { DetectionDataStreamClient } from './detection_client';
+export type { DetectionInput } from './detection_client';
 export { DetectionService } from './detection_service';

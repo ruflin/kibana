@@ -5,8 +5,6 @@
  * 2.0.
  */
 
-import type { BulkResponse } from '@elastic/elasticsearch/lib/api/types';
-import { elasticsearchServiceMock } from '@kbn/core/server/mocks';
 import type { ESQLSearchResponse } from '@kbn/es-types';
 import type { Detection } from '@kbn/significant-events-schema';
 import { DetectionClient } from './detection_client';
@@ -16,14 +14,18 @@ type StoredDetection = Partial<Omit<Detection, 'processed'>> & {
   detection_id: string;
 };
 
-// A stored detection as it comes back from the `_source` read (no derived `processed`).
-const createDetection = (overrides: StoredDetection): Omit<Detection, 'processed'> =>
-  ({
-    rule_uuid: overrides.rule_uuid ?? 'rule-1',
-    rule_name: overrides.rule_name ?? 'Rule 1',
-    change_point_type: overrides.change_point_type ?? 'spike',
-    ...overrides,
-  } as Omit<Detection, 'processed'>);
+// A detection signal as it comes back from the `_source` read of `.rule-events`.
+const createDetection = ({
+  '@timestamp': timestamp,
+  rule_uuid: ruleUuid = 'rule-1',
+  ...data
+}: StoredDetection): Record<string, unknown> => ({
+  '@timestamp': timestamp,
+  rule: { id: ruleUuid },
+  type: 'signal',
+  source: 'elastic.significant_events.detection',
+  data: { rule_name: 'Rule 1', change_point_type: 'spike', ...data },
+});
 
 const sourceResponse = (docs: Array<Record<string, unknown>>): ESQLSearchResponse =>
   ({
@@ -44,6 +46,8 @@ const markerResponse = (ids: string[]): ESQLSearchResponse =>
     values: ids.map((id) => [id]),
   } as unknown as ESQLSearchResponse);
 
+const isMarkerQuery = (query: string) => query.includes('detection_processed');
+
 interface MockResponses {
   // Detections returned by the latest/find data query (already collapsed by groupBy).
   detections: Array<Record<string, unknown>>;
@@ -57,31 +61,31 @@ const createClient = (responses: MockResponses) => {
     if (q.includes('STATS total')) {
       return countResponse(responses.detections.length);
     }
-    // Membership semijoin filters on `processed_by`.
-    if (q.includes('processed_by')) {
+    if (isMarkerQuery(q)) {
       return markerResponse(responses.processedIds);
     }
     return sourceResponse(responses.detections);
   });
+  const createSignalEvents = jest.fn().mockResolvedValue({ count: 0 });
 
-  const esClient = { esql: { query } } as never;
+  const client = new DetectionClient({
+    getAlertEventsClient: jest.fn().mockResolvedValue({ createSignalEvents }),
+    esClient: { esql: { query } } as never,
+    space: 'default',
+  });
 
-  return {
-    client: new DetectionClient({
-      dataStreamClient: {} as never,
-      esClient,
-      space: 'default',
-    }),
-    query,
-  };
+  return { client, query, createSignalEvents };
 };
 
 const queriesFrom = (query: jest.Mock): string[] =>
   query.mock.calls.map((c) => (c[0] as { query: string }).query);
 
+const dataQueryFrom = (query: jest.Mock): string | undefined =>
+  queriesFrom(query).find((q) => !q.includes('STATS total') && !isMarkerQuery(q));
+
 describe('DetectionClient', () => {
   describe('findLatest', () => {
-    it('filters detections by change_point_type IS NOT NULL (excludes marker docs)', async () => {
+    it('reads only detection signals of the space from .rule-events', async () => {
       const { client, query } = createClient({
         detections: [
           createDetection({ '@timestamp': '2026-01-02T00:00:00.000Z', detection_id: 'f-1' }),
@@ -91,13 +95,14 @@ describe('DetectionClient', () => {
 
       await client.findLatest();
 
-      const dataQuery = queriesFrom(query).find(
-        (q) => !q.includes('STATS total') && !q.includes('processed_by')
+      const dataQuery = dataQueryFrom(query);
+      expect(dataQuery).toContain('FROM .rule-events');
+      expect(dataQuery).toContain(
+        'space_id == "default" AND type == "signal" AND source == "elastic.significant_events.detection"'
       );
-      expect(dataQuery).toContain('change_point_type IS NOT NULL');
     });
 
-    it('groups by rule_uuid, not detection_id', async () => {
+    it('groups by the rule (rule.id), not detection_id', async () => {
       const { client, query } = createClient({
         detections: [
           createDetection({ '@timestamp': '2026-01-02T00:00:00.000Z', detection_id: 'f-1' }),
@@ -107,15 +112,54 @@ describe('DetectionClient', () => {
 
       await client.findLatest();
 
-      const dataQuery = queriesFrom(query).find(
-        (q) => !q.includes('STATS total') && !q.includes('processed_by')
-      );
-      expect(dataQuery).toContain('rule_uuid');
+      const dataQuery = dataQueryFrom(query);
+      expect(dataQuery).toContain('EVAL rule_uuid = rule.id');
+      expect(dataQuery).toContain('BY rule_uuid');
       expect(dataQuery).not.toContain('BY detection_id');
     });
 
-    it('derives processed=true only for detections whose id has a marker', async () => {
+    it('filters by rule and by the rule name stored in data', async () => {
+      const { client, query } = createClient({ detections: [], processedIds: [] });
+
+      await client.findLatest({ rule_uuid: ['rule-1', 'rule-2'], rule_name: 'Rule 1' });
+
+      const dataQuery = dataQueryFrom(query);
+      expect(dataQuery).toContain('rule.id IN ("rule-1", "rule-2")');
+      expect(dataQuery).toContain('FIELD_EXTRACT(data, "rule_name") == "Rule 1"');
+    });
+
+    it('flattens the signal back into a detection with rule_uuid from rule.id', async () => {
       const { client } = createClient({
+        detections: [
+          createDetection({
+            '@timestamp': '2026-01-02T00:00:00.000Z',
+            detection_id: 'f-1',
+            rule_uuid: 'rule-7',
+            source_id: 'source-1',
+            p_value: 0.0001,
+          }),
+        ],
+        processedIds: [],
+      });
+
+      const { hits } = await client.findLatest();
+
+      expect(hits).toEqual([
+        {
+          '@timestamp': '2026-01-02T00:00:00.000Z',
+          detection_id: 'f-1',
+          rule_uuid: 'rule-7',
+          rule_name: 'Rule 1',
+          source_id: 'source-1',
+          change_point_type: 'spike',
+          p_value: 0.0001,
+          processed: false,
+        },
+      ]);
+    });
+
+    it('derives processed=true only for detections whose id has a marker', async () => {
+      const { client, query } = createClient({
         detections: [
           createDetection({
             '@timestamp': '2026-01-02T00:00:00.000Z',
@@ -136,6 +180,10 @@ describe('DetectionClient', () => {
       const byId = new Map(result.hits.map((h) => [h.detection_id, h.processed]));
       expect(byId.get('f-1')).toBe(true);
       expect(byId.get('f-2')).toBe(false);
+
+      const markerQuery = queriesFrom(query).find(isMarkerQuery);
+      expect(markerQuery).toContain('source == "elastic.significant_events.detection_processed"');
+      expect(markerQuery).toContain('FIELD_EXTRACT(data, "detection_id") IN ("f-1", "f-2")');
     });
 
     it('returns a rule whose latest detection is a stationary (settlement) detection', async () => {
@@ -159,8 +207,46 @@ describe('DetectionClient', () => {
     });
   });
 
+  describe('findLatestPaginated', () => {
+    it('returns the requested page and the total of rules', async () => {
+      const { client } = createClient({
+        detections: [
+          createDetection({ '@timestamp': '2026-01-03T00:00:00.000Z', detection_id: 'f-3' }),
+          createDetection({ '@timestamp': '2026-01-02T00:00:00.000Z', detection_id: 'f-2' }),
+          createDetection({ '@timestamp': '2026-01-01T00:00:00.000Z', detection_id: 'f-1' }),
+        ],
+        processedIds: [],
+      });
+
+      const result = await client.findLatestPaginated({ page: 2, perPage: 2 });
+
+      expect(result).toMatchObject({ page: 2, perPage: 2, total: 3 });
+      expect(result.hits.map((h) => h.detection_id)).toEqual(['f-1']);
+    });
+  });
+
+  describe('findHistoryByRuleUuid', () => {
+    it('reads the most recent detections of the rule and returns them oldest first', async () => {
+      const { client, query } = createClient({
+        detections: [
+          createDetection({ '@timestamp': '2026-01-02T00:00:00.000Z', detection_id: 'f-2' }),
+          createDetection({ '@timestamp': '2026-01-01T00:00:00.000Z', detection_id: 'f-1' }),
+        ],
+        processedIds: [],
+      });
+
+      const { hits } = await client.findHistoryByRuleUuid('rule-1');
+
+      expect(hits.map((h) => h.detection_id)).toEqual(['f-1', 'f-2']);
+      const dataQuery = dataQueryFrom(query);
+      expect(dataQuery).toContain('rule.id IN ("rule-1")');
+      expect(dataQuery).toContain('SORT @timestamp DESC');
+      expect(dataQuery).toContain('LIMIT 20');
+    });
+  });
+
   describe('findById', () => {
-    it('filters out marker docs via change_point_type IS NOT NULL', async () => {
+    it('looks the detection up by the id stored in data', async () => {
       const { client, query } = createClient({
         detections: [
           createDetection({ '@timestamp': '2026-01-02T00:00:00.000Z', detection_id: 'f-1' }),
@@ -170,8 +256,9 @@ describe('DetectionClient', () => {
 
       await client.findById('f-1');
 
-      const dataQuery = queriesFrom(query).find((q) => !q.includes('processed_by'));
-      expect(dataQuery).toContain('change_point_type IS NOT NULL');
+      const dataQuery = dataQueryFrom(query);
+      expect(dataQuery).toContain('FIELD_EXTRACT(data, "detection_id") IN ("f-1")');
+      expect(dataQuery).toContain('source == "elastic.significant_events.detection"');
     });
 
     it('derives processed from marker membership', async () => {
@@ -188,49 +275,121 @@ describe('DetectionClient', () => {
       expect(result.hits[0].processed).toBe(true);
     });
   });
+
+  describe('findByIds', () => {
+    it('does not query for an empty id list', async () => {
+      const { client, query } = createClient({ detections: [], processedIds: [] });
+
+      await expect(client.findByIds([])).resolves.toEqual({ hits: [] });
+      expect(query).not.toHaveBeenCalled();
+    });
+  });
 });
 
-describe('DetectionClient.bulkCreate', () => {
-  const createWriteClient = (items: BulkResponse['items']) => {
-    const create = jest.fn(
-      async (): Promise<BulkResponse> => ({ errors: items.length > 0, items, took: 1 })
-    );
-    const client = new DetectionClient({
-      dataStreamClient: { create },
-      esClient: elasticsearchServiceMock.createElasticsearchClient(),
-      space: 'space-a',
+describe('DetectionClient writes', () => {
+  const timestamp = '2026-01-01T00:00:00.000Z';
+
+  it('appends detections to the series of their rule with the payload under data', async () => {
+    const { client, createSignalEvents } = createClient({ detections: [], processedIds: [] });
+
+    await client.createDetections({
+      detections: [
+        {
+          detection_id: 'rule-1-exec-1',
+          rule_uuid: 'rule-1',
+          rule_name: 'Rule 1',
+          source_id: 'source-1',
+          change_point_type: 'spike',
+          p_value: 0.001,
+          severity_score: 70,
+          alert_index: '.rule-events',
+          workflow_execution_id: 'exec-1',
+        },
+      ],
+      timestamp,
     });
-    return { client, create };
-  };
 
-  it('writes every document in the client space through the data stream client', async () => {
-    const { client, create } = createWriteClient([]);
-    const documents = [
-      { '@timestamp': '2026-01-01T00:00:00.000Z', rule_uuid: 'rule-1', scanned_by: 'exec-1' },
-      { '@timestamp': '2026-01-01T00:00:00.000Z', detection_id: 'd-1', processed_by: 'exec-1' },
-    ];
-
-    await client.bulkCreate(documents);
-
-    expect(create).toHaveBeenCalledWith({ space: 'space-a', documents });
-  });
-
-  it('skips the request when there is nothing to write', async () => {
-    const { client, create } = createWriteClient([]);
-
-    await client.bulkCreate([]);
-
-    expect(create).not.toHaveBeenCalled();
-  });
-
-  it('throws when Elasticsearch rejects a document', async () => {
-    const { client } = createWriteClient([
-      { create: { _index: '.significant_events-detections', status: 403, error: { type: 'x' } } },
+    expect(createSignalEvents).toHaveBeenCalledWith([
+      {
+        source: 'elastic.significant_events.detection',
+        rule_id: 'rule-1',
+        timestamp,
+        data: {
+          detection_id: 'rule-1-exec-1',
+          rule_name: 'Rule 1',
+          source_id: 'source-1',
+          change_point_type: 'spike',
+          p_value: 0.001,
+          severity_score: 70,
+          alert_index: '.rule-events',
+          workflow_execution_id: 'exec-1',
+        },
+      },
     ]);
+  });
+
+  it('drops absent optional fields from the payload', async () => {
+    const { client, createSignalEvents } = createClient({ detections: [], processedIds: [] });
+
+    await client.createDetections({
+      detections: [
+        { detection_id: 'd-1', rule_uuid: 'rule-1', change_point_type: 'dip', p_value: 0.01 },
+      ],
+      timestamp,
+    });
+
+    expect(createSignalEvents.mock.calls[0][0][0].data).toEqual({
+      detection_id: 'd-1',
+      change_point_type: 'dip',
+      p_value: 0.01,
+    });
+  });
+
+  it('writes processed markers keyed on the detection, without a rule', async () => {
+    const { client, createSignalEvents } = createClient({ detections: [], processedIds: [] });
+
+    await client.markProcessed({ detectionIds: ['d-1'], processedBy: 'exec-1', timestamp });
+
+    expect(createSignalEvents).toHaveBeenCalledWith([
+      {
+        source: 'elastic.significant_events.detection_processed',
+        fingerprint: 'd-1',
+        timestamp,
+        data: { detection_id: 'd-1', processed_by: 'exec-1' },
+      },
+    ]);
+  });
+
+  it('writes scan markers on the series of the scanned rule', async () => {
+    const { client, createSignalEvents } = createClient({ detections: [], processedIds: [] });
+
+    await client.markScanned({ ruleUuids: ['rule-1'], scannedBy: 'exec-1', timestamp });
+
+    expect(createSignalEvents).toHaveBeenCalledWith([
+      {
+        source: 'elastic.significant_events.detection_scanned',
+        rule_id: 'rule-1',
+        timestamp,
+        data: { scanned_by: 'exec-1' },
+      },
+    ]);
+  });
+
+  it('skips the write when there is nothing to write', async () => {
+    const { client, createSignalEvents } = createClient({ detections: [], processedIds: [] });
+
+    await client.markProcessed({ detectionIds: [], processedBy: 'exec-1', timestamp });
+
+    expect(createSignalEvents).not.toHaveBeenCalled();
+  });
+
+  it('propagates a rejected write', async () => {
+    const { client, createSignalEvents } = createClient({ detections: [], processedIds: [] });
+    createSignalEvents.mockRejectedValue(new Error('Failed to persist 1 of 1 signal event(s)'));
 
     await expect(
-      client.bulkCreate([{ '@timestamp': '2026-01-01T00:00:00.000Z', rule_uuid: 'rule-1' }])
-    ).rejects.toThrow('Bulk create operation failed for 1 out of 1 items');
+      client.markScanned({ ruleUuids: ['rule-1'], scannedBy: 'exec-1', timestamp })
+    ).rejects.toThrow('Failed to persist 1 of 1 signal event(s)');
   });
 });
 
@@ -252,10 +411,10 @@ describe('DetectionClient.markSourceDetectionsProcessed', () => {
       if (request.query.includes('STATS total')) {
         return countResponse(detections.length);
       }
-      if (request.query.includes('processed_by')) {
+      if (isMarkerQuery(request.query)) {
         return markerResponse(processedIds);
       }
-      if (request.query.includes('rule_uuid IN')) {
+      if (request.query.includes('rule.id IN')) {
         const lowerBound = /TO_DATETIME\("([^"]+)"\)/.exec(request.query)?.[1];
         const page = lowerBound
           ? history.filter(({ '@timestamp': ts }) => String(ts) >= lowerBound)
@@ -264,19 +423,23 @@ describe('DetectionClient.markSourceDetectionsProcessed', () => {
       }
       return sourceResponse(detections);
     });
-    const create = jest.fn(
-      async (): Promise<BulkResponse> => ({ errors: false, items: [], took: 1 })
-    );
+    const createSignalEvents = jest.fn().mockResolvedValue({ count: 0 });
     const client = new DetectionClient({
-      dataStreamClient: { create },
+      getAlertEventsClient: jest.fn().mockResolvedValue({ createSignalEvents }),
       esClient: { esql: { query } } as never,
       space: 'default',
     });
-    return { client, create };
+    const markedIds = () =>
+      createSignalEvents.mock.calls.flatMap(([events]) =>
+        (events as Array<{ data: { detection_id: string; processed_by: string } }>).map(
+          ({ data }) => data
+        )
+      );
+    return { client, createSignalEvents, markedIds };
   };
 
   it('marks only the unprocessed detections of the deleted source', async () => {
-    const { client, create } = createSweepClient({
+    const { client, createSignalEvents, markedIds } = createSweepClient({
       detections: [
         createDetection({
           '@timestamp': '2026-01-01T00:00:00.000Z',
@@ -301,17 +464,12 @@ describe('DetectionClient.markSourceDetectionsProcessed', () => {
       client.markSourceDetectionsProcessed({ sourceId: 'gone', processedBy: 'source-deleted' })
     ).resolves.toBe(1);
 
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(create).toHaveBeenCalledWith({
-      space: 'default',
-      documents: [
-        expect.objectContaining({ detection_id: 'd-gone', processed_by: 'source-deleted' }),
-      ],
-    });
+    expect(createSignalEvents).toHaveBeenCalledTimes(1);
+    expect(markedIds()).toEqual([{ detection_id: 'd-gone', processed_by: 'source-deleted' }]);
   });
 
   it('writes nothing when the source has no unprocessed detections', async () => {
-    const { client, create } = createSweepClient({
+    const { client, createSignalEvents } = createSweepClient({
       detections: [
         createDetection({
           '@timestamp': '2026-01-01T00:00:00.000Z',
@@ -325,7 +483,7 @@ describe('DetectionClient.markSourceDetectionsProcessed', () => {
       client.markSourceDetectionsProcessed({ sourceId: 'gone', processedBy: 'source-deleted' })
     ).resolves.toBe(0);
 
-    expect(create).not.toHaveBeenCalled();
+    expect(createSignalEvents).not.toHaveBeenCalled();
   });
 
   it('marks the older unprocessed detections of a rule, not only its latest', async () => {
@@ -341,7 +499,7 @@ describe('DetectionClient.markSourceDetectionsProcessed', () => {
       rule_uuid: 'rule-1',
       source_id: 'gone',
     });
-    const { client, create } = createSweepClient({
+    const { client, markedIds } = createSweepClient({
       detections: [latest],
       history: [older, latest],
       processedIds: ['d-done'],
@@ -351,13 +509,10 @@ describe('DetectionClient.markSourceDetectionsProcessed', () => {
       client.markSourceDetectionsProcessed({ sourceId: 'gone', processedBy: 'source-deleted' })
     ).resolves.toBe(2);
 
-    expect(create).toHaveBeenCalledWith({
-      space: 'default',
-      documents: [
-        expect.objectContaining({ detection_id: 'd-old', processed_by: 'source-deleted' }),
-        expect.objectContaining({ detection_id: 'd-new', processed_by: 'source-deleted' }),
-      ],
-    });
+    expect(markedIds()).toEqual([
+      { detection_id: 'd-old', processed_by: 'source-deleted' },
+      { detection_id: 'd-new', processed_by: 'source-deleted' },
+    ]);
   });
 
   it('pages through a rule history longer than one read', async () => {
@@ -369,7 +524,7 @@ describe('DetectionClient.markSourceDetectionsProcessed', () => {
         source_id: 'gone',
       });
     const all = [make('d-1', 1), make('d-2', 2), make('d-3', 3), make('d-4', 4), make('d-5', 5)];
-    const { client, create } = createSweepClient({
+    const { client, markedIds } = createSweepClient({
       detections: [all[4]],
       history: all,
       // The first two are processed, the rest are the newer rows a single capped read would drop.
@@ -385,11 +540,8 @@ describe('DetectionClient.markSourceDetectionsProcessed', () => {
       })
     ).resolves.toBe(3);
 
-    expect(create).toHaveBeenCalledWith({
-      space: 'default',
-      documents: ['d-3', 'd-4', 'd-5'].map((id) =>
-        expect.objectContaining({ detection_id: id, processed_by: 'source-deleted' })
-      ),
-    });
+    expect(markedIds()).toEqual(
+      ['d-3', 'd-4', 'd-5'].map((id) => ({ detection_id: id, processed_by: 'source-deleted' }))
+    );
   });
 });

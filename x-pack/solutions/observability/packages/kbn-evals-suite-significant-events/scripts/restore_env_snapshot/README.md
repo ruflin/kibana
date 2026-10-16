@@ -15,7 +15,7 @@ Restores a Streams/Significant Events environment from a GCS snapshot. Automates
 Restoring a Significant Events snapshot involves several distinct steps that previously had to be run manually in sequence:
 
 1. **Enable streams** — calls the Kibana Streams API to ensure streams are enabled before replaying data.
-2. **Restore the Significant Events data streams** (`.significant_events-knowledge_indicators`, `.significant_events-discoveries`, `.significant_events-detections`) — each reindexed into its data stream so it is not left as a plain index squatting the data-stream name. No-op for any data stream absent from an older snapshot.
+2. **Restore the Significant Events data streams** (`.significant_events-knowledge_indicators`, `.significant_events-discoveries`) — each reindexed into its data stream so it is not left as a plain index squatting the data-stream name. No-op for any data stream absent from an older snapshot.
 3. **Replay** data indices (e.g. `logs.otel`) — restores with timestamp transformation so alerts fire on current data.
 4. **Recreate** alert-index aliases.
 5. **Repromote** query rules so the Streams rule engine reflects the restored state.

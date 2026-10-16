@@ -7,8 +7,10 @@
 
 export {
   detectionSchema,
+  detectionFromSignalSource,
   CHANGE_POINT_TYPES,
   type Detection,
+  type DetectionSignalSource,
   type ChangePointType,
 } from './detections';
 export {
@@ -59,6 +61,10 @@ export {
   SUMMARY_ROLE_RULE,
   SYMPTOM_HYPOTHESIS_ROLE_RULE,
   SIGNIFICANT_EVENTS_ALERT_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_PROCESSED_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_SCANNED_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES,
 } from './constants';
 export {
   type SignificantEventsTuningConfig,

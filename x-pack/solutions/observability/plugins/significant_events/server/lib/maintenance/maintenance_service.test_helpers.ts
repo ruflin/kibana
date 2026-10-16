@@ -22,7 +22,7 @@ import type { GetScopedClients } from '../../routes/types';
 import type { SignificantEventsServer } from '../../types';
 import type { KnowledgeIndicatorType } from '../knowledge_indicators';
 import { KNOWLEDGE_INDICATORS_DATA_STREAM } from '../knowledge_indicators/data_stream';
-import { DETECTIONS_DATA_STREAM } from '../significant_events/detections/data_stream';
+import { RULE_EVENTS_INDEX } from '../significant_events/alerting/rule_events_metric_series';
 import { createSignificantEventsMaintenanceService } from './maintenance_service';
 import { requestForSpace } from './feature_settings';
 import {
@@ -252,6 +252,17 @@ export function makeUiSettingsClient(
   };
 }
 
+/** The two shapes reset deletes by: owned streams by space tag, `.rule-events` by space and source. */
+export type ResetQuery =
+  | { term: { 'kibana.space_ids': string } }
+  | { bool: { filter: Array<{ term?: Record<string, string> }> } };
+
+/** The space a reset delete-by-query targets. */
+export const spaceOfResetQuery = (query: ResetQuery): string | undefined =>
+  'term' in query
+    ? query.term['kibana.space_ids']
+    : query.bool.filter.find(({ term }) => term?.space_id)?.term?.space_id;
+
 export function makeService(params?: {
   management?: ReturnType<typeof makeManagementApi>['api'];
   ruleBackedRuleIds?: string[];
@@ -324,7 +335,7 @@ export function makeService(params?: {
   const streamDocuments = new Map<string, number>(
     Object.entries(
       params?.dataStreams ?? {
-        [DETECTIONS_DATA_STREAM]: 0,
+        [RULE_EVENTS_INDEX]: 0,
         [KNOWLEDGE_INDICATORS_DATA_STREAM]: 0,
       }
     )
@@ -332,25 +343,17 @@ export function makeService(params?: {
   const spaceDocuments = new Map([['default', streamDocuments]]);
   // Physical deletion and caller-side creation are sentinels: reset must retain shared streams.
   const esClient = {
-    deleteByQuery: jest.fn(
-      async ({
-        index,
-        query,
-      }: {
-        index: string;
-        query: { term: { 'kibana.space_ids': string } };
-      }) => {
-        const documents = spaceDocuments.get(query.term['kibana.space_ids']);
-        const deleted = documents?.get(index) ?? 0;
-        documents?.set(index, 0);
-        return {
-          deleted,
-          failures: [] as Array<{ cause: { reason: string } }>,
-          version_conflicts: 0,
-          timed_out: false,
-        };
-      }
-    ),
+    deleteByQuery: jest.fn(async ({ index, query }: { index: string; query: ResetQuery }) => {
+      const documents = spaceDocuments.get(spaceOfResetQuery(query) ?? '');
+      const deleted = documents?.get(index) ?? 0;
+      documents?.set(index, 0);
+      return {
+        deleted,
+        failures: [] as Array<{ cause: { reason: string } }>,
+        version_conflicts: 0,
+        timed_out: false,
+      };
+    }),
     indices: {
       deleteDataStream: jest.fn(async ({ name }: { name: string }) => {
         streamDocuments.delete(name);
