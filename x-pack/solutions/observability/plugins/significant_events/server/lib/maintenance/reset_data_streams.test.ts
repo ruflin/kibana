@@ -5,11 +5,17 @@
  * 2.0.
  */
 
+import { SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES } from '@kbn/significant-events-schema';
 import type { SignificantEventsMaintenanceFailure } from '../../../common/maintenance/types';
 import { KNOWLEDGE_INDICATORS_DATA_STREAM } from '../knowledge_indicators/data_stream';
-import { DETECTIONS_DATA_STREAM } from '../significant_events/detections/data_stream';
+import { RULE_EVENTS_INDEX } from '../significant_events/alerting/rule_events_metric_series';
 import { DISCOVERIES_DATA_STREAM } from '../significant_events/discoveries_data_stream';
-import { REQUEST, makeService, makeManagementApi } from './maintenance_service.test_helpers';
+import {
+  REQUEST,
+  makeService,
+  makeManagementApi,
+  spaceOfResetQuery,
+} from './maintenance_service.test_helpers';
 import { prepareDataStreamsForReset, resetDataStreams } from './reset_data_streams';
 
 describe('space-scoped data stream reset', () => {
@@ -28,7 +34,7 @@ describe('space-scoped data stream reset', () => {
     fixture.esClient.deleteByQuery.mockImplementation(async ({ query }) => {
       const before = documents.length;
       for (let i = documents.length - 1; i >= 0; i--) {
-        if (documents[i].space === query.term['kibana.space_ids']) documents.splice(i, 1);
+        if (documents[i].space === spaceOfResetQuery(query)) documents.splice(i, 1);
       }
       return {
         deleted: before - documents.length,
@@ -88,11 +94,11 @@ describe('space-scoped data stream reset', () => {
     const summary = await service.reset({ request: REQUEST });
 
     expect(summary.partialFailures).toContainEqual({
-      target: `data-stream:${DETECTIONS_DATA_STREAM}:delete`,
+      target: `data-stream:${KNOWLEDGE_INDICATORS_DATA_STREAM}:delete`,
       error: 'delete denied',
     });
     expect(esClient.deleteByQuery).toHaveBeenCalledWith(
-      expect.objectContaining({ index: KNOWLEDGE_INDICATORS_DATA_STREAM })
+      expect.objectContaining({ index: RULE_EVENTS_INDEX })
     );
     expect(internalEsClient.deleteByQuery).not.toHaveBeenCalled();
   });
@@ -115,5 +121,58 @@ describe('space-scoped data stream reset', () => {
     });
     expect(esClient.deleteByQuery).not.toHaveBeenCalled();
     expect(failures).toEqual([]);
+  });
+
+  it('deletes only the space detection signals from .rule-events, never creating it', async () => {
+    const { esClient, internalEsClient, initializeClient } = makeService();
+    const failures: SignificantEventsMaintenanceFailure[] = [];
+    const prepared = await prepareDataStreamsForReset({
+      esClient: esClient as never,
+      internalEsClient: internalEsClient as never,
+      dataStreams: { initializeClient } as never,
+      failures,
+    });
+    expect(prepared.has(RULE_EVENTS_INDEX)).toBe(true);
+    expect(initializeClient).not.toHaveBeenCalledWith(RULE_EVENTS_INDEX);
+
+    await resetDataStreams({
+      esClient: esClient as never,
+      spaceId: REQUEST.spaceId,
+      preparedStreams: new Set([RULE_EVENTS_INDEX]),
+      failures,
+    });
+
+    expect(esClient.deleteByQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        index: RULE_EVENTS_INDEX,
+        query: {
+          bool: {
+            filter: [
+              { term: { space_id: REQUEST.spaceId } },
+              { term: { type: 'signal' } },
+              { terms: { source: [...SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES] } },
+            ],
+          },
+        },
+      })
+    );
+    expect(failures).toEqual([]);
+  });
+
+  it('skips a missing .rule-events without creating it', async () => {
+    const { esClient, internalEsClient, initializeClient } = makeService({ dataStreams: {} });
+    const failures: SignificantEventsMaintenanceFailure[] = [];
+
+    const prepared = await prepareDataStreamsForReset({
+      esClient: esClient as never,
+      internalEsClient: internalEsClient as never,
+      dataStreams: { initializeClient } as never,
+      failures,
+    });
+
+    expect(prepared.has(RULE_EVENTS_INDEX)).toBe(false);
+    expect(internalEsClient.indices.createDataStream).not.toHaveBeenCalledWith({
+      name: RULE_EVENTS_INDEX,
+    });
   });
 });

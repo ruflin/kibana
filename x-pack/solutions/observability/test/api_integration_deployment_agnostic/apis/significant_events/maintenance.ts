@@ -34,10 +34,10 @@ import {
 
 const RESET_STREAM_NAME = 'logs.otel.maintenance-reset-test';
 const ORPHAN_RULE_STREAM_NAME = 'logs.otel.maintenance-reset-orphan-rule';
-const REGISTERED_DATA_STREAMS = [
-  '.significant_events-detections',
-  '.significant_events-knowledge_indicators',
-] as const;
+const REGISTERED_DATA_STREAMS = ['.significant_events-knowledge_indicators'] as const;
+// Detections are signals in the shared Alerting v2 stream; reset deletes only this space's.
+const RULE_EVENTS_INDEX = '.rule-events';
+const DETECTION_SOURCE = 'elastic.significant_events.detection';
 const DISCOVERIES_DATA_STREAM = '.significant_events-discoveries';
 const DISCOVERIES_TEST_TEMPLATE = 'significant-events-maintenance-discoveries-test';
 const resetStream: Streams.WiredStream.UpsertRequest['stream'] = {
@@ -213,20 +213,40 @@ export default function ({ getService }: DeploymentAgnosticFtrProviderContext) {
         expect(seededRules.body.items).to.have.length(2);
 
         const timestamp = new Date().toISOString();
-        await esClient.create({
-          index: '.significant_events-detections',
-          id: 'maintenance-reset-detection',
-          refresh: 'wait_for',
-          document: {
-            '@timestamp': timestamp,
+        const detectionSignal = (spaceId: string, source: string) => ({
+          '@timestamp': timestamp,
+          type: 'signal',
+          source,
+          space_id: spaceId,
+          status: 'breached',
+          group_hash: 'maintenance-reset-rule',
+          rule: { id: 'maintenance-reset-rule' },
+          data: {
             detection_id: 'maintenance-reset-detection',
-            rule_uuid: 'maintenance-reset-rule',
             rule_name: 'Maintenance reset rule',
             source_id: resetSource.id,
             change_point_type: 'spike',
             p_value: 0.01,
-            'kibana.space_ids': ['default'],
           },
+        });
+        await esClient.create({
+          index: RULE_EVENTS_INDEX,
+          id: 'maintenance-reset-detection',
+          refresh: 'wait_for',
+          document: detectionSignal('default', DETECTION_SOURCE),
+        });
+        // Kept by reset: a detection of another space and a rule execution signal of this one.
+        await esClient.create({
+          index: RULE_EVENTS_INDEX,
+          id: sentinelIds[0],
+          refresh: 'wait_for',
+          document: detectionSignal(otherSpaceId, DETECTION_SOURCE),
+        });
+        await esClient.create({
+          index: RULE_EVENTS_INDEX,
+          id: sentinelIds[1],
+          refresh: 'wait_for',
+          document: detectionSignal('default', 'internal'),
         });
 
         await esClient.indices.deleteDataStream(
@@ -308,6 +328,29 @@ export default function ({ getService }: DeploymentAgnosticFtrProviderContext) {
           await esClient.indices.getDataStream({ name: REGISTERED_DATA_STREAMS.join(',') })
         ).to.eql(backingIndicesBefore);
         expect((await esClient.count({ index: DISCOVERIES_DATA_STREAM })).count).to.be(2);
+        expect(
+          (
+            await esClient.count({
+              index: RULE_EVENTS_INDEX,
+              query: {
+                bool: {
+                  filter: [
+                    { term: { space_id: 'default' } },
+                    { term: { source: DETECTION_SOURCE } },
+                  ],
+                },
+              },
+            })
+          ).count
+        ).to.be(0);
+        expect(
+          (
+            await esClient.count({
+              index: RULE_EVENTS_INDEX,
+              query: { ids: { values: sentinelIds } },
+            })
+          ).count
+        ).to.be(2);
         await supertest.get(`/internal/nightshift/sources/${resetSource.id}`).expect(200);
         expect(
           (await esClient.esql.query({ query: `FROM ${resetSource.viewName} | LIMIT 1` })).columns
@@ -340,7 +383,7 @@ export default function ({ getService }: DeploymentAgnosticFtrProviderContext) {
           expect(await dataStreamExists(esClient, dataStream)).to.be(true);
         }
       } finally {
-        for (const index of REGISTERED_DATA_STREAMS) {
+        for (const index of [...REGISTERED_DATA_STREAMS, RULE_EVENTS_INDEX]) {
           await esClient.deleteByQuery({
             index,
             query: { ids: { values: sentinelIds } },

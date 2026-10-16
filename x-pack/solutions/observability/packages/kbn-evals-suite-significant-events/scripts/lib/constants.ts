@@ -5,9 +5,12 @@
  * 2.0.
  */
 import type { IndicesUpdateAliasesAddAction } from '@elastic/elasticsearch/lib/api/types';
+import {
+  SIGNIFICANT_EVENTS_ALERT_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES,
+} from '@kbn/significant-events-schema';
 import type { Scenario } from './types';
 import {
-  DETECTIONS_DATA_STREAM,
   KNOWLEDGE_INDICATORS_DATA_STREAM,
   RULE_EVENTS_DATA_STREAM,
 } from '../../src/data_generators/snapshot_indices';
@@ -41,10 +44,7 @@ export const HEALTHY_BASELINE_SCENARIO: Scenario = { id: 'healthy-baseline' };
 
 // Streams that only exist when the user runs the full discovery workflow.
 // Capture skips them silently when absent; restore skips them when not in the snapshot.
-export const SIGEVENTS_OPTIONAL_STREAMS = [
-  DETECTIONS_DATA_STREAM,
-  RULE_EVENTS_DATA_STREAM,
-] as const;
+export const SIGEVENTS_OPTIONAL_STREAMS = [RULE_EVENTS_DATA_STREAM] as const;
 
 export const SIGNIFICANT_EVENTS_DATA_STREAMS = [
   KNOWLEDGE_INDICATORS_DATA_STREAM,
@@ -55,8 +55,13 @@ export const SIGNIFICANT_EVENTS_DATA_STREAMS = [
 // Alerting v2 producers, so restore must preserve documents that are not Significant Events.
 export const SIGNIFICANT_EVENTS_CLEANABLE_DATA_STREAMS = [
   KNOWLEDGE_INDICATORS_DATA_STREAM,
-  DETECTIONS_DATA_STREAM,
 ] as const;
+
+/** Sources of the `.rule-events` documents Significant Events writes: events and detection signals. */
+export const SIGNIFICANT_EVENTS_RULE_EVENTS_SOURCES = [
+  SIGNIFICANT_EVENTS_ALERT_SOURCE,
+  ...SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES,
+];
 
 export const VALID_ALERT_INDICES = ['.internal.alerts-streams.alerts-default-*'] as const;
 

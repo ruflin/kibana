@@ -15,8 +15,10 @@ import { NIGHTSHIFT_ENABLED_FLAG } from '@kbn/nightshift-shared';
 import type { ToolingLog } from '@kbn/tooling-log';
 import type { Feature, SignificantEvent } from '@kbn/significant-events-schema';
 import {
+  detectionFromSignalSource,
   KIS_ONBOARDING_IN_PROGRESS_STATUSES,
   KIsOnboardingStep,
+  SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES,
 } from '@kbn/significant-events-schema';
 import type { ConnectionConfig } from './get_connection_config';
 import { kibanaRequest } from './kibana';
@@ -37,8 +39,8 @@ import {
   FEATURES_TEMP_INDEX_PATTERN,
   DISCOVERIES_TEMP_INDEX_PATTERN,
   DETECTIONS_TEMP_INDEX_PATTERN,
-  DETECTIONS_DATA_STREAM,
   KNOWLEDGE_INDICATORS_TEMP_INDEX_PATTERN,
+  RULE_EVENTS_DATA_STREAM,
 } from '../../src/data_generators/snapshot_indices';
 
 const RAW_DATA_STREAM_SEARCH_LIMIT = 1000;
@@ -335,15 +337,22 @@ export async function persistDetectionsForSnapshot(
   log: ToolingLog,
   snapshotName: string
 ): Promise<{ index: string; count: number }> {
+  // Detections and their markers are signals in `.rule-events`; the snapshot keeps the flat
+  // detection shape so existing snapshots and `loadDetectionsFromSnapshot` stay compatible.
   const detectionDocs = await withTempSuperuser(esClient, log, config, (sysClient) =>
-    readRawDataStreamDocs(sysClient, DETECTIONS_DATA_STREAM, { match_all: {} }, 'detection(s)')
+    readRawDataStreamDocs(
+      sysClient,
+      RULE_EVENTS_DATA_STREAM,
+      { terms: { source: [...SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES] } },
+      'detection(s)'
+    )
   );
 
   return persistDocsForSnapshot(
     esClient,
     log,
     getSnapshotDetectionsIndex(snapshotName),
-    detectionDocs,
+    detectionDocs.map((doc) => detectionFromSignalSource(doc)),
     undefined,
     'detection(s)'
   );
@@ -406,7 +415,7 @@ export async function persistDiscoveriesForSnapshot(
 export async function cleanupExtractedData(esClient: Client, log: ToolingLog): Promise<void> {
   log.info('Cleaning up ES data...');
 
-  const dataStreamTargets = ['logs*', KNOWLEDGE_INDICATORS_DATA_STREAM, DETECTIONS_DATA_STREAM];
+  const dataStreamTargets = ['logs*', KNOWLEDGE_INDICATORS_DATA_STREAM];
   const indexTargets = [
     FEATURES_TEMP_INDEX_PATTERN,
     DISCOVERIES_TEMP_INDEX_PATTERN,
@@ -417,6 +426,15 @@ export async function cleanupExtractedData(esClient: Client, log: ToolingLog): P
   for (const name of dataStreamTargets) {
     await esClient.indices.deleteDataStream({ name }).catch(() => {});
   }
+  // `.rule-events` is shared with other Alerting v2 producers: delete only detection signals.
+  await esClient
+    .deleteByQuery({
+      index: RULE_EVENTS_DATA_STREAM,
+      query: { terms: { source: [...SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES] } },
+      refresh: true,
+      ignore_unavailable: true,
+    })
+    .catch(() => {});
   for (const index of indexTargets) {
     await esClient.indices.delete({ index, ignore_unavailable: true }).catch(() => {});
   }

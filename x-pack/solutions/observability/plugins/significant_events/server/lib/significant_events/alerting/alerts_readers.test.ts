@@ -5,7 +5,10 @@
  * 2.0.
  */
 
-import type { QueryLink } from '@kbn/significant-events-schema';
+import {
+  SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES,
+  type QueryLink,
+} from '@kbn/significant-events-schema';
 import type { TracedElasticsearchClient } from '@kbn/traced-es-client';
 import {
   RULES_BUCKET_SIZE,
@@ -64,6 +67,9 @@ describe('SignificantEventsAlertsReaderV2', () => {
     });
 
     expect(request.query).toContain('type == "signal"');
+    expect(request.query).toContain(
+      'WHERE source IS NULL OR (source NOT IN ("elastic.significant_events.detection", "elastic.significant_events.detection_processed", "elastic.significant_events.detection_scanned"))'
+    );
     expect(request.query).toContain(`space_id == "${SPACE_ID}"`);
     expect(request.query).toContain(`rule.id IN ("${RULE_UUID}")`);
     expect(request.query).toContain(
@@ -113,6 +119,11 @@ describe('SignificantEventsAlertsReaderV2', () => {
             { term: { type: 'signal' } },
             { term: { space_id: SPACE_ID } },
             { range: { '@timestamp': { gte: LOOKBACK } } },
+            {
+              bool: {
+                must_not: [{ terms: { source: [...SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES] } }],
+              },
+            },
           ],
         },
       },
@@ -180,6 +191,13 @@ describe('SignificantEventsAlertsReaderV2', () => {
               { term: { type: 'signal' } },
               { term: { space_id: SPACE_ID } },
               { range: { '@timestamp': { gte: writeTimeLookback } } },
+              {
+                bool: {
+                  must_not: [
+                    { terms: { source: [...SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES] } },
+                  ],
+                },
+              },
             ],
           },
         },

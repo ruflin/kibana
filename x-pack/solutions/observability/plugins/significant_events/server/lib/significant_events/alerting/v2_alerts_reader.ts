@@ -18,6 +18,7 @@ import {
 import {
   RULE_EVENTS_INDEX,
   buildRuleEventsSignalFilter,
+  excludeDetectionSignalsWhere,
   projectMetricSeriesColumns,
 } from './rule_events_metric_series';
 import type {
@@ -91,7 +92,8 @@ export class SignificantEventsAlertsReaderV2 implements ISignificantEventsAlerts
 
     const scoped = esql.from([this.index]).where`${typeCol} == ${esql.str(
       'signal'
-    )} AND ${spaceIdCol} == ${esql.str(spaceId)} AND ${ruleIdCol} IN (${ruleIdLiterals})`;
+    )} AND ${spaceIdCol} == ${esql.str(spaceId)} AND ${ruleIdCol} IN (${ruleIdLiterals})`
+      .where`${excludeDetectionSignalsWhere()}`;
 
     return toEsqlRequest(
       projectMetricSeriesColumns(scoped).pipe`WHERE bucket IS NOT NULL AND metric_value IS NOT NULL`

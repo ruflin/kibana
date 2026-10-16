@@ -53,7 +53,13 @@ outputs:
   - name: suppressedRuleCount
     type: number
 consts:
-  DETECTIONS_INDEX: '.significant_events-detections'
+  # Detections and processed markers are Alerting v2 `type: signal` events in `.rule-events`,
+  # told apart from rule executions by `source`; their payload is in the flattened `data`.
+  DETECTION_SOURCE: 'elastic.significant_events.detection'
+  DETECTION_PROCESSED_SOURCE: 'elastic.significant_events.detection_processed'
+  DETECTION_AND_PROCESSED_SOURCES:
+    - 'elastic.significant_events.detection'
+    - 'elastic.significant_events.detection_processed'
   INVESTIGATABLE_SEVERITIES: ['critical', 'high']
 
 steps:
@@ -104,7 +110,8 @@ steps:
     type: elasticsearch.esql.query
     with:
       query: |-
-        FROM .significant_events-detections METADATA _id, _source
+        FROM .rule-events METADATA _id
+        | EVAL detection_id = FIELD_EXTRACT(data, "detection_id"), processed_by = FIELD_EXTRACT(data, "processed_by"), change_point_type = FIELD_EXTRACT(data, "change_point_type"), rule_uuid = rule.id
         | INLINE STATS processed_count = COUNT(processed_by) BY detection_id
         | WHERE change_point_type IS NOT NULL
         | INLINE STATS recent_detection_count = COUNT(*) BY rule_uuid
@@ -113,7 +120,7 @@ steps:
         | WHERE @timestamp == latest_timestamp
         | INLINE STATS latest_id = MAX(_id) BY rule_uuid
         | WHERE _id == latest_id
-        | EVAL severity_score = COALESCE(severity_score, 0)
+        | EVAL severity_score = COALESCE(TO_DOUBLE(FIELD_EXTRACT(data, "severity_score")), 0)
         | EVAL suppressed_age_minutes = DATE_DIFF("minute", oldest_unprocessed, NOW())
         | WHERE recent_detection_count < ?2 OR suppressed_age_minutes >= ?3 OR severity_score >= ?4
         | EVAL flaky_probe = recent_detection_count >= ?2 AND suppressed_age_minutes >= ?3
@@ -121,7 +128,8 @@ steps:
         | EVAL score = severity_score + staleness_minutes
         | SORT score DESC, @timestamp ASC, _id ASC
         | LIMIT ?1
-        | KEEP rule_uuid, _source, score, recent_detection_count, flaky_probe
+        | EVAL rule_name = FIELD_EXTRACT(data, "rule_name"), source_id = FIELD_EXTRACT(data, "source_id"), p_value = TO_DOUBLE(FIELD_EXTRACT(data, "p_value"))
+        | KEEP rule_uuid, detection_id, rule_name, source_id, change_point_type, p_value, severity_score, @timestamp, score, recent_detection_count, flaky_probe
       params:
         - '${{ inputs.detectionBatchMax }}'
         - '${{ inputs.flakyRuleDetectionThreshold }}'
@@ -131,7 +139,11 @@ steps:
         bool:
           filter:
             - term:
-                kibana.space_ids: '{{ variables.spaceId }}'
+                space_id: '{{ variables.spaceId }}'
+            - term:
+                type: 'signal'
+            - terms:
+                source: '${{ consts.DETECTION_AND_PROCESSED_SOURCES }}'
             - range:
                 '@timestamp':
                   gte: '{{ inputs.detectionLookback }}'
@@ -148,7 +160,8 @@ steps:
     type: elasticsearch.esql.query
     with:
       query: |-
-        FROM .significant_events-detections METADATA _id
+        FROM .rule-events METADATA _id
+        | EVAL detection_id = FIELD_EXTRACT(data, "detection_id"), processed_by = FIELD_EXTRACT(data, "processed_by"), change_point_type = FIELD_EXTRACT(data, "change_point_type"), rule_uuid = rule.id
         | INLINE STATS processed_count = COUNT(processed_by) BY detection_id
         | WHERE change_point_type IS NOT NULL
         | INLINE STATS recent_detection_count = COUNT(*) BY rule_uuid
@@ -157,7 +170,7 @@ steps:
         | WHERE @timestamp == latest_timestamp
         | INLINE STATS latest_id = MAX(_id) BY rule_uuid
         | WHERE _id == latest_id
-        | EVAL severity_score = COALESCE(severity_score, 0)
+        | EVAL severity_score = COALESCE(TO_DOUBLE(FIELD_EXTRACT(data, "severity_score")), 0)
         | EVAL suppressed_age_minutes = DATE_DIFF("minute", oldest_unprocessed, NOW())
         | WHERE recent_detection_count >= ?1 AND suppressed_age_minutes < ?2 AND severity_score < ?3
         | STATS suppressedRuleCount = COUNT(*)
@@ -169,7 +182,11 @@ steps:
         bool:
           filter:
             - term:
-                kibana.space_ids: '{{ variables.spaceId }}'
+                space_id: '{{ variables.spaceId }}'
+            - term:
+                type: 'signal'
+            - terms:
+                source: '${{ consts.DETECTION_AND_PROCESSED_SOURCES }}'
             - range:
                 '@timestamp':
                   gte: '{{ inputs.detectionLookback }}'
@@ -283,14 +300,15 @@ steps:
     type: if
     condition: '${{ steps.run_discovery_agent.error == null and steps.count_written_rules.output.writtenCount > 0 }}'
     steps:
-      # The rule filter must be a should alongside `exists: processed_by` — markers carry no
-      # rule_uuid, so a bare terms filter drops them before the processed_count semijoin and
-      # every backlog detection gets re-stamped each cycle (nightshift-program#961).
+      # The rule filter must be a should alongside the processed-marker source — markers carry
+      # no rule, so a bare rule filter drops them before the processed_count semijoin and every
+      # backlog detection gets re-stamped each cycle (nightshift-program#961).
       - name: get_written_rules_backlog
         type: elasticsearch.esql.query
         with:
           query: |-
-            FROM .significant_events-detections
+            FROM .rule-events
+            | EVAL detection_id = FIELD_EXTRACT(data, "detection_id"), processed_by = FIELD_EXTRACT(data, "processed_by"), change_point_type = FIELD_EXTRACT(data, "change_point_type")
             | INLINE STATS processed_count = COUNT(processed_by) BY detection_id
             | WHERE change_point_type IS NOT NULL AND processed_count == 0
             | KEEP detection_id
@@ -298,13 +316,19 @@ steps:
             bool:
               filter:
                 - term:
-                    kibana.space_ids: '{{ variables.spaceId }}'
+                    space_id: '{{ variables.spaceId }}'
+                - term:
+                    type: 'signal'
                 - bool:
                     should:
-                      - terms:
-                          rule_uuid: '${{ variables.written_rule_uuids }}'
-                      - exists:
-                          field: processed_by
+                      - bool:
+                          filter:
+                            - term:
+                                source: '{{ consts.DETECTION_SOURCE }}'
+                            - terms:
+                                rule.id: '${{ variables.written_rule_uuids }}'
+                      - term:
+                          source: '{{ consts.DETECTION_PROCESSED_SOURCE }}'
                     minimum_should_match: 1
                 - range:
                     '@timestamp':
@@ -318,7 +342,7 @@ steps:
         iteration-on-failure:
           continue: true
         steps:
-          # Written through Kibana as its internal user, like detections in detection.yaml.
+          # Appended through Kibana as its internal user, like detections in detection.yaml.
           - name: write_processed_marker
             type: kibana.request
             with:

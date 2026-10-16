@@ -31,9 +31,10 @@ export type ChangePointType = (typeof CHANGE_POINT_TYPES)[number];
 
 /**
  * Detection — an immutable change-point observation. `change_point_type` and
- * `p_value` are top-level (no nested `detection_evidence`). `processed` is derived
- * at read time from the presence of a processed marker (see `processedMarkerSchema`)
- * and is never stored on the detection.
+ * `p_value` are top-level (no nested `detection_evidence`). Stored as an Alerting v2
+ * signal in `.rule-events` (see `detectionFromSignalSource`). `processed` is derived at
+ * read time from the presence of a processed-marker signal
+ * (`SIGNIFICANT_EVENTS_DETECTION_PROCESSED_SOURCE`) and is never stored on the detection.
  */
 export const detectionSchema = lazySchema(() =>
   z.object({
@@ -84,3 +85,25 @@ export const detectionSchema = lazySchema(() =>
 );
 
 export type Detection = z.infer<typeof detectionSchema>;
+
+/** `_source` of a detection-pipeline signal in `.rule-events`. */
+export interface DetectionSignalSource {
+  '@timestamp'?: string;
+  rule?: { id?: string };
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Flattens a detection signal back into the detection shape: `data` carries the payload and
+ * `rule.id` the rule UUID. `processed` is derived from processed markers, so it is not set here.
+ */
+export const detectionFromSignalSource = ({
+  '@timestamp': timestamp,
+  rule,
+  data,
+}: DetectionSignalSource): Omit<Detection, 'processed'> =>
+  ({
+    ...data,
+    ...(rule?.id ? { rule_uuid: rule.id } : {}),
+    '@timestamp': timestamp,
+  } as Omit<Detection, 'processed'>);

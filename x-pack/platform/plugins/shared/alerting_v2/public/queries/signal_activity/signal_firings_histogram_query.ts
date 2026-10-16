@@ -34,6 +34,12 @@ export const BUCKET_INTERVAL_TO_ESQL_SPAN: Record<string, string> = {
 
 const DEFAULT_ESQL_SPAN = '1 hour';
 
+/**
+ * Source stamped by rule execution. Plugins can append their own signals to a rule's series (for
+ * example change-point detections); those are annotations, not firings of the rule.
+ */
+const RULE_EXECUTION_SOURCE = 'internal';
+
 export interface BuildSignalFiringsQueryOptions {
   ruleId: string;
   gteMs: number;
@@ -71,7 +77,7 @@ export const buildSignalFiringsHistogramQuery = ({
 
   // prettier-ignore
   return esql.from(ALERT_EVENTS_DATA_STREAM)
-    .where`type == "signal"`
+    .where`type == "signal" AND source == ${RULE_EXECUTION_SOURCE}`
     .where`rule.id == ${ruleId}`
     .where`@timestamp >= ${fromIso}::DATETIME AND @timestamp <= ${toIso}::DATETIME`
     .pipe`STATS count = COUNT(*) BY ts = BUCKET(@timestamp, ${span})`
@@ -93,7 +99,7 @@ export const buildSignalFiringsSummaryQuery = ({
 
   // prettier-ignore
   return esql.from(ALERT_EVENTS_DATA_STREAM)
-    .where`type == "signal"`
+    .where`type == "signal" AND source == ${RULE_EXECUTION_SOURCE}`
     .where`rule.id == ${ruleId}`
     .where`@timestamp >= ${fromIso}::DATETIME AND @timestamp <= ${toIso}::DATETIME`
     .pipe`STATS last_firing = MAX(@timestamp)`;

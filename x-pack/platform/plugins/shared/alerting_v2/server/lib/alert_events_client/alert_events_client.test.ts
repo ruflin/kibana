@@ -258,3 +258,128 @@ describe('AlertEventsClient.createAlertEvent episode lifecycle', () => {
     expect(docs[0]).toMatchObject({ '@timestamp': timestamp, scheduled_timestamp: timestamp });
   });
 });
+
+describe('AlertEventsClient.createSignalEvents', () => {
+  const spaceId = 'default';
+
+  const createClient = () => {
+    const storageService = createMockStorageServiceContract();
+    storageService.bulkIndexDocs.mockImplementation(async ({ docs }) => ({
+      attempted: docs.length,
+      docs: [...docs],
+      errors: [],
+    }));
+    const queryService: jest.Mocked<Pick<QueryServiceContract, 'executeQueryRows'>> = {
+      executeQueryRows: jest.fn().mockResolvedValue([]),
+    };
+    const resourceManager = createMockResourceManager();
+    const client = new AlertEventsClient(
+      storageService,
+      queryService as unknown as QueryServiceContract,
+      spaceId,
+      resourceManager
+    );
+    return { client, storageService, queryService, resourceManager };
+  };
+
+  it('writes stateless signal events attached to the rule, without resolving an episode', async () => {
+    const { client, storageService, queryService } = createClient();
+    const timestamp = '2026-10-16T15:10:55.000Z';
+
+    const result = await client.createSignalEvents([
+      {
+        source: 'elastic.example',
+        rule_id: 'rule-1',
+        timestamp,
+        data: { detection_id: 'd-1', p_value: 0.001 },
+        severity: 'high',
+      },
+    ]);
+
+    expect(result).toEqual({ count: 1 });
+    expect(queryService.executeQueryRows).not.toHaveBeenCalled();
+    const [{ docs }] = storageService.bulkIndexDocs.mock.calls[0];
+    expect(docs).toEqual([
+      {
+        '@timestamp': timestamp,
+        scheduled_timestamp: timestamp,
+        rule: { id: 'rule-1' },
+        group_hash: sha256('default:elastic.example:rule-1'),
+        data: { detection_id: 'd-1', p_value: 0.001 },
+        status: 'breached',
+        source: 'elastic.example',
+        type: 'signal',
+        space_id: spaceId,
+        severity: 'high',
+      },
+    ]);
+  });
+
+  it('keys the series on the fingerprint and omits rule when none is given', async () => {
+    const { client, storageService } = createClient();
+
+    await client.createSignalEvents([{ source: 'elastic.example', fingerprint: 'fp-1' }]);
+
+    const [{ docs }] = storageService.bulkIndexDocs.mock.calls[0];
+    expect(docs[0]).not.toHaveProperty('rule');
+    expect(docs[0]).not.toHaveProperty('@timestamp');
+    expect(docs[0]).toMatchObject({
+      group_hash: sha256('default:elastic.example:fp-1'),
+      data: {},
+      type: 'signal',
+    });
+  });
+
+  it('writes every event in one bulk request after the data stream is ready', async () => {
+    const { client, storageService, resourceManager } = createClient();
+
+    await client.createSignalEvents([
+      { source: 'elastic.example', rule_id: 'rule-1' },
+      { source: 'elastic.example', rule_id: 'rule-2' },
+    ]);
+
+    expect(storageService.bulkIndexDocs).toHaveBeenCalledTimes(1);
+    expect(storageService.bulkIndexDocs.mock.calls[0][0].docs).toHaveLength(2);
+    expect(resourceManager.ensureResourceReady.mock.invocationCallOrder[0]).toBeLessThan(
+      storageService.bulkIndexDocs.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('does nothing for an empty batch', async () => {
+    const { client, storageService, resourceManager } = createClient();
+
+    await expect(client.createSignalEvents([])).resolves.toEqual({ count: 0 });
+    expect(resourceManager.ensureResourceReady).not.toHaveBeenCalled();
+    expect(storageService.bulkIndexDocs).not.toHaveBeenCalled();
+  });
+
+  it('rejects an event without a series identity', async () => {
+    const { client, storageService } = createClient();
+
+    await expect(client.createSignalEvents([{ source: 'elastic.example' }])).rejects.toThrow(
+      'one of fingerprint or rule_id is required'
+    );
+    expect(storageService.bulkIndexDocs).not.toHaveBeenCalled();
+  });
+
+  it('throws when Elasticsearch rejects a document', async () => {
+    const { client, storageService } = createClient();
+    storageService.bulkIndexDocs.mockImplementation(async ({ docs }) => ({
+      attempted: docs.length,
+      docs: [],
+      errors: [
+        {
+          code: 'mapper_parsing_exception',
+          message: 'failed to parse',
+          index: '.rule-events',
+          document: docs[0],
+          details: { statusCode: 400 },
+        },
+      ],
+    }));
+
+    await expect(
+      client.createSignalEvents([{ source: 'elastic.example', rule_id: 'rule-1' }])
+    ).rejects.toThrow('Failed to persist 1 of 1 signal event(s): failed to parse');
+  });
+});

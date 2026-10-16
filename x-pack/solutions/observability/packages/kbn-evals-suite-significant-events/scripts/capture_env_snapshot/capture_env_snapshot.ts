@@ -10,13 +10,13 @@ import { Client, errors } from '@elastic/elasticsearch';
 import type { MappingTypeMapping } from '@elastic/elasticsearch/lib/api/types';
 import moment from 'moment';
 import { extractDataStreamName } from '@kbn/es-snapshot-loader';
-import { SIGNIFICANT_EVENTS_ALERT_SOURCE } from '@kbn/significant-events-schema';
 import type { ConnectionConfig } from '../lib/get_connection_config';
 import { getConnectionConfig } from '../lib/get_connection_config';
 import { createSnapshot, generateGcsBasePath, registerGcsRepository } from '../lib/gcs';
 import {
   GCS_BUCKET,
   SIGNIFICANT_EVENTS_DATA_STREAMS,
+  SIGNIFICANT_EVENTS_RULE_EVENTS_SOURCES,
   SIGEVENTS_OPTIONAL_STREAMS,
 } from '../lib/constants';
 import { resolvePatterns, parseCommonSnapshotFlags, toSnapshotName } from '../lib/snapshot_utils';
@@ -84,7 +84,7 @@ async function captureDataStream({
         source: {
           index: sourceIndex,
           ...(sourceIndex === RULE_EVENTS_DATA_STREAM
-            ? { query: { term: { source: SIGNIFICANT_EVENTS_ALERT_SOURCE } } }
+            ? { query: { terms: { source: SIGNIFICANT_EVENTS_RULE_EVENTS_SOURCES } } }
             : {}),
         },
         dest: { index: snapshotIndex },

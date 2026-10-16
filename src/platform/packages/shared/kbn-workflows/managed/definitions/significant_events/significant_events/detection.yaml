@@ -37,7 +37,14 @@ triggers:
         required: false
         description: "Every active rule must be scanned at least once within this many minutes. scan_cycles = floor(targetCoverageMinutes / detectionIntervalMinutes), min 1. Round-robin spreads the fleet only when targetCoverageMinutes > detectionIntervalMinutes; equal or less scans the whole fleet each run. The scheduler overrides this at run time; the default here (equal to detectionIntervalMinutes) scans the whole fleet on a manual/standalone run."
 consts:
-  DETECTIONS_INDEX: ".significant_events-detections"
+  # Detections and scan markers are Alerting v2 `type: signal` events in `.rule-events`, on the
+  # series of the rule they describe (`rule.id`), told apart from rule executions by `source`.
+  RULE_EVENTS_INDEX: ".rule-events"
+  DETECTION_SOURCE: "elastic.significant_events.detection"
+  # Both count as "recently scanned" for the round-robin batch.
+  SCAN_RECENCY_SOURCES:
+    - "elastic.significant_events.detection"
+    - "elastic.significant_events.detection_scanned"
   # Window used to look up a rule's most recent change-point detection when deciding whether the
   # currently observed change_point_type is a transition. Must comfortably exceed the scan
   # cadence so the prior detection is still visible.
@@ -107,8 +114,8 @@ steps:
   #
   # Design overview:
   #   - active_rule_uuids: all rule keys from the change-point agg (with NO_MATCH_UUIDS sentinel).
-  #   - get_scan_recency: terms agg on rule_uuid, ordered stalest-first, max(@timestamp) sub-agg,
-  #     NO `exists: change_point_type` filter so bare touch markers count as "recently scanned".
+  #   - get_scan_recency: terms agg on rule.id over detection and scan-marker signals, ordered
+  #     stalest-first, max(@timestamp) sub-agg, so bare touch markers count as "recently scanned".
   #   - scanned_uuids: rules that appear in the recency window (already stalest-first).
   #   - never_scanned_uuids: active rules absent from the recency agg (set-difference via reject_exp).
   #   - scan_cycles: floor(targetCoverageMinutes / detectionIntervalMinutes), min 1.
@@ -126,28 +133,32 @@ steps:
 
   - name: get_scan_recency
     # Fetch when each active rule was last scanned (detection or bare touch marker).
-    # No `exists: change_point_type` filter — bare markers must count.
+    # Both signal sources count — bare markers must count.
     # terms agg ordered ascending by last_touched so the result is already stalest-first.
     type: elasticsearch.request
     with:
       method: POST
-      path: '/{{ consts.DETECTIONS_INDEX }}/_search?ignore_unavailable=true'
+      path: '/{{ consts.RULE_EVENTS_INDEX }}/_search?ignore_unavailable=true'
       body:
         size: 0
         query:
           bool:
             filter:
               - term:
-                  kibana.space_ids: "{{ variables.spaceId }}"
+                  space_id: "{{ variables.spaceId }}"
+              - term:
+                  type: "signal"
               - terms:
-                  rule_uuid: "${{ variables.active_rule_uuids }}"
+                  source: "${{ consts.SCAN_RECENCY_SOURCES }}"
+              - terms:
+                  rule.id: "${{ variables.active_rule_uuids }}"
               - range:
                   "@timestamp":
                     gte: '{{ consts.SCAN_RECENCY_WINDOW }}'
         aggregations:
           by_rule:
             terms:
-              field: rule_uuid
+              field: rule.id
               size: "${{ consts.SCAN_RECENCY_AGG_SIZE }}"
               order:
                 last_touched: asc
@@ -217,14 +228,13 @@ steps:
           has_rule_uuid: "${{ foreach.item.key != null and foreach.item.key != '' and variables.batch_rule_uuids contains foreach.item.key }}"
 
       - name: check_last_detection
-        # Most recent DETECTION for this rule (detections carry change_point_type; processed markers do not,
-        # so `exists: change_point_type` excludes markers). Used to decide whether the observed
-        # type is a transition.
+        # Most recent DETECTION for this rule (the detection source excludes processed and scan
+        # markers). Used to decide whether the observed type is a transition.
         if: "${{ steps.compute_rule_context.output.has_rule_uuid }}"
         type: elasticsearch.request
         with:
           method: POST
-          path: '/{{ consts.DETECTIONS_INDEX }}/_search?ignore_unavailable=true'
+          path: '/{{ consts.RULE_EVENTS_INDEX }}/_search?ignore_unavailable=true'
           body:
             size: 1
             sort:
@@ -234,11 +244,13 @@ steps:
               bool:
                 filter:
                   - term:
-                      kibana.space_ids: "{{ variables.spaceId }}"
+                      space_id: "{{ variables.spaceId }}"
                   - term:
-                      rule_uuid: "{{ foreach.item.key }}"
-                  - exists:
-                      field: change_point_type
+                      type: "signal"
+                  - term:
+                      source: "{{ consts.DETECTION_SOURCE }}"
+                  - term:
+                      rule.id: "{{ foreach.item.key }}"
                   - range:
                       "@timestamp":
                         gte: '{{ consts.LAST_DETECTION_LOOKBACK }}'
@@ -249,7 +261,7 @@ steps:
         with:
           # "" when the rule has no prior detection in the window; any observed type then reads as a
           # transition (first observation for the rule).
-          last_change_point_type: "{% if steps.check_last_detection.output.hits.total.value > 0 %}{{ steps.check_last_detection.output.hits.hits[0]._source.change_point_type | default: '' }}{% else %}{% endif %}"
+          last_change_point_type: "{% if steps.check_last_detection.output.hits.total.value > 0 %}{{ steps.check_last_detection.output.hits.hits[0]._source.data.change_point_type | default: '' }}{% else %}{% endif %}"
           detection_p_value: "${{ foreach.item.change_points.type[steps.compute_rule_context.output.change_point_type].p_value | default: 0 }}"
 
       - name: compute_write_gate
@@ -269,10 +281,10 @@ steps:
 
       - name: write_detection
         # One immutable detection per transition. detection_id is minted fresh for every detection
-        # ({rule}-{execution}); latest-per-rule reads regroup by rule_uuid. No lifecycle fields
-        # and no cross-pipeline handoff fields — change_point_type/p_value are top-level.
-        # Written through Kibana, which persists as its internal user: the workflow's credentials
-        # need the Nightshift manage privilege, not Elasticsearch write on the data stream.
+        # ({rule}-{execution}); latest-per-rule reads regroup by rule. No lifecycle fields and no
+        # cross-pipeline handoff fields. Kibana appends it as a signal on the rule's series in
+        # `.rule-events` as its internal user: the workflow's credentials need the Nightshift
+        # manage privilege, not Elasticsearch write on `.rule-events`.
         if: "${{ steps.compute_write_gate.output.is_transition }}"
         type: kibana.request
         with:
@@ -298,8 +310,8 @@ steps:
         # Bare touch doc written when the rule was in-batch but its change_point_type did NOT
         # transition (write_detection did not fire). This advances the rule's last_touched
         # timestamp in the recency agg so it is not treated as perpetually stale and re-picked
-        # every run. Carries no change_point_type so it remains invisible to check_last_detection,
-        # discovery's get_detections, and DetectionClient.findLatest (all filter `exists: change_point_type`).
+        # every run. Its own signal source keeps it invisible to check_last_detection, discovery's
+        # get_detections, and DetectionClient.findLatest (all select the detection source).
         # When a detection IS written its own @timestamp already advances last_touched — no marker needed.
         # No idempotency guard: foreach_rule visits each rule once per run and markers are
         # intentionally append-per-scan touch records.

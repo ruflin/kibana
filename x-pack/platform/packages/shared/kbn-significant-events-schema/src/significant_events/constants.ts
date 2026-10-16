@@ -26,6 +26,26 @@ export const MAX_ASSESSMENT_NOTE_LENGTH = 400;
  * Used by readers and action policies to filter Significant Events by source.
  */
 export const SIGNIFICANT_EVENTS_ALERT_SOURCE = 'elastic.significant_events' as const;
+
+/**
+ * Sources of the `type: signal` documents the detection pipeline appends to `.rule-events`: a
+ * change-point detection, a marker that discovery processed a detection, and a marker that a rule
+ * was scanned without a new detection. Never change after first write: workflows and readers
+ * filter on these values.
+ */
+export const SIGNIFICANT_EVENTS_DETECTION_SOURCE = 'elastic.significant_events.detection' as const;
+export const SIGNIFICANT_EVENTS_DETECTION_PROCESSED_SOURCE =
+  'elastic.significant_events.detection_processed' as const;
+export const SIGNIFICANT_EVENTS_DETECTION_SCANNED_SOURCE =
+  'elastic.significant_events.detection_scanned' as const;
+
+/** Every signal source written by the detection pipeline; rule-execution signal readers exclude them. */
+export const SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES = [
+  SIGNIFICANT_EVENTS_DETECTION_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_PROCESSED_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_SCANNED_SOURCE,
+] as const;
+
 export const MAX_TIMESTAMP_LENGTH = 64;
 
 export const SYMPTOM_HYPOTHESIS_ROLE_RULE =

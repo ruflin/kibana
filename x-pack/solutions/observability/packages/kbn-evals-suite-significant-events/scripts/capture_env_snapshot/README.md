@@ -54,7 +54,7 @@ SigEvents data streams are reindexed to a `snapshot-*` copy (leading `.` is repl
 | --- | --- |
 | `.significant_events-knowledge_indicators` | `snapshot-significant_events-knowledge_indicators` |
 | `.significant_events-discoveries` | `snapshot-significant_events-discoveries` (if workflow was run) |
-| `.significant_events-detections` | `snapshot-significant_events-detections` (if workflow was run) |
+| `.rule-events` (Significant Events and detection signals only) | `snapshot-rule-events` (if workflow was run) |
 | `.internal.alerts-streams.alerts-default-000001` | `.internal.alerts-streams.alerts-default-000001` (no change) |
 | `logs.otel` | `logs.otel` (no change) |
 

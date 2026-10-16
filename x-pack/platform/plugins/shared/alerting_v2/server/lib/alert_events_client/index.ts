@@ -6,3 +6,4 @@
  */
 
 export { AlertEventsClient } from './alert_events_client';
+export type { CreateSignalEventData } from './alert_events_client';

@@ -12,7 +12,6 @@ import {
 } from '@kbn/significant-events-schema';
 import { z, isoDateTime } from '@kbn/zod/v4';
 import { NIGHTSHIFT_API_PRIVILEGES } from '@kbn/nightshift-shared';
-import type { DetectionClient, StoredDetection } from '../../../lib/significant_events/detections';
 import type { PaginatedResponse } from '../../../lib/significant_events/query_utils';
 import { createServerRoute } from '../../create_server_route';
 import { assertNotPaused } from '../../utils/assert_not_paused';
@@ -113,29 +112,13 @@ const createDetectionSchema = z.object({
   workflow_execution_id: z.string().max(MAX_ID_LENGTH).optional(),
 });
 
-/** Stamps server-side `@timestamp` and appends to the current space; Kibana writes as its internal user. */
-const appendDetectionDocuments = async ({
-  getDetectionClient,
-  documents,
-}: {
-  getDetectionClient: () => Promise<DetectionClient>;
-  documents: Array<Omit<StoredDetection, '@timestamp'>>;
-}): Promise<{ count: number }> => {
-  const timestamp = new Date().toISOString();
-  const detectionClient = await getDetectionClient();
-  await detectionClient.bulkCreate(
-    documents.map((document) => ({ '@timestamp': timestamp, ...document }))
-  );
-  return { count: documents.length };
-};
-
 const createDetectionsRoute = createServerRoute({
   endpoint: 'POST /internal/significant_events/detections',
   options: {
     access: 'internal',
     summary: 'Create detections',
     description:
-      'Appends change-point detections to the current space. Detections are immutable; `@timestamp` is set by the server. Kibana writes as its internal user, so callers need the Nightshift manage privilege but no Elasticsearch privileges on the data stream. Rejected with 409 while Significant Events is paused.',
+      'Appends change-point detections to the current space as Alerting v2 signals in `.rule-events`, on the series of the rule they were observed on. Detections are immutable; `@timestamp` is set by the server. Kibana writes as its internal user, so callers need the Nightshift manage privilege but no Elasticsearch privileges on `.rule-events`. Rejected with 409 while Significant Events is paused.',
   },
   security: {
     authz: {
@@ -159,7 +142,10 @@ const createDetectionsRoute = createServerRoute({
     await assertSignificantEventsAccess({ server, licensing });
     await assertNotPaused({ maintenanceService, request });
 
-    return appendDetectionDocuments({ getDetectionClient, documents: params.body.detections });
+    const { detections } = params.body;
+    const detectionClient = await getDetectionClient();
+    await detectionClient.createDetections({ detections, timestamp: new Date().toISOString() });
+    return { count: detections.length };
   },
 });
 
@@ -169,7 +155,7 @@ const markDetectionsProcessedRoute = createServerRoute({
     access: 'internal',
     summary: 'Mark detections as processed',
     description:
-      'Records that detections in the current space were processed, which sets their derived `processed` flag. Stored as processed markers in the detections data stream. Rejected with 409 while Significant Events is paused.',
+      'Records that detections in the current space were processed, which sets their derived `processed` flag. Stored as processed-marker signals in `.rule-events`. Rejected with 409 while Significant Events is paused.',
   },
   security: {
     authz: {
@@ -195,13 +181,13 @@ const markDetectionsProcessedRoute = createServerRoute({
     await assertNotPaused({ maintenanceService, request });
 
     const { detection_ids: detectionIds, processed_by: processedBy } = params.body;
-    return appendDetectionDocuments({
-      getDetectionClient,
-      documents: detectionIds.map((detectionId) => ({
-        detection_id: detectionId,
-        processed_by: processedBy,
-      })),
+    const detectionClient = await getDetectionClient();
+    await detectionClient.markProcessed({
+      detectionIds,
+      processedBy,
+      timestamp: new Date().toISOString(),
     });
+    return { count: detectionIds.length };
   },
 });
 
@@ -211,7 +197,7 @@ const markRulesScannedRoute = createServerRoute({
     access: 'internal',
     summary: 'Mark rules as scanned for detections',
     description:
-      'Records that rules in the current space were scanned for change points without a new detection, so scan scheduling treats them as recently covered. Stored as scan markers in the detections data stream. Rejected with 409 while Significant Events is paused.',
+      'Records that rules in the current space were scanned for change points without a new detection, so scan scheduling treats them as recently covered. Stored as scan-marker signals in `.rule-events`. Rejected with 409 while Significant Events is paused.',
   },
   security: {
     authz: {
@@ -237,10 +223,13 @@ const markRulesScannedRoute = createServerRoute({
     await assertNotPaused({ maintenanceService, request });
 
     const { rule_uuids: ruleUuids, scanned_by: scannedBy } = params.body;
-    return appendDetectionDocuments({
-      getDetectionClient,
-      documents: ruleUuids.map((ruleUuid) => ({ rule_uuid: ruleUuid, scanned_by: scannedBy })),
+    const detectionClient = await getDetectionClient();
+    await detectionClient.markScanned({
+      ruleUuids,
+      scannedBy,
+      timestamp: new Date().toISOString(),
     });
+    return { count: ruleUuids.length };
   },
 });
 

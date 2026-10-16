@@ -8,16 +8,38 @@
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type { DataStreamsStart } from '@kbn/core-data-streams-server';
 import type { SpaceId } from '@kbn/core-spaces-common';
+import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import { SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES } from '@kbn/significant-events-schema';
 import type { SignificantEventsMaintenanceFailure } from '../../../common/maintenance/types';
 import { KNOWLEDGE_INDICATORS_DATA_STREAM } from '../knowledge_indicators/data_stream';
-import { DETECTIONS_DATA_STREAM } from '../significant_events/detections/data_stream';
+import { RULE_EVENTS_INDEX } from '../significant_events/alerting/rule_events_metric_series';
 import { DISCOVERIES_DATA_STREAM } from '../significant_events/discoveries_data_stream';
 import { toMessage } from './to_message';
 
-export const RESET_REGISTERED_DATA_STREAMS = [
-  DETECTIONS_DATA_STREAM,
-  KNOWLEDGE_INDICATORS_DATA_STREAM,
-] as const;
+export const RESET_REGISTERED_DATA_STREAMS = [KNOWLEDGE_INDICATORS_DATA_STREAM] as const;
+
+/**
+ * Streams reset reads and clears without owning them: Kibana neither initializes nor creates them.
+ * Detections live as signals in the shared Alerting v2 `.rule-events` stream.
+ */
+const RESET_UNREGISTERED_DATA_STREAMS = [DISCOVERIES_DATA_STREAM, RULE_EVENTS_INDEX] as const;
+
+/**
+ * The current space's documents reset deletes from a stream. In `.rule-events` that is only the
+ * detection pipeline's signals; Significant Events history and every other producer are kept.
+ */
+const getResetQuery = (name: string, spaceId: SpaceId): QueryDslQueryContainer =>
+  name === RULE_EVENTS_INDEX
+    ? {
+        bool: {
+          filter: [
+            { term: { space_id: spaceId } },
+            { term: { type: 'signal' } },
+            { terms: { source: [...SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES] } },
+          ],
+        },
+      }
+    : { term: { 'kibana.space_ids': spaceId } };
 
 interface ResetDataStreamsParams {
   /** The caller authorizes refresh and document deletion, not the Kibana system user. */
@@ -36,8 +58,8 @@ export const prepareDataStreamsForReset = async ({
   failures,
 }: ResetDataStreamsParams): Promise<Set<string>> => {
   const prepared = new Set<string>();
-  for (const name of [...RESET_REGISTERED_DATA_STREAMS, DISCOVERIES_DATA_STREAM]) {
-    const registered = name !== DISCOVERIES_DATA_STREAM;
+  for (const name of [...RESET_REGISTERED_DATA_STREAMS, ...RESET_UNREGISTERED_DATA_STREAMS]) {
+    const registered = (RESET_REGISTERED_DATA_STREAMS as readonly string[]).includes(name);
     if (registered) {
       try {
         await dataStreams.initializeClient(name);
@@ -71,7 +93,10 @@ export const prepareDataStreamsForReset = async ({
   return prepared;
 };
 
-/** Delete only the current space's documents, leaving shared streams and untagged history intact. */
+/**
+ * Delete only the current space's documents, leaving untagged history and other producers' documents
+ * in shared streams intact.
+ */
 export const resetDataStreams = async ({
   esClient,
   spaceId,
@@ -88,7 +113,7 @@ export const resetDataStreams = async ({
     streamNames.map(async (name) =>
       esClient.deleteByQuery({
         index: name,
-        query: { term: { 'kibana.space_ids': spaceId } },
+        query: getResetQuery(name, spaceId),
         conflicts: 'proceed',
         refresh: true,
         ignore_unavailable: true,

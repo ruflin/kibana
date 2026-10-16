@@ -10,7 +10,6 @@ import type { ToolingLog } from '@kbn/tooling-log';
 import { Client, errors } from '@elastic/elasticsearch';
 import type { MappingTypeMapping } from '@elastic/elasticsearch/lib/api/types';
 import type { LoadResult } from '@kbn/es-snapshot-loader';
-import { SIGNIFICANT_EVENTS_ALERT_SOURCE } from '@kbn/significant-events-schema';
 import { createGcsRepository, replaySnapshot, restoreSnapshot } from '@kbn/es-snapshot-loader';
 import type { ConnectionConfig } from '../lib/get_connection_config';
 import { getConnectionConfig } from '../lib/get_connection_config';
@@ -18,6 +17,7 @@ import {
   GCS_BUCKET,
   SIGNIFICANT_EVENTS_CLEANABLE_DATA_STREAMS,
   SIGNIFICANT_EVENTS_DATA_STREAMS,
+  SIGNIFICANT_EVENTS_RULE_EVENTS_SOURCES,
 } from '../lib/constants';
 import {
   ensureCleanEnvironment,
@@ -39,7 +39,7 @@ async function cleanSignificantEventsRuleEvents(esClient: Client, log: ToolingLo
       conflicts: 'proceed',
       refresh: true,
       query: {
-        term: { source: SIGNIFICANT_EVENTS_ALERT_SOURCE },
+        terms: { source: SIGNIFICANT_EVENTS_RULE_EVENTS_SOURCES },
       },
     });
     log.info(`Cleaned ${result.deleted ?? 0} Significant Events document(s) from ".rule-events"`);

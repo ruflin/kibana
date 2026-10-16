@@ -78,7 +78,11 @@ describe('significant events fair batch selection', () => {
     expect(query).toContain(
       'EVAL flaky_probe = recent_detection_count >= ?2 AND suppressed_age_minutes >= ?3'
     );
-    expect(query).toContain('KEEP rule_uuid, _source, score, recent_detection_count, flaky_probe');
+    expect(query).toContain('FROM .rule-events');
+    expect(query).toContain(
+      'KEEP rule_uuid, detection_id, rule_name, source_id, change_point_type, p_value, severity_score, @timestamp, score, recent_detection_count, flaky_probe'
+    );
+    expect(JSON.stringify(selection.with?.filter)).toContain('"type":"signal"');
 
     const queryLines = query?.split('\n') ?? [];
     const suppressionLineIdx = queryLines.findIndex((l: string) =>
@@ -90,7 +94,7 @@ describe('significant events fair batch selection', () => {
     expect(suppressionLineIdx).toBeLessThan(limitLineIdx);
 
     const coalesceLineIdx = queryLines.findIndex((l: string) =>
-      l.includes('COALESCE(severity_score')
+      l.includes('EVAL severity_score = COALESCE(')
     );
     expect(coalesceLineIdx).toBeGreaterThan(-1);
     expect(coalesceLineIdx).toBeLessThan(suppressionLineIdx);
@@ -115,14 +119,14 @@ describe('significant events fair batch selection', () => {
   });
 
   it('keeps markers visible to the backlog dedup semijoin (rule filter is a should, not a bare terms)', () => {
-    // Markers carry no rule_uuid; a bare terms filter drops them before the processed_count
+    // Markers carry no rule; a bare rule filter drops them before the processed_count
     // join and every backlog detection gets re-stamped each cycle (nightshift-program#961).
     const gate = getStep(DISCOVERY_YAML, 'maybe_stamp_processed');
     const backlog = gate.steps?.find(({ name }) => name === 'get_written_rules_backlog');
     const filter = JSON.stringify(backlog?.with?.filter);
 
     expect(filter).toContain('"should"');
-    expect(filter).toContain('"exists":{"field":"processed_by"}');
+    expect(filter).toContain('"term":{"source":"{{ consts.DETECTION_PROCESSED_SOURCE }}"}');
     expect(filter).toContain('"minimum_should_match":1');
     expect(backlog?.with?.query).toContain('INLINE STATS processed_count');
     expect(backlog?.with?.query).toContain('processed_count == 0');
@@ -187,5 +191,25 @@ describe('significant events fair batch selection', () => {
     expect(params?.[1]).toContain('flakyRuleDetectionThreshold');
     expect(params?.[2]).toContain('flakyRuleProbeAfterMinutes');
     expect(params?.[3]).toContain('flakyRuleExemptSeverityScore');
+  });
+
+  it('reads detections and their markers as signals in .rule-events, scoped by source', () => {
+    const detection = parse(DETECTION_YAML) as { consts: Record<string, unknown> };
+    const discovery = parse(DISCOVERY_YAML) as { consts: Record<string, unknown> };
+
+    expect(detection.consts.RULE_EVENTS_INDEX).toBe('.rule-events');
+    expect(detection.consts.DETECTION_SOURCE).toBe('elastic.significant_events.detection');
+    expect(detection.consts.SCAN_RECENCY_SOURCES).toEqual([
+      'elastic.significant_events.detection',
+      'elastic.significant_events.detection_scanned',
+    ]);
+    expect(discovery.consts.DETECTION_AND_PROCESSED_SOURCES).toEqual([
+      'elastic.significant_events.detection',
+      'elastic.significant_events.detection_processed',
+    ]);
+    expect(DETECTION_YAML).not.toContain('.significant_events-detections');
+    expect(DISCOVERY_YAML).not.toContain('.significant_events-detections');
+    expect(DETECTION_YAML).not.toContain('kibana.space_ids');
+    expect(DISCOVERY_YAML).not.toContain('kibana.space_ids');
   });
 });

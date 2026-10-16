@@ -8,7 +8,10 @@
 import type { Client } from '@elastic/elasticsearch';
 import type { BulkOperationContainer } from '@elastic/elasticsearch/lib/api/types';
 import type { ToolingLog } from '@kbn/tooling-log';
-import { CRITICAL_SEVERITY_THRESHOLD } from '@kbn/significant-events-schema';
+import {
+  CRITICAL_SEVERITY_THRESHOLD,
+  SIGNIFICANT_EVENTS_DETECTION_SOURCE,
+} from '@kbn/significant-events-schema';
 import type { ConnectionConfig } from '../lib/get_connection_config';
 import { kibanaRequest } from '../lib/kibana';
 import type { SeedContext, SeededQuery } from '../types';
@@ -29,7 +32,12 @@ interface WorkflowExecution {
 interface DetectionDocument {
   '@timestamp'?: string;
   detection_id?: string;
-  rule_uuid?: string;
+}
+
+/** `_source` of a detection signal in `.rule-events`. */
+interface DetectionSignalDocument {
+  '@timestamp'?: string;
+  data?: { detection_id?: string };
 }
 
 interface EventHit {
@@ -113,27 +121,29 @@ async function findPrimaryDetection(
   ruleIds: string[],
   esClient: Client
 ): Promise<Required<Pick<DetectionDocument, '@timestamp' | 'detection_id'>>> {
-  await esClient.indices.refresh({
-    index: '.significant_events-detections',
-    ignore_unavailable: true,
-  });
-  const response = await esClient.search<DetectionDocument>({
-    index: '.significant_events-detections',
+  await esClient.indices.refresh({ index: '.rule-events', ignore_unavailable: true });
+  const response = await esClient.search<DetectionSignalDocument>({
+    index: '.rule-events',
     size: 1,
     query: {
       bool: {
         filter: [
-          { term: { 'kibana.space_ids': ctx.space } },
-          { terms: { rule_uuid: ruleIds } },
-          { exists: { field: 'detection_id' } },
+          { term: { space_id: ctx.space } },
+          { term: { type: 'signal' } },
+          { term: { source: SIGNIFICANT_EVENTS_DETECTION_SOURCE } },
+          { terms: { 'rule.id': ruleIds } },
           { range: { '@timestamp': { gte: ctx.generatedAt } } },
         ],
       },
     },
     sort: [{ '@timestamp': 'desc' }],
   });
-  const detection = response.hits.hits[0]?._source;
-  if (!detection?.['@timestamp'] || !detection.detection_id) {
+  const signal = response.hits.hits[0]?._source;
+  const detection: DetectionDocument = {
+    '@timestamp': signal?.['@timestamp'],
+    detection_id: signal?.data?.detection_id,
+  };
+  if (!detection['@timestamp'] || !detection.detection_id) {
     throw new Error(
       `runDiscovery: detection workflow completed but produced no detection for the seeded rules (${ruleIds.join(
         ', '

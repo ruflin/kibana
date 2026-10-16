@@ -9,13 +9,13 @@ import { setTimeout as delay } from 'timers/promises';
 import {
   KIS_ONBOARDING_IN_PROGRESS_STATUSES,
   SIGNIFICANT_EVENTS_ALERT_SOURCE,
+  SIGNIFICANT_EVENTS_DETECTION_SOURCE,
   type SignificantEventsWorkflowStatus,
 } from '@kbn/significant-events-schema';
 import type { EsClient, KbnClient } from '@kbn/scout-oblt';
 import { COMMON_API_HEADERS, PUBLIC_API_HEADERS } from './constants';
 
 export const RULE_EVENTS_INDEX = '.rule-events';
-export const DETECTIONS_DATA_STREAM = '.significant_events-detections';
 /** The ES|QL behind the source the suites store their knowledge indicators and detections under. */
 export const ACCESS_SOURCE_ESQL = 'FROM logs.otel, logs.otel.*';
 
@@ -137,8 +137,16 @@ export const seedDetection = async ({
 
 export const deleteDetections = async (esClient: EsClient, ruleUuid: string): Promise<void> => {
   await esClient.deleteByQuery({
-    index: DETECTIONS_DATA_STREAM,
-    query: { term: { rule_uuid: ruleUuid } },
+    index: RULE_EVENTS_INDEX,
+    // Detections are signals on the rule series in `.rule-events`.
+    query: {
+      bool: {
+        filter: [
+          { term: { 'rule.id': ruleUuid } },
+          { term: { source: SIGNIFICANT_EVENTS_DETECTION_SOURCE } },
+        ],
+      },
+    },
     refresh: true,
     ignore_unavailable: true,
   });

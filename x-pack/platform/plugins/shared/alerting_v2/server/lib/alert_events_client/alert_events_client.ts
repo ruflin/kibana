@@ -9,7 +9,11 @@ import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Boom from '@hapi/boom';
 import { inject, injectable } from 'inversify';
-import type { CreateAlertEventData, CreateAlertEventResponse } from '@kbn/alerting-v2-schemas';
+import type {
+  AlertEventSeverity,
+  CreateAlertEventData,
+  CreateAlertEventResponse,
+} from '@kbn/alerting-v2-schemas';
 import { ALERT_EVENTS_DATA_STREAM } from '@kbn/alerting-v2-constants';
 import {
   alertEventStatus,
@@ -73,6 +77,23 @@ export function getGroupHash(event: CreateAlertEventData, spaceId: string): stri
 
   // Schema requires fingerprint, fingerprint_fields, or rule_id.
   return sha256(`${spaceId}:${source}:${event.rule_id}`);
+}
+
+/**
+ * A stateless signal written by a plugin rather than by rule execution. Signals are point events:
+ * no episode is resolved or tracked for them.
+ */
+export interface CreateSignalEventData {
+  /** Producer of the signal. Rule execution stamps `internal`; plugins use their own value. */
+  source: string;
+  /** Persisted as `rule.id`, so the signal is read back alongside the rule it describes. */
+  rule_id?: string;
+  /** Series key hashed with space and source into `group_hash`. Defaults to `rule_id`. */
+  fingerprint?: string;
+  /** Persisted as `@timestamp`; Elasticsearch sets it at ingest when omitted. */
+  timestamp?: string;
+  data?: Record<string, unknown>;
+  severity?: AlertEventSeverity;
 }
 
 @injectable()
@@ -148,6 +169,50 @@ export class AlertEventsClient {
       group_hash: groupHash,
       alert_id: episodeId,
     };
+  }
+
+  /** Appends `type: signal` events in one bulk request and resolves with the number written. */
+  public async createSignalEvents(events: CreateSignalEventData[]): Promise<{ count: number }> {
+    if (events.length === 0) {
+      return { count: 0 };
+    }
+
+    const docs: AlertEventDocument[] = events.map((event) => {
+      const { source, rule_id: ruleId, fingerprint, timestamp, data, severity } = event;
+      if (!fingerprint && !ruleId) {
+        throw Boom.badRequest('one of fingerprint or rule_id is required for a signal event');
+      }
+      return {
+        ...(timestamp != null ? { '@timestamp': timestamp } : {}),
+        scheduled_timestamp: timestamp ?? new Date().toISOString(),
+        ...(ruleId != null ? { rule: { id: ruleId } } : {}),
+        group_hash: getGroupHash({ source, fingerprint, rule_id: ruleId }, this.spaceId),
+        data: data ?? {},
+        status: alertEventStatus.breached,
+        source,
+        type: alertEventType.signal,
+        space_id: this.spaceId,
+        ...(severity != null ? { severity } : {}),
+      };
+    });
+
+    // The docs may omit `@timestamp`, so the ingest pipeline must be in place before writing.
+    await this.resourceManager.ensureResourceReady(ALERT_EVENTS_RESOURCE_KEY);
+
+    const { errors } = await this.storageService.bulkIndexDocs({
+      index: ALERT_EVENTS_DATA_STREAM,
+      docs,
+    });
+
+    if (errors.length > 0) {
+      const first = errors[0];
+      throw Boom.badData(
+        `Failed to persist ${errors.length} of ${docs.length} signal event(s): ${first.message}`,
+        { code: first.code, details: first.details }
+      );
+    }
+
+    return { count: docs.length };
   }
 
   private async resolveEpisodeId(

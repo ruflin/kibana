@@ -5,7 +5,6 @@
  * 2.0.
  */
 
-import { detectionsDataStream } from './detections';
 import { RuleEventsClient } from './events';
 import {
   createSignificantEventsClients,
@@ -13,31 +12,28 @@ import {
 } from './significant_events_clients';
 
 describe('createSignificantEventsClients', () => {
-  it('initializes the detection Core client only when requested', async () => {
+  it('gives the detection client the space and the lazy rule-events writer', async () => {
     const detectionClient = {};
-    const services: SignificantEventsServices = {
-      detection: { getClient: jest.fn().mockReturnValue(detectionClient) } as never,
-    };
-    const initializeClient = jest.fn(async () => ({}));
+    const getClient = jest.fn().mockReturnValue(detectionClient);
+    const services: SignificantEventsServices = { detection: { getClient } as never };
+    const esClient = {} as never;
+    const getAlertEventsClient = jest.fn();
 
     const clients = createSignificantEventsClients({
       services,
-      dataStreams: { initializeClient } as never,
-      esClient: {} as never,
+      esClient,
       space: 'default',
-      getAlertEventsClient: jest.fn(),
+      getAlertEventsClient,
     });
 
-    expect(initializeClient).not.toHaveBeenCalled();
     await expect(clients.getDetectionClient()).resolves.toBe(detectionClient);
-    expect(initializeClient).toHaveBeenCalledTimes(1);
-    expect(initializeClient).toHaveBeenCalledWith(detectionsDataStream.name);
+    expect(getClient).toHaveBeenCalledWith({ getAlertEventsClient, esClient, space: 'default' });
+    expect(getAlertEventsClient).not.toHaveBeenCalled();
   });
 
   it('getEventSearchClient() always returns a RuleEventsClient', async () => {
     const clients = createSignificantEventsClients({
       services: { detection: { getClient: jest.fn() } as never },
-      dataStreams: { initializeClient: jest.fn() } as never,
       esClient: {} as never,
       space: 'default',
       getAlertEventsClient: jest.fn(),
@@ -50,7 +46,6 @@ describe('createSignificantEventsClients', () => {
     const triggerEmitter = jest.fn();
     const clients = createSignificantEventsClients({
       services: { detection: { getClient: jest.fn() } as never },
-      dataStreams: { initializeClient: jest.fn() } as never,
       esClient: {} as never,
       space: 'default',
       getAlertEventsClient: jest.fn(),
@@ -66,7 +61,6 @@ describe('createSignificantEventsClients', () => {
     const triggerEmitter = jest.fn();
     const clients = createSignificantEventsClients({
       services: { detection: { getClient: jest.fn() } as never },
-      dataStreams: { initializeClient: jest.fn() } as never,
       esClient: {} as never,
       space: 'default',
       getAlertEventsClient,

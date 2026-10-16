@@ -6,10 +6,11 @@
  */
 
 import { ALERTING_ERROR_CODES } from '@kbn/alerting-v2-plugin/server';
+import { SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES } from '@kbn/significant-events-schema';
 import { SIGNIFICANT_EVENTS_SCHEDULED_DETECTION_WORKFLOW_ID } from '@kbn/workflows/managed';
 import { KI_TYPE_FEATURE, KI_TYPE_QUERY } from '../knowledge_indicators';
 import { KNOWLEDGE_INDICATORS_DATA_STREAM } from '../knowledge_indicators/data_stream';
-import { DETECTIONS_DATA_STREAM } from '../significant_events/detections/data_stream';
+import { RULE_EVENTS_INDEX } from '../significant_events/alerting/rule_events_metric_series';
 import { DISCOVERIES_DATA_STREAM } from '../significant_events/discoveries_data_stream';
 import {
   SIGNIFICANT_EVENTS_MAINTENANCE_STATE_SO_ID,
@@ -54,7 +55,7 @@ describe('SignificantEventsMaintenanceService', () => {
           'logs.orphan': ['orphan-rule'],
         },
         dataStreams: {
-          [DETECTIONS_DATA_STREAM]: 3,
+          [RULE_EVENTS_INDEX]: 3,
           [KNOWLEDGE_INDICATORS_DATA_STREAM]: 4,
           [DISCOVERIES_DATA_STREAM]: 4,
         },
@@ -80,11 +81,7 @@ describe('SignificantEventsMaintenanceService', () => {
       expect(v2RulesClient?.bulkDeleteRules).toHaveBeenCalledWith({
         ids: ['linked-rule', 'owned-rule', 'orphan-rule'],
       });
-      for (const index of [
-        DETECTIONS_DATA_STREAM,
-        KNOWLEDGE_INDICATORS_DATA_STREAM,
-        DISCOVERIES_DATA_STREAM,
-      ]) {
+      for (const index of [KNOWLEDGE_INDICATORS_DATA_STREAM, DISCOVERIES_DATA_STREAM]) {
         expect(esClient.deleteByQuery).toHaveBeenCalledWith({
           index,
           query: { term: { 'kibana.space_ids': 'default' } },
@@ -94,10 +91,27 @@ describe('SignificantEventsMaintenanceService', () => {
           wait_for_completion: true,
         });
       }
+      // Detections are signals in the shared `.rule-events`: only this space's are deleted.
+      expect(esClient.deleteByQuery).toHaveBeenCalledWith({
+        index: RULE_EVENTS_INDEX,
+        query: {
+          bool: {
+            filter: [
+              { term: { space_id: 'default' } },
+              { term: { type: 'signal' } },
+              { terms: { source: [...SIGNIFICANT_EVENTS_DETECTION_SIGNAL_SOURCES] } },
+            ],
+          },
+        },
+        refresh: true,
+        conflicts: 'proceed',
+        ignore_unavailable: true,
+        wait_for_completion: true,
+      });
       expect(esClient.indices.deleteDataStream).not.toHaveBeenCalled();
       expect(internalEsClient.indices.createDataStream).not.toHaveBeenCalled();
       expect(internalEsClient.deleteByQuery).not.toHaveBeenCalled();
-      expect(streamDocuments.get(DETECTIONS_DATA_STREAM)).toBe(0);
+      expect(streamDocuments.get(RULE_EVENTS_INDEX)).toBe(0);
       expect(streamDocuments.get(KNOWLEDGE_INDICATORS_DATA_STREAM)).toBe(0);
       expect(streamDocuments.get(DISCOVERIES_DATA_STREAM)).toBe(0);
       expect(esClient.indices.createDataStream).not.toHaveBeenCalled();
@@ -137,18 +151,15 @@ describe('SignificantEventsMaintenanceService', () => {
       const summary = await service.reset({ request: REQUEST });
 
       expect(initializeClient.mock.calls.map(([name]) => name)).toEqual([
-        DETECTIONS_DATA_STREAM,
         KNOWLEDGE_INDICATORS_DATA_STREAM,
       ]);
+      // `.rule-events` belongs to Alerting v2, so reset never creates it.
       expect(
         internalEsClient.indices.createDataStream.mock.calls.map(([{ name }]) => name)
-      ).toEqual([DETECTIONS_DATA_STREAM, KNOWLEDGE_INDICATORS_DATA_STREAM]);
+      ).toEqual([KNOWLEDGE_INDICATORS_DATA_STREAM]);
       expect(summary.deleted?.dataStreams).toBe(0);
       expect(summary.partialFailures).toEqual([]);
-      expect([...streamDocuments.keys()]).toEqual([
-        DETECTIONS_DATA_STREAM,
-        KNOWLEDGE_INDICATORS_DATA_STREAM,
-      ]);
+      expect([...streamDocuments.keys()]).toEqual([KNOWLEDGE_INDICATORS_DATA_STREAM]);
     });
 
     it('skips a registered stream after its existence check fails and continues cleanup', async () => {
@@ -162,33 +173,30 @@ describe('SignificantEventsMaintenanceService', () => {
       const summary = await service.reset({ request: REQUEST });
 
       expect(summary.partialFailures).toContainEqual({
-        target: `data-stream:${DETECTIONS_DATA_STREAM}`,
+        target: `data-stream:${KNOWLEDGE_INDICATORS_DATA_STREAM}`,
         error: 'existence check failed',
       });
-      expect(internalEsClient.indices.createDataStream).not.toHaveBeenCalledWith({
-        name: DETECTIONS_DATA_STREAM,
-      });
-      expect(internalEsClient.indices.createDataStream).toHaveBeenCalledWith({
-        name: KNOWLEDGE_INDICATORS_DATA_STREAM,
-      });
+      expect(internalEsClient.indices.createDataStream).not.toHaveBeenCalled();
+      // The remaining streams are still checked.
+      expect(internalEsClient.indices.exists).toHaveBeenCalledWith({ index: RULE_EVENTS_INDEX });
     });
 
     it('leaves a registered stream untouched when its initializer fails', async () => {
       const { api } = makeManagementApi();
       const { service, initializeClient, esClient } = makeService({
         management: api,
-        dataStreams: { [DETECTIONS_DATA_STREAM]: 3 },
+        dataStreams: { [KNOWLEDGE_INDICATORS_DATA_STREAM]: 3 },
       });
       initializeClient.mockRejectedValueOnce(new Error('template install failed'));
 
       const summary = await service.reset({ request: REQUEST });
 
       expect(summary.partialFailures).toContainEqual({
-        target: `data-stream:${DETECTIONS_DATA_STREAM}:initialize`,
+        target: `data-stream:${KNOWLEDGE_INDICATORS_DATA_STREAM}:initialize`,
         error: 'template install failed',
       });
       expect(esClient.deleteByQuery).not.toHaveBeenCalledWith(
-        expect.objectContaining({ index: DETECTIONS_DATA_STREAM })
+        expect.objectContaining({ index: KNOWLEDGE_INDICATORS_DATA_STREAM })
       );
       expect(summary.deleted?.dataStreams).toBe(0);
     });
@@ -197,7 +205,7 @@ describe('SignificantEventsMaintenanceService', () => {
       const { api } = makeManagementApi();
       const { service, esClient } = makeService({
         management: api,
-        dataStreams: { [DETECTIONS_DATA_STREAM]: 1 },
+        dataStreams: { [RULE_EVENTS_INDEX]: 1 },
       });
 
       await service.reset({ request: REQUEST });
@@ -217,7 +225,7 @@ describe('SignificantEventsMaintenanceService', () => {
       expect(esClient.deleteByQuery).not.toHaveBeenCalled();
       expect(summary.deleted?.dataStreams).toBe(0);
       expect(summary.partialFailures).toContainEqual({
-        target: `data-stream:${DETECTIONS_DATA_STREAM}:refresh`,
+        target: `data-stream:${RULE_EVENTS_INDEX}:refresh`,
         error: 'refresh denied',
       });
     });
@@ -504,7 +512,7 @@ describe('SignificantEventsMaintenanceService', () => {
       const { service } = makeService({
         management: api,
         dataStreams: {
-          [DETECTIONS_DATA_STREAM]: 1,
+          [RULE_EVENTS_INDEX]: 1,
           [KNOWLEDGE_INDICATORS_DATA_STREAM]: 1,
           [DISCOVERIES_DATA_STREAM]: 1,
         },
@@ -564,7 +572,7 @@ describe('SignificantEventsMaintenanceService', () => {
       const { api } = makeManagementApi();
       const { service, soClient, esClient } = makeService({
         management: api,
-        dataStreams: { [DETECTIONS_DATA_STREAM]: 1 },
+        dataStreams: { [RULE_EVENTS_INDEX]: 1 },
       });
 
       await service.reset({ request: REQUEST });
@@ -586,7 +594,7 @@ describe('SignificantEventsMaintenanceService', () => {
       const { api, updateWorkflow } = makeManagementApi();
       const { service, soClient, esClient } = makeService({
         management: api,
-        dataStreams: { [DETECTIONS_DATA_STREAM]: 1 },
+        dataStreams: { [RULE_EVENTS_INDEX]: 1 },
       });
       soClient.create
         .mockResolvedValueOnce({} as never)
@@ -616,7 +624,7 @@ describe('SignificantEventsMaintenanceService', () => {
       const { service, soClient, esClient } = makeService({
         management: api,
         dataStreams: {
-          [DETECTIONS_DATA_STREAM]: 1,
+          [RULE_EVENTS_INDEX]: 1,
           [KNOWLEDGE_INDICATORS_DATA_STREAM]: 0,
         },
       });
@@ -628,8 +636,8 @@ describe('SignificantEventsMaintenanceService', () => {
       await expect(service.reset({ request: REQUEST })).rejects.toThrow('reset state write failed');
       expect(esClient.deleteByQuery).toHaveBeenCalledWith(
         expect.objectContaining({
-          index: DETECTIONS_DATA_STREAM,
-          query: { term: { 'kibana.space_ids': 'default' } },
+          index: RULE_EVENTS_INDEX,
+          query: expect.objectContaining({ bool: expect.anything() }),
         })
       );
     });

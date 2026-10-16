@@ -58,10 +58,13 @@ function createEsClient(): Client {
       hits: {
         hits: [
           {
+            // A detection signal in `.rule-events`, on the series of the rule it was observed on.
             _source: {
               '@timestamp': '2026-08-27T10:01:00.000Z',
-              detection_id: 'primary-detection',
-              rule_uuid: 'primary-rule',
+              type: 'signal',
+              source: 'elastic.significant_events.detection',
+              rule: { id: 'primary-rule' },
+              data: { detection_id: 'primary-detection' },
             },
           },
         ],
@@ -131,6 +134,19 @@ describe('runDiscovery', () => {
       ['GET', '/api/workflows/executions/discovery-execution'],
       ['GET', expect.stringContaining('/internal/significant_events/events?')],
     ]);
+    expect(esClient.search).toHaveBeenCalledWith(
+      expect.objectContaining({
+        index: '.rule-events',
+        query: {
+          bool: {
+            filter: expect.arrayContaining([
+              { term: { source: 'elastic.significant_events.detection' } },
+              { terms: { 'rule.id': expect.any(Array) } },
+            ]),
+          },
+        },
+      })
+    );
     expect(esClient.esql.query).toHaveBeenCalledWith({
       query: expect.stringContaining('METADATA _index, _id'),
     });
