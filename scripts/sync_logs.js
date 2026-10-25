@@ -23,6 +23,7 @@
  * Source (required): SOURCE_ELASTICSEARCH_HOST, SOURCE_ELASTICSEARCH_API_KEY (or --source-host, --source-api-key)
  * Destination: read from config/kibana.dev.yml (or --config), env ELASTICSEARCH_HOST, ELASTICSEARCH_API_KEY, ELASTICSEARCH_USERNAME, ELASTICSEARCH_PASSWORD.
  * Local dest is detected like kibana_api_common.sh: HTTP/HTTPS × elastic/elastic_serverless.
+ * HTTPS-to-HTTP (OpenSSL "wrong version number") retries the opposite protocol.
  * Sync options: SYNC_* env or --index-pattern, --size, --interval, --sample-mode, --target-index, etc.
  * Set env vars in the shell (e.g. export SOURCE_ELASTICSEARCH_HOST=...) or pass inline; CLI flags override env.
  */
@@ -35,6 +36,7 @@ var yaml = require('yaml');
 var getopts = require('getopts');
 var elasticsearch = require('@elastic/elasticsearch');
 var Client = elasticsearch.Client;
+var destUtils = require('./sync_logs_dest');
 
 var requestTimeoutMs = 30000;
 
@@ -43,33 +45,37 @@ var requestTimeoutMs = 30000;
  * Uses config file (default config/kibana.dev.yml or --config), then env overrides.
  */
 function readKibanaConfig(configPath, log) {
-  var configPathToUse = path.resolve(process.cwd(), '../config/kibana.dev.yml');
-
+  var configPathToUse;
   if (configPath) {
     configPathToUse = path.resolve(process.cwd(), configPath);
-  }
-  if (!fs.existsSync(configPathToUse)) {
+  } else {
     configPathToUse = path.resolve(process.cwd(), 'config/kibana.dev.yml');
+    if (!fs.existsSync(configPathToUse)) {
+      configPathToUse = path.resolve(process.cwd(), '../config/kibana.dev.yml');
+    }
   }
   var esConfigValues = {};
 
   if (fs.existsSync(configPathToUse)) {
     try {
       var loaded = yaml.parse(fs.readFileSync(configPathToUse, 'utf8')) || {};
-      // Support flat keys (elasticsearch.hosts) or nested (elasticsearch: { hosts })
-      if (loaded.elasticsearch && typeof loaded.elasticsearch === 'object') {
-        esConfigValues = loaded.elasticsearch;
-      } else {
-        for (var key in loaded) {
-          if (Object.prototype.hasOwnProperty.call(loaded, key)) {
-            var value = loaded[key];
-            if (key.startsWith('elasticsearch.') && value != null) {
-              var sub = key.slice('elasticsearch.'.length);
-              esConfigValues[sub] = Array.isArray(value) ? value[0] : value;
-            }
-          }
-        }
+      // Merge nested elasticsearch: { hosts } with dotted elasticsearch.hosts keys.
+      // Nested-only (e.g. elasticsearch.ssl) must not hide dotted hosts.
+      if (
+        loaded.elasticsearch &&
+        typeof loaded.elasticsearch === 'object' &&
+        !Array.isArray(loaded.elasticsearch)
+      ) {
+        esConfigValues = Object.assign({}, loaded.elasticsearch);
       }
+      Object.keys(loaded).forEach(function (key) {
+        if (!Object.prototype.hasOwnProperty.call(loaded, key)) return;
+        var value = loaded[key];
+        if (key.startsWith('elasticsearch.') && value != null) {
+          var sub = key.slice('elasticsearch.'.length);
+          esConfigValues[sub] = Array.isArray(value) ? value[0] : value;
+        }
+      });
     } catch (err) {
       if (log) log('Warning: could not read config ' + configPathToUse + ': ' + err.message);
     }
@@ -200,14 +206,7 @@ function parseConfig(log) {
   var destApiKey = get('dest-api-key', 'ELASTICSEARCH_API_KEY', undefined);
 
   var destEsConfig = readKibanaConfig(opts.config, log);
-  var destHost;
-  if (typeof destEsConfig.hosts === 'string') {
-    destHost = destEsConfig.hosts;
-  } else if (Array.isArray(destEsConfig.hosts)) {
-    destHost = destEsConfig.hosts[0];
-  } else {
-    destHost = 'http://localhost:9200';
-  }
+  var destHost = destUtils.firstEsHost(destEsConfig.hosts) || 'http://localhost:9200';
 
   // CLI flag takes precedence, then env (already in destApiKey), then config file
   var resolvedDestApiKey = destApiKey || destEsConfig.apiKey || undefined;
@@ -273,120 +272,11 @@ function parseConfig(log) {
   return config;
 }
 
-function isLocalhostUrl(nodeUrl) {
-  try {
-    var hostname = new URL(nodeUrl).hostname;
-    return (
-      hostname === 'localhost' ||
-      hostname === '127.0.0.1' ||
-      hostname === '[::1]' ||
-      hostname === 'host.docker.internal'
-    );
-  } catch (err) {
-    return false;
-  }
-}
-
-// Same permutations as scripts/kibana_api_common.sh and @kbn/connector-cli.
-var DEFAULT_DEST_AUTHS = [
-  { username: 'elastic', password: 'changeme' },
-  { username: 'elastic_serverless', password: 'changeme' },
-];
-
-function destHostCandidates(config) {
-  var host = config.destHost.replace(/\/$/, '');
-  if (!isLocalhostUrl(host)) {
-    return [host];
-  }
-  try {
-    var parsed = new URL(host);
-    var port = parsed.port || '9200';
-    var httpCandidate = new URL(host);
-    var httpsCandidate = new URL(host);
-    httpCandidate.protocol = 'http:';
-    httpsCandidate.protocol = 'https:';
-    httpCandidate.port = port;
-    httpsCandidate.port = port;
-    return [
-      httpCandidate.toString().replace(/\/$/, ''),
-      httpsCandidate.toString().replace(/\/$/, ''),
-    ];
-  } catch (err) {
-    return ['http://localhost:9200', 'https://localhost:9200'];
-  }
-}
-
-function destAuthCandidates(config) {
-  if (config.destApiKey) {
-    return [{ apiKey: config.destApiKey }];
-  }
-
-  var configured = { username: config.destUsername, password: config.destPassword };
-  if (!isLocalhostUrl(config.destHost)) {
-    return [configured];
-  }
-
-  var isStockUser =
-    config.destUsername === 'elastic' || config.destUsername === 'elastic_serverless';
-  if (config.destPassword !== 'changeme' || !isStockUser) {
-    return [configured];
-  }
-
-  return DEFAULT_DEST_AUTHS.slice();
-}
-
-function destCandidates(config) {
-  var hosts = destHostCandidates(config);
-  var auths = destAuthCandidates(config);
-  var out = [];
-  hosts.forEach(function (host) {
-    auths.forEach(function (auth) {
-      out.push({
-        destHost: host,
-        destApiKey: auth.apiKey,
-        destUsername: auth.username,
-        destPassword: auth.password,
-      });
-    });
-  });
-  return out;
-}
-
-function formatDestCandidate(candidate) {
-  if (candidate.destApiKey) {
-    return candidate.destHost + ' (api key)';
-  }
-  return candidate.destHost + ' as ' + candidate.destUsername;
-}
-
-function formatDestCandidatesTried(config) {
-  return destCandidates(config).map(formatDestCandidate).join(', ');
-}
-
-function applyDestCandidate(config, candidate) {
-  config.destHost = candidate.destHost;
-  config.destApiKey = candidate.destApiKey;
-  config.destUsername = candidate.destUsername;
-  config.destPassword = candidate.destPassword;
-}
-
-// Match kibana_api_common.sh (`curl -k`) and connector-cli (rejectUnauthorized: false).
-function getTlsOptions(nodeUrl, noVerifyCerts) {
-  try {
-    var parsed = new URL(nodeUrl);
-    if (parsed.protocol !== 'https:') {
-      return undefined;
-    }
-    if (noVerifyCerts || isLocalhostUrl(nodeUrl)) {
-      return { rejectUnauthorized: false };
-    }
-  } catch (err) {
-    if (noVerifyCerts) {
-      return { rejectUnauthorized: false };
-    }
-  }
-  return undefined;
-}
+var isLocalhostUrl = destUtils.isLocalhostUrl;
+var destCandidates = destUtils.destCandidates;
+var formatDestCandidate = destUtils.formatDestCandidate;
+var applyDestCandidate = destUtils.applyDestCandidate;
+var getTlsOptions = destUtils.getTlsOptions;
 
 function createSourceClient(config) {
   var node = config.sourceHost.replace(/\/$/, '');
@@ -401,7 +291,10 @@ function createSourceClient(config) {
 
 function createDestClient(config, clientOptions) {
   clientOptions = clientOptions || {};
-  var node = config.destHost.replace(/\/$/, '');
+  var coerced = destUtils.coerceDestUrl(config.destHost);
+  var node = coerced
+    ? coerced.toString().replace(/\/$/, '')
+    : config.destHost.replace(/\/$/, '');
   var auth = config.destApiKey
     ? { apiKey: config.destApiKey }
     : { username: config.destUsername, password: config.destPassword };
@@ -444,22 +337,26 @@ function tryDestCandidate(config, candidate) {
 
 function resolveDestClient(config, log) {
   var candidates = destCandidates(config);
-
-  if (candidates.length === 1) {
-    applyDestCandidate(config, candidates[0]);
-    var client = createDestClient(config);
-    return pingCluster(client, 'dest', log).then(function () {
-      return client;
-    });
-  }
-
+  var protocolFlipped = false;
   var index = 0;
+
   function tryNext(lastErr) {
     if (index >= candidates.length) {
+      // HTTPS-to-HTTP (OpenSSL "wrong version number") is a protocol mismatch, not a
+      // dead cluster. Retry the opposite protocol even when dest was not classified
+      // as localhost (e.g. protocol-less "localhost:9200" before coerce, docker DNS).
+      if (!protocolFlipped && lastErr && destUtils.isProtocolMismatchError(lastErr)) {
+        protocolFlipped = true;
+        var extras = destUtils.appendOppositeProtocolCandidates(candidates);
+        if (extras.length) {
+          candidates = candidates.concat(extras);
+          return tryNext(lastErr);
+        }
+      }
       log('[dest] Connection failed: could not detect a running Elasticsearch instance.');
       throw new Error(
         'Tried: ' +
-          formatDestCandidatesTried(config) +
+          candidates.map(formatDestCandidate).join(', ') +
           (lastErr ? '. Last error: ' + lastErr.message : '')
       );
     }
@@ -778,8 +675,9 @@ Source (required):
 
 Destination (same cluster as Kibana, like otel_demo):
   Read from config/kibana.dev.yml (or --config). Local dest is detected like
-  kibana_api_common.sh: http://localhost:9200 and https://localhost:9200 with
+  kibana_api_common.sh: HTTP and HTTPS on the configured host/port with
   elastic:changeme and elastic_serverless:changeme. Local HTTPS skips TLS verify.
+  If HTTPS hits a plain HTTP server (OpenSSL "wrong version number"), dest retries HTTP.
   ELASTICSEARCH_HOST             or  --config           Destination cluster URL
   ELASTICSEARCH_API_KEY          or  --dest-api-key     Destination API key (takes precedence over username/password)
   ELASTICSEARCH_USERNAME                                Destination username (default: elastic)
@@ -948,9 +846,12 @@ module.exports = {
   createSourceClient: createSourceClient,
   createDestClient: createDestClient,
   destCandidates: destCandidates,
+  destHostCandidates: destUtils.destHostCandidates,
+  destAuthCandidates: destUtils.destAuthCandidates,
   resolveDestClient: resolveDestClient,
   getTlsOptions: getTlsOptions,
   isLocalhostUrl: isLocalhostUrl,
+  coerceDestUrl: destUtils.coerceDestUrl,
   search: search,
   transform: transform,
   backingIndexToStreamName: backingIndexToStreamName,
