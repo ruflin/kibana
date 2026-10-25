@@ -8,4 +8,41 @@
  */
 
 require('@kbn/setup-node-env/node_version_validator');
-require('@elastic/makelogs');
+
+var detect = require('./makelogs_detect');
+
+function startMakelogs() {
+  require('@elastic/makelogs');
+}
+
+function main() {
+  if (detect.hasUserConnectionFlags()) {
+    startMakelogs();
+    return;
+  }
+
+  detect.detectLocalEs().then(function (detected) {
+    if (!detected) {
+      console.error(
+        'Could not detect a running Elasticsearch instance with known credentials.\n' +
+          'Tried HTTP/HTTPS on localhost:9200 as elastic and elastic_serverless.\n' +
+          'Pass --auth user:password and optionally --url/--host, or set ELASTICSEARCH_HOST.'
+      );
+      process.exit(1);
+      return;
+    }
+    console.log(
+      'Detected Elasticsearch at ' + detected.destHost + ' (auth: ' + detected.username + ')'
+    );
+    detect.injectDetectedArgv(detected);
+    startMakelogs();
+  });
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  main: main,
+};
