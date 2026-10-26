@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+results/a1.json
+results/a2.json
+results/a3.json
