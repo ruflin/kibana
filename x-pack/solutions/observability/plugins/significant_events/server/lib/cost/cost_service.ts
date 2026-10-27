@@ -630,6 +630,36 @@ const toPeriodCost = ({
   });
 };
 
+/**
+ * Estimated Nightshift spend in USD for the current UTC day, or null when it cannot be priced.
+ * Throws when the token usage cannot be read, so callers decide how to degrade.
+ */
+export const calculateTodayEstimatedCost = async ({
+  esClient,
+  prices,
+  now,
+  logger,
+}: {
+  esClient: ElasticsearchClient;
+  prices: PriceMap;
+  now: Date;
+  logger: Logger;
+}): Promise<number | null> => {
+  const periodStart = resolveDailyWindow(now).start;
+  const periodEnd = now.toISOString();
+  let aggregations: unknown;
+  try {
+    aggregations = await searchPeriod({ esClient, prices, periodStart, periodEnd });
+  } catch (error) {
+    if (isMissingTokenUsageIndex(error)) {
+      return 0;
+    }
+    throw error;
+  }
+  return toPeriodCost({ label: 'today', periodStart, periodEnd, aggregations, prices, logger })
+    .totalEstimatedCost;
+};
+
 export const calculateSignificantEventsCost = async ({
   esClient,
   prices,

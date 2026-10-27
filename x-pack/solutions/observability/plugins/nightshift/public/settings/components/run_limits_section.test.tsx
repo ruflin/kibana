@@ -40,6 +40,7 @@ const response = (overrides: Partial<RunQuotasResponse> = {}): RunQuotasResponse
     investigation: 30,
     ki_extraction: 20,
   },
+  costLimitUsd: 0,
   counts: {
     detection: 4,
     investigation: 3,
@@ -65,7 +66,13 @@ const setQueryResponse = (data: RunQuotasResponse) => {
 
 const ALL_GROUPS = ['detection', 'investigation', 'ki_extraction'] as const;
 
-const TestRunLimits = ({ groups = ALL_GROUPS }: { groups?: readonly RunQuotaGroup[] }) => {
+const TestRunLimits = ({
+  groups = ALL_GROUPS,
+  tokenTrackingEnabled,
+}: {
+  groups?: readonly RunQuotaGroup[];
+  tokenTrackingEnabled?: boolean;
+}) => {
   const form = useRunLimitsForm({ groups });
   const onSave = async () => {
     await form.requestSave();
@@ -76,7 +83,13 @@ const TestRunLimits = ({ groups = ALL_GROUPS }: { groups?: readonly RunQuotaGrou
 
   return (
     <>
-      <RunLimitsSection groups={groups} form={form} onSave={onSave} onConfirmSave={onConfirmSave} />
+      <RunLimitsSection
+        groups={groups}
+        form={form}
+        tokenTrackingEnabled={tokenTrackingEnabled}
+        onSave={onSave}
+        onConfirmSave={onConfirmSave}
+      />
       <SettingsSaveBar
         hasChanges={form.isDirty}
         isSaving={form.isSaving}
@@ -88,14 +101,18 @@ const TestRunLimits = ({ groups = ALL_GROUPS }: { groups?: readonly RunQuotaGrou
   );
 };
 
-const setup = (data: RunQuotasResponse = response(), groups?: readonly RunQuotaGroup[]) => {
+const setup = (
+  data: RunQuotasResponse = response(),
+  groups?: readonly RunQuotaGroup[],
+  tokenTrackingEnabled?: boolean
+) => {
   setQueryResponse(data);
   mockUseUpdateRunQuotas.mockReturnValue({ save, isSaving: updateIsSaving });
   save.mockResolvedValue(data);
 
   return render(
     <I18nProvider>
-      <TestRunLimits groups={groups} />
+      <TestRunLimits groups={groups} tokenTrackingEnabled={tokenTrackingEnabled} />
     </I18nProvider>
   );
 };
@@ -115,6 +132,97 @@ describe('RunLimitsSection', () => {
         },
       },
     } as never);
+  });
+
+  describe('daily cost limit', () => {
+    it('is hidden unless the tab provides the token tracking state', () => {
+      setup(response({ costLimitUsd: 25 }));
+
+      expect(screen.queryByTestId('nightshiftCostLimitRow')).not.toBeInTheDocument();
+    });
+
+    it('shows the saved limit and lets managers change it when tracking is enabled', () => {
+      setup(response({ costLimitUsd: 25 }), undefined, true);
+
+      expect(screen.getByTestId('nightshiftCostLimitEnabledSwitch')).toBeChecked();
+      expect(screen.getByTestId('nightshiftCostLimitInput')).toHaveValue(25);
+      expect(screen.getByTestId('nightshiftCostLimitInput')).toBeEnabled();
+    });
+
+    it('saves a new limit together with nothing else', async () => {
+      setup(response({ costLimitUsd: 25 }), undefined, true);
+      fireEvent.change(screen.getByTestId('nightshiftCostLimitInput'), {
+        target: { value: '12.5' },
+      });
+      fireEvent.click(screen.getByTestId('streams-settings-save-button'));
+
+      await waitFor(() => expect(save).toHaveBeenCalledWith({ costLimitUsd: 12.5 }));
+    });
+
+    it('saves zero when the limit is switched off and restores the last amount when switched on', async () => {
+      setup(response({ costLimitUsd: 25 }), undefined, true);
+      fireEvent.click(screen.getByTestId('nightshiftCostLimitEnabledSwitch'));
+
+      expect(screen.queryByTestId('nightshiftCostLimitInput')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('streams-settings-save-button'));
+      await waitFor(() => expect(save).toHaveBeenCalledWith({ costLimitUsd: 0 }));
+    });
+
+    it('offers a default amount when the limit is switched on', () => {
+      setup(response({ costLimitUsd: 0 }), undefined, true);
+      fireEvent.click(screen.getByTestId('nightshiftCostLimitEnabledSwitch'));
+
+      expect(screen.getByTestId('nightshiftCostLimitInput')).toHaveValue(10);
+    });
+
+    it('blocks saving an invalid amount', () => {
+      setup(response({ costLimitUsd: 25 }), undefined, true);
+      fireEvent.change(screen.getByTestId('nightshiftCostLimitInput'), {
+        target: { value: '' },
+      });
+
+      expect(screen.getByText(/Enter an amount from/)).toBeInTheDocument();
+      expect(screen.getByTestId('streams-settings-save-button')).toBeDisabled();
+    });
+
+    it('does not let a limit be enabled or changed while token tracking is off', () => {
+      setup(response({ costLimitUsd: 0 }), undefined, false);
+
+      expect(screen.getByTestId('nightshiftCostLimitEnabledSwitch')).toBeDisabled();
+      expect(screen.getByText(/Token usage tracking is turned off/)).toBeInTheDocument();
+    });
+
+    it('still lets an existing limit be switched off while token tracking is off', () => {
+      setup(response({ costLimitUsd: 25 }), undefined, false);
+
+      expect(screen.getByTestId('nightshiftCostLimitInput')).toBeDisabled();
+      expect(screen.getByTestId('nightshiftCostLimitEnabledSwitch')).toBeEnabled();
+    });
+
+    it('prevents read-only users from editing it', () => {
+      setup(response({ canManage: false, costLimitUsd: 25 }), undefined, true);
+
+      expect(screen.getByTestId('nightshiftCostLimitEnabledSwitch')).toBeDisabled();
+      expect(screen.getByTestId('nightshiftCostLimitInput')).toBeDisabled();
+    });
+
+    it('is combined with run limit edits in one update', async () => {
+      setup(response({ costLimitUsd: 25 }), undefined, true);
+      fireEvent.change(screen.getByTestId('nightshiftRunLimitInput-detection'), {
+        target: { value: '50' },
+      });
+      fireEvent.change(screen.getByTestId('nightshiftCostLimitInput'), {
+        target: { value: '30' },
+      });
+      fireEvent.click(screen.getByTestId('streams-settings-save-button'));
+
+      await waitFor(() =>
+        expect(save).toHaveBeenCalledWith({
+          limits: { detection: 50 },
+          costLimitUsd: 30,
+        })
+      );
+    });
   });
 
   it('shows legacy globally disabled settings as unlimited per category', () => {

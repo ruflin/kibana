@@ -27,7 +27,13 @@ import {
   readRunQuotaLedger,
   readRunQuotaSettings,
 } from '../../../lib/run_quotas';
+import { createDailyCostLimitCheck } from '../../../lib/cost/daily_cost_limit';
+import type { PriceService } from '../../../lib/cost/price_service';
 import { internalRunQuotaRoutes } from './route';
+
+jest.mock('../../../lib/cost/daily_cost_limit', () => ({
+  createDailyCostLimitCheck: jest.fn(),
+}));
 
 jest.mock('../../utils/assert_significant_events_access', () => ({
   assertSignificantEventsAccess: jest.fn().mockResolvedValue(undefined),
@@ -56,11 +62,16 @@ const request = {};
 const defaultSettings: RunQuotaSettingsAttributes = {
   enabled: DEFAULT_RUN_QUOTA_SETTINGS.enabled,
   limits: { ...DEFAULT_RUN_QUOTA_SETTINGS.limits },
+  costLimitUsd: DEFAULT_RUN_QUOTA_SETTINGS.costLimitUsd,
 };
+
+const priceService = {} as PriceService;
+const isCostLimitReached = jest.fn();
 
 const handlerParams = {
   request,
   server,
+  priceService,
   getScopedClients: jest.fn().mockResolvedValue({ licensing: {} }),
 };
 
@@ -86,6 +97,7 @@ describe('Significant Events run quota routes', () => {
       .mocked(createRunQuotaInternalRepository)
       .mockReset()
       .mockReturnValue(repository as never);
+    jest.mocked(createDailyCostLimitCheck).mockReset().mockReturnValue(isCostLimitReached);
     jest.mocked(patchRunQuotaSettings).mockReset();
     jest.mocked(readRunQuotaSettings).mockReset().mockResolvedValue(defaultSettings);
     jest.mocked(readRunQuotaLedger).mockReset();
@@ -119,6 +131,13 @@ describe('Significant Events run quota routes', () => {
   it('accepts only non-empty bounded settings updates', () => {
     expect(putRoute.params.safeParse({ body: { enabled: true } }).success).toBe(true);
     expect(putRoute.params.safeParse({ body: { limits: { detection: 0 } } }).success).toBe(true);
+    expect(putRoute.params.safeParse({ body: { costLimitUsd: 12.5 } }).success).toBe(true);
+    expect(putRoute.params.safeParse({ body: { costLimitUsd: 0 } }).success).toBe(true);
+    expect(
+      putRoute.params.safeParse({
+        body: { activateLimits: { detection: 15 }, costLimitUsd: 10 },
+      }).success
+    ).toBe(true);
     expect(putRoute.params.safeParse({ body: { activateLimits: { detection: 15 } } }).success).toBe(
       true
     );
@@ -142,6 +161,9 @@ describe('Significant Events run quota routes', () => {
       { activateLimits: { detection: 0 } },
       { activateLimits: { memory: 1 } },
       { enabled: true, activateLimits: { detection: 15 } },
+      { costLimitUsd: -1 },
+      { costLimitUsd: 1_000_001 },
+      { costLimitUsd: '5' },
     ]) {
       expect(putRoute.params.safeParse({ body }).success).toBe(false);
     }
@@ -171,6 +193,7 @@ describe('Significant Events run quota routes', () => {
   it('returns configured limits and current-day counts while enforcement is disabled', async () => {
     const settings: RunQuotaSettingsAttributes = {
       enabled: false,
+      costLimitUsd: 7.5,
       limits: {
         detection: 0,
         investigation: 30,
@@ -189,6 +212,7 @@ describe('Significant Events run quota routes', () => {
     expect(response).toEqual({
       enabled: false,
       limits: settings.limits,
+      costLimitUsd: 7.5,
       counts: {
         detection: 17,
         investigation: 8,
@@ -210,6 +234,7 @@ describe('Significant Events run quota routes', () => {
   it('applies an actual partial update and returns the common snapshot', async () => {
     const updated: RunQuotaSettingsAttributes = {
       enabled: true,
+      costLimitUsd: 20,
       limits: {
         detection: 0,
         investigation: 30,
@@ -225,6 +250,7 @@ describe('Significant Events run quota routes', () => {
         body: {
           enabled: true,
           limits: { detection: 0 },
+          costLimitUsd: 20,
         },
       },
     } as never);
@@ -233,10 +259,12 @@ describe('Significant Events run quota routes', () => {
     expect(patchRunQuotaSettings).toHaveBeenCalledWith(repository, {
       enabled: true,
       limits: { detection: 0 },
+      costLimitUsd: 20,
     });
     expect(response).toEqual({
       enabled: true,
       limits: updated.limits,
+      costLimitUsd: 20,
       counts: {
         detection: 2,
         investigation: 3,
@@ -263,9 +291,11 @@ describe('Significant Events run quota routes', () => {
       } as never)
     ).resolves.toEqual({ allowed: true });
 
+    expect(createDailyCostLimitCheck).toHaveBeenCalledWith({ request, server, priceService });
     expect(consumeRunQuota).toHaveBeenCalledWith({
       internalRepository: repository,
       group: body.group,
+      isCostLimitReached,
     });
   });
 });

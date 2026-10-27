@@ -11,6 +11,9 @@ export type RunQuotaGroup = (typeof RUN_QUOTA_GROUPS)[number];
 
 export const MIN_RUN_LIMIT = 0;
 export const MAX_RUN_LIMIT = 10_000;
+export const MIN_COST_LIMIT_USD = 0;
+export const MAX_COST_LIMIT_USD = 1_000_000;
+export const DEFAULT_COST_LIMIT_USD = 0;
 export const DEFAULT_RUN_QUOTA_TIME_ZONE = 'UTC';
 
 export const DEFAULT_RUN_LIMITS: Readonly<Record<RunQuotaGroup, number>> = {
@@ -22,11 +25,17 @@ export const DEFAULT_RUN_LIMITS: Readonly<Record<RunQuotaGroup, number>> = {
 export interface RunQuotaSettings {
   enabled: boolean;
   limits: Record<RunQuotaGroup, number>;
+  /**
+   * Global daily estimated cost cap in USD across all Nightshift scheduled activity, where 0
+   * means no cost cap. Only enforced while token usage tracking is enabled.
+   */
+  costLimitUsd: number;
 }
 
 export const DEFAULT_RUN_QUOTA_SETTINGS: Readonly<RunQuotaSettings> = {
   enabled: true,
   limits: DEFAULT_RUN_LIMITS,
+  costLimitUsd: DEFAULT_COST_LIMIT_USD,
 };
 
 export interface RunQuotaWindow {
@@ -38,6 +47,7 @@ export interface RunQuotaWindow {
 export interface RunQuotasResponse {
   enabled: boolean;
   limits: Record<RunQuotaGroup, number>;
+  costLimitUsd: number;
   counts: Record<RunQuotaGroup, number>;
   window: RunQuotaWindow;
   canManage: boolean;
@@ -47,6 +57,7 @@ export type RunQuotaSettingsUpdate =
   | {
       enabled?: boolean;
       limits?: Partial<Record<RunQuotaGroup, number>>;
+      costLimitUsd?: number;
       activateLimits?: never;
     }
   | {
@@ -55,6 +66,7 @@ export type RunQuotaSettingsUpdate =
        * without overwriting categories activated by a concurrent request.
        */
       activateLimits: Partial<Record<RunQuotaGroup, number>>;
+      costLimitUsd?: number;
       enabled?: never;
       limits?: never;
     };

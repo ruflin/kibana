@@ -5,18 +5,21 @@
  * 2.0.
  */
 
-import { z } from '@kbn/zod/v4';
+import { lazySchema, z } from '@kbn/zod/v4';
 import {
   NIGHTSHIFT_API_PRIVILEGES,
   NIGHTSHIFT_MANAGE_AND_CONFIGURE_API_PRIVILEGES,
 } from '@kbn/nightshift-shared';
 import {
+  MAX_COST_LIMIT_USD,
   MAX_RUN_LIMIT,
+  MIN_COST_LIMIT_USD,
   MIN_RUN_LIMIT,
   type RunQuotasResponse,
 } from '../../../../common/run_quotas';
 import { createServerRoute } from '../../create_server_route';
 import { assertSignificantEventsAccess } from '../../utils/assert_significant_events_access';
+import { createDailyCostLimitCheck } from '../../../lib/cost/daily_cost_limit';
 import {
   assertCanManageRunQuotas,
   canManageRunQuotas,
@@ -68,22 +71,32 @@ const activateLimitsSchema = z
     message: 'At least one run limit to activate is required',
   });
 
-const settingsUpdateSchema = z.union([
-  z
-    .object({
-      enabled: z.boolean().optional(),
-      limits: limitsUpdateSchema.optional(),
-    })
-    .strict()
-    .refine((update) => update.enabled !== undefined || update.limits !== undefined, {
-      message: 'At least one run quota setting is required',
-    }),
-  z
-    .object({
-      activateLimits: activateLimitsSchema,
-    })
-    .strict(),
-]);
+const settingsUpdateSchema = lazySchema(() =>
+  z.union([
+    z
+      .object({
+        enabled: z.boolean().optional(),
+        limits: limitsUpdateSchema.optional(),
+        costLimitUsd: z.number().min(MIN_COST_LIMIT_USD).max(MAX_COST_LIMIT_USD).optional(),
+      })
+      .strict()
+      .refine(
+        (update) =>
+          update.enabled !== undefined ||
+          update.limits !== undefined ||
+          update.costLimitUsd !== undefined,
+        {
+          message: 'At least one run quota setting is required',
+        }
+      ),
+    z
+      .object({
+        activateLimits: activateLimitsSchema,
+        costLimitUsd: z.number().min(MIN_COST_LIMIT_USD).max(MAX_COST_LIMIT_USD).optional(),
+      })
+      .strict(),
+  ])
+);
 
 const consumeRequestSchema = z.discriminatedUnion('group', [
   z.object({ group: z.literal('detection') }).strict(),
@@ -117,6 +130,7 @@ const readRunQuotaSnapshot = async ({
       investigation: settings.limits.investigation,
       ki_extraction: settings.limits.ki_extraction,
     },
+    costLimitUsd: settings.costLimitUsd,
     counts: {
       detection: detection.count,
       investigation: investigation.count,
@@ -198,12 +212,13 @@ const consumeRoute = createServerRoute({
   params: z.object({
     body: consumeRequestSchema,
   }),
-  handler: async ({ params, request, server, getScopedClients }) => {
+  handler: async ({ params, request, server, getScopedClients, priceService }) => {
     const { licensing } = await getScopedClients({ request });
     await assertSignificantEventsAccess({ server, licensing });
     return consumeRunQuota({
       internalRepository: createRunQuotaInternalRepository(server),
       group: params.body.group,
+      isCostLimitReached: createDailyCostLimitCheck({ request, server, priceService }),
     });
   },
 });

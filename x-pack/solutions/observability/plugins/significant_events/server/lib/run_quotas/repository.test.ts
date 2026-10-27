@@ -45,6 +45,7 @@ describe('run quota settings repository', () => {
         investigation: 3,
         ki_extraction: 3,
       },
+      costLimitUsd: 0,
     });
   });
 
@@ -52,6 +53,7 @@ describe('run quota settings repository', () => {
     const repository = makeRepository();
     const first: RunQuotaSettingsAttributes = {
       enabled: false,
+      costLimitUsd: 0,
       limits: {
         detection: 100,
         investigation: 30,
@@ -84,6 +86,7 @@ describe('run quota settings repository', () => {
       })
     ).resolves.toEqual({
       enabled: true,
+      costLimitUsd: 0,
       futureTopLevel: { retained: 'winner' },
       limits: {
         detection: 120,
@@ -98,6 +101,7 @@ describe('run quota settings repository', () => {
     const repository = makeRepository();
     const legacy: RunQuotaSettingsAttributes = {
       enabled: false,
+      costLimitUsd: 0,
       limits: {
         detection: 100,
         investigation: 30,
@@ -107,6 +111,7 @@ describe('run quota settings repository', () => {
     };
     const concurrentWinner: RunQuotaSettingsAttributes = {
       enabled: true,
+      costLimitUsd: 0,
       limits: {
         detection: 15,
         investigation: 0,
@@ -129,6 +134,7 @@ describe('run quota settings repository', () => {
       })
     ).resolves.toEqual({
       enabled: true,
+      costLimitUsd: 0,
       limits: {
         detection: 15,
         investigation: 3,
@@ -139,12 +145,50 @@ describe('run quota settings repository', () => {
 
     expect(repository.update.mock.calls[0][2]).toEqual({
       enabled: true,
+      costLimitUsd: 0,
       limits: {
         detection: 0,
         investigation: 3,
         ki_extraction: 0,
         future_group: 9,
       },
+    });
+  });
+
+  it('defaults the cost limit for settings stored before it existed', async () => {
+    const repository = makeRepository();
+    repository.get.mockResolvedValue(
+      makeSavedObject({
+        enabled: true,
+        limits: { detection: 5, investigation: 5, ki_extraction: 5 },
+      } as RunQuotaSettingsAttributes)
+    );
+
+    await expect(readRunQuotaSettings(repository)).resolves.toEqual(
+      expect.objectContaining({ costLimitUsd: 0 })
+    );
+  });
+
+  it('stores a patched cost limit next to the existing run limits', async () => {
+    const repository = makeRepository();
+    const current: RunQuotaSettingsAttributes = {
+      enabled: true,
+      costLimitUsd: 0,
+      limits: { detection: 5, investigation: 5, ki_extraction: 5 },
+    };
+    repository.get.mockResolvedValue(makeSavedObject(current));
+    repository.update.mockImplementation(async (_type, _id, attributes) =>
+      makeSavedObject(attributes as RunQuotaSettingsAttributes, 'WzMsMV0=')
+    );
+
+    await expect(patchRunQuotaSettings(repository, { costLimitUsd: 12.5 })).resolves.toEqual({
+      ...current,
+      costLimitUsd: 12.5,
+    });
+    expect(repository.update.mock.calls[0][2]).toEqual({
+      enabled: true,
+      costLimitUsd: 12.5,
+      limits: current.limits,
     });
   });
 });

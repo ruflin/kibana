@@ -5,9 +5,11 @@
  * 2.0.
  */
 
-import type { Logger } from '@kbn/core/server';
+import type { KibanaRequest, Logger } from '@kbn/core/server';
 import type { InvestigationQuotaCallback } from '../types';
 import { evaluateInvestigationQuota } from './evaluate_investigation_quota';
+
+const request = {} as KibanaRequest;
 
 const createLogger = () =>
   ({
@@ -22,15 +24,25 @@ describe('evaluateInvestigationQuota', () => {
   it('allows and warns when no callback is registered', async () => {
     const logger = createLogger();
 
-    await expect(evaluateInvestigationQuota({ logger })).resolves.toEqual({ allowed: true });
+    await expect(evaluateInvestigationQuota({ request, logger })).resolves.toEqual({
+      allowed: true,
+    });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('unavailable'));
+  });
+
+  it('passes the request to the callback', async () => {
+    const callback = jest.fn().mockResolvedValue({ allowed: true });
+
+    await evaluateInvestigationQuota({ callback, request, logger: createLogger() });
+
+    expect(callback).toHaveBeenCalledWith({ request });
   });
 
   it('returns an explicit denial without warning', async () => {
     const logger = createLogger();
     const callback = jest.fn().mockResolvedValue({ allowed: false });
 
-    await expect(evaluateInvestigationQuota({ callback, logger })).resolves.toEqual({
+    await expect(evaluateInvestigationQuota({ callback, request, logger })).resolves.toEqual({
       allowed: false,
     });
     expect(logger.warn).not.toHaveBeenCalled();
@@ -42,7 +54,7 @@ describe('evaluateInvestigationQuota', () => {
       throw new Error('Storage unavailable');
     }) as InvestigationQuotaCallback;
 
-    await expect(evaluateInvestigationQuota({ callback, logger })).resolves.toEqual({
+    await expect(evaluateInvestigationQuota({ callback, request, logger })).resolves.toEqual({
       allowed: true,
     });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Storage unavailable'));
@@ -52,7 +64,7 @@ describe('evaluateInvestigationQuota', () => {
     const logger = createLogger();
     const callback = jest.fn().mockRejectedValue(new Error('Storage unavailable'));
 
-    await expect(evaluateInvestigationQuota({ callback, logger })).resolves.toEqual({
+    await expect(evaluateInvestigationQuota({ callback, request, logger })).resolves.toEqual({
       allowed: true,
     });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Storage unavailable'));
@@ -63,7 +75,7 @@ describe('evaluateInvestigationQuota', () => {
     const logger = createLogger();
     const callback = jest.fn(() => new Promise<{ allowed: boolean }>(() => {}));
 
-    const result = evaluateInvestigationQuota({ callback, logger });
+    const result = evaluateInvestigationQuota({ callback, request, logger });
     await jest.advanceTimersByTimeAsync(10_000);
 
     await expect(result).resolves.toEqual({ allowed: true });
@@ -82,7 +94,7 @@ describe('evaluateInvestigationQuota', () => {
         })
     );
 
-    const result = evaluateInvestigationQuota({ callback, logger });
+    const result = evaluateInvestigationQuota({ callback, request, logger });
     await jest.advanceTimersByTimeAsync(10_000);
     await expect(result).resolves.toEqual({ allowed: true });
 

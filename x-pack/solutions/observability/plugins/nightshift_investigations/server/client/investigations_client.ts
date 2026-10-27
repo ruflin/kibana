@@ -642,6 +642,7 @@ export class NightshiftInvestigationsClient {
       case 'automatic': {
         const { allowed } = await evaluateInvestigationQuota({
           callback: this.investigationQuotaCallback,
+          request: this.request,
           logger: this.logger,
         });
         if (!allowed) {

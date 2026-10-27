@@ -7,6 +7,7 @@
 
 import { coreMock } from '@kbn/core/server/mocks';
 import { httpServerMock } from '@kbn/core-http-server-mocks';
+import { createDailyCostLimitCheck } from './lib/cost/daily_cost_limit';
 import { consumeRunQuota, createRunQuotaInternalRepository } from './lib/run_quotas';
 import { knowledgeIndicatorsDataStream } from './lib/knowledge_indicators';
 import { detectionsDataStream } from './lib/significant_events/detections';
@@ -18,9 +19,11 @@ jest.mock('./lib/run_quotas', () => ({
   createRunQuotaInternalRepository: jest.fn(),
 }));
 
+jest.mock('./lib/cost/daily_cost_limit', () => ({ createDailyCostLimitCheck: jest.fn() }));
 jest.mock('./routes', () => ({ significantEventsRouteRepository: {} }));
 
 const consumeRunQuotaMock = jest.mocked(consumeRunQuota);
+const createDailyCostLimitCheckMock = jest.mocked(createDailyCostLimitCheck);
 const createRunQuotaInternalRepositoryMock = jest.mocked(createRunQuotaInternalRepository);
 
 const createPlugin = () => new SignificantEventsPlugin(coreMock.createPluginInitializerContext());
@@ -112,7 +115,9 @@ describe('SignificantEventsPlugin setup', () => {
     plugin.setup(createCoreSetup(), createSetupDeps({ registerInvestigationQuota }));
     const [callback] = registerInvestigationQuota.mock.calls[0];
 
-    await expect(callback()).rejects.toThrow('Significant Events start services are unavailable');
+    await expect(callback({ request: httpServerMock.createKibanaRequest() })).rejects.toThrow(
+      'Significant Events start services are unavailable'
+    );
     expect(createRunQuotaInternalRepositoryMock).not.toHaveBeenCalled();
   });
 
@@ -127,14 +132,23 @@ describe('SignificantEventsPlugin setup', () => {
       throw new Error('Expected Significant Events server');
     }
     server.core = coreMock.createStart();
+    const isCostLimitReached = jest.fn();
+    createDailyCostLimitCheckMock.mockReturnValue(isCostLimitReached);
+    const request = httpServerMock.createKibanaRequest();
     const [callback] = registerInvestigationQuota.mock.calls[0];
 
-    await expect(callback()).resolves.toEqual({ allowed: true });
+    await expect(callback({ request })).resolves.toEqual({ allowed: true });
 
     expect(createRunQuotaInternalRepositoryMock).toHaveBeenCalledWith(server);
+    expect(createDailyCostLimitCheckMock).toHaveBeenCalledWith({
+      request,
+      server,
+      priceService: expect.objectContaining({ getPrices: expect.any(Function) }),
+    });
     expect(consumeRunQuotaMock).toHaveBeenCalledWith({
       internalRepository,
       group: 'investigation',
+      isCostLimitReached,
     });
   });
 });

@@ -26,6 +26,7 @@ const response = (overrides: Partial<RunQuotasResponse> = {}): RunQuotasResponse
     investigation: 30,
     ki_extraction: 0,
   },
+  costLimitUsd: 0,
   counts: {
     detection: 100,
     investigation: 5,

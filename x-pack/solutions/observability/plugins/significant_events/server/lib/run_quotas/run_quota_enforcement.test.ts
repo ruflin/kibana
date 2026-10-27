@@ -135,6 +135,10 @@ const createRepository = () => {
   };
 };
 
+const consumeWithoutCostLimit = (
+  params: Omit<Parameters<typeof consumeRunQuota>[0], 'isCostLimitReached'>
+) => consumeRunQuota({ ...params, isCostLimitReached: async () => false });
+
 describe('run quota admission behavior', () => {
   afterEach(() => {
     jest.useRealTimers();
@@ -145,10 +149,10 @@ describe('run quota admission behavior', () => {
     const repository = createRepository();
 
     await expect(
-      consumeRunQuota({ internalRepository: repository.client, group: 'detection' })
+      consumeWithoutCostLimit({ internalRepository: repository.client, group: 'detection' })
     ).resolves.toEqual({ allowed: true });
     await expect(
-      consumeRunQuota({ internalRepository: repository.client, group: 'detection' })
+      consumeWithoutCostLimit({ internalRepository: repository.client, group: 'detection' })
     ).resolves.toEqual({ allowed: true });
 
     await expect(repository.count('2026-08-31', 'detection')).resolves.toBe(2);
@@ -164,7 +168,7 @@ describe('run quota admission behavior', () => {
 
     const results = await Promise.all(
       Array.from({ length: 30 }, () =>
-        consumeRunQuota({
+        consumeWithoutCostLimit({
           internalRepository: repository.client,
           group: 'ki_extraction',
         })
@@ -184,13 +188,13 @@ describe('run quota admission behavior', () => {
     });
 
     await expect(
-      consumeRunQuota({ internalRepository: repository.client, group: 'detection' })
+      consumeWithoutCostLimit({ internalRepository: repository.client, group: 'detection' })
     ).resolves.toEqual({ allowed: true });
     await expect(
-      consumeRunQuota({ internalRepository: repository.client, group: 'detection' })
+      consumeWithoutCostLimit({ internalRepository: repository.client, group: 'detection' })
     ).resolves.toEqual({ allowed: true });
     await expect(
-      consumeRunQuota({ internalRepository: repository.client, group: 'detection' })
+      consumeWithoutCostLimit({ internalRepository: repository.client, group: 'detection' })
     ).resolves.toEqual({ allowed: false });
 
     await expect(repository.count('2026-08-31', 'detection')).resolves.toBe(2);
@@ -205,13 +209,13 @@ describe('run quota admission behavior', () => {
     });
 
     await expect(
-      consumeRunQuota({
+      consumeWithoutCostLimit({
         internalRepository: repository.client,
         group: 'investigation',
       })
     ).resolves.toEqual({ allowed: true });
     await expect(
-      consumeRunQuota({
+      consumeWithoutCostLimit({
         internalRepository: repository.client,
         group: 'investigation',
       })
@@ -230,7 +234,7 @@ describe('run quota admission behavior', () => {
 
     const results = await Promise.all(
       Array.from({ length: 30 }, () =>
-        consumeRunQuota({ internalRepository: repository.client, group: 'detection' })
+        consumeWithoutCostLimit({ internalRepository: repository.client, group: 'detection' })
       )
     );
 
@@ -249,7 +253,7 @@ describe('run quota admission behavior', () => {
     });
 
     await expect(
-      consumeRunQuota({ internalRepository: repository.client, group: 'detection' })
+      consumeWithoutCostLimit({ internalRepository: repository.client, group: 'detection' })
     ).resolves.toEqual({ allowed: true });
 
     await expect(repository.count('2026-08-31', 'detection')).resolves.toBe(1);
@@ -260,9 +264,9 @@ describe('run quota admission behavior', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-08-31T23:59:59.999Z'));
     const repository = createRepository();
 
-    await consumeRunQuota({ internalRepository: repository.client, group: 'detection' });
+    await consumeWithoutCostLimit({ internalRepository: repository.client, group: 'detection' });
     jest.setSystemTime(new Date('2026-09-01T00:00:00.000Z'));
-    await consumeRunQuota({ internalRepository: repository.client, group: 'detection' });
+    await consumeWithoutCostLimit({ internalRepository: repository.client, group: 'detection' });
 
     await expect(repository.count('2026-08-31', 'detection')).resolves.toBe(1);
     await expect(repository.count('2026-09-01', 'detection')).resolves.toBe(1);
@@ -278,7 +282,7 @@ describe('run quota admission behavior', () => {
     repository.seedLedger('2026-08-31', 'detection', 10_000);
 
     await expect(
-      consumeRunQuota({ internalRepository: repository.client, group: 'detection' })
+      consumeWithoutCostLimit({ internalRepository: repository.client, group: 'detection' })
     ).resolves.toEqual({ allowed: true });
     await expect(repository.count('2026-08-31', 'detection')).resolves.toBe(10_001);
   });
@@ -289,13 +293,110 @@ describe('run quota admission behavior', () => {
     settingsFailure.failNextGet(new Error('settings unavailable'));
 
     await expect(
-      consumeRunQuota({ internalRepository: settingsFailure.client, group: 'detection' })
+      consumeWithoutCostLimit({ internalRepository: settingsFailure.client, group: 'detection' })
     ).rejects.toThrow('settings unavailable');
 
     const ledgerFailure = createRepository();
     ledgerFailure.failNextCreate(new Error('ledger unavailable'));
     await expect(
-      consumeRunQuota({ internalRepository: ledgerFailure.client, group: 'detection' })
+      consumeWithoutCostLimit({ internalRepository: ledgerFailure.client, group: 'detection' })
     ).rejects.toThrow('ledger unavailable');
+  });
+
+  describe('daily cost limit', () => {
+    const setUpSettings = async (
+      repository: ReturnType<typeof createRepository>,
+      costLimitUsd: number,
+      enabled = true
+    ) => {
+      await patchRunQuotaSettings(repository.client, {
+        enabled,
+        limits: { detection: 10 },
+        costLimitUsd,
+      });
+    };
+
+    it('denies without counting an admission when the cost limit is reached', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-08-31T12:00:00.000Z'));
+      const repository = createRepository();
+      await setUpSettings(repository, 5);
+      const isCostLimitReached = jest.fn().mockResolvedValue(true);
+
+      await expect(
+        consumeRunQuota({
+          internalRepository: repository.client,
+          group: 'detection',
+          isCostLimitReached,
+        })
+      ).resolves.toEqual({ allowed: false });
+
+      expect(isCostLimitReached).toHaveBeenCalledWith(5);
+      await expect(repository.count('2026-08-31', 'detection')).resolves.toBe(0);
+    });
+
+    it('admits and counts when the cost limit is not reached', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-08-31T12:00:00.000Z'));
+      const repository = createRepository();
+      await setUpSettings(repository, 5);
+
+      await expect(
+        consumeRunQuota({
+          internalRepository: repository.client,
+          group: 'detection',
+          isCostLimitReached: async () => false,
+        })
+      ).resolves.toEqual({ allowed: true });
+
+      await expect(repository.count('2026-08-31', 'detection')).resolves.toBe(1);
+    });
+
+    it('does not check the cost when no cost limit is set', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-08-31T12:00:00.000Z'));
+      const repository = createRepository();
+      await setUpSettings(repository, 0);
+      const isCostLimitReached = jest.fn().mockResolvedValue(true);
+
+      await expect(
+        consumeRunQuota({
+          internalRepository: repository.client,
+          group: 'detection',
+          isCostLimitReached,
+        })
+      ).resolves.toEqual({ allowed: true });
+
+      expect(isCostLimitReached).not.toHaveBeenCalled();
+    });
+
+    it('enforces the cost limit even when the run count limits are switched off', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-08-31T12:00:00.000Z'));
+      const repository = createRepository();
+      await setUpSettings(repository, 5, false);
+
+      await expect(
+        consumeRunQuota({
+          internalRepository: repository.client,
+          group: 'detection',
+          isCostLimitReached: async () => true,
+        })
+      ).resolves.toEqual({ allowed: false });
+    });
+
+    it('still applies the run count limit when the cost limit is not reached', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-08-31T12:00:00.000Z'));
+      const repository = createRepository();
+      await patchRunQuotaSettings(repository.client, {
+        enabled: true,
+        limits: { detection: 1 },
+        costLimitUsd: 5,
+      });
+      const params = {
+        internalRepository: repository.client,
+        group: 'detection' as const,
+        isCostLimitReached: async () => false,
+      };
+
+      await expect(consumeRunQuota(params)).resolves.toEqual({ allowed: true });
+      await expect(consumeRunQuota(params)).resolves.toEqual({ allowed: false });
+    });
   });
 });

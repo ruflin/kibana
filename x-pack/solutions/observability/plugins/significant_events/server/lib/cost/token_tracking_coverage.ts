@@ -34,6 +34,19 @@ const requestForSpace = (request: KibanaRequest, spaceId: SpaceId): KibanaReques
   return kibanaRequestFactory(fakeRawRequest);
 };
 
+/** Whether token usage tracking is enabled in the space the request is scoped to. */
+export const isTokenTrackingEnabled = async ({
+  request,
+  server,
+}: {
+  request: KibanaRequest;
+  server: SignificantEventsServer;
+}): Promise<boolean> => {
+  const soClient = server.core.savedObjects.getScopedClient(request);
+  const uiSettingsClient = server.core.uiSettings.asScopedToClient(soClient);
+  return Boolean(await uiSettingsClient.get<boolean>(GEN_AI_SETTINGS_TOKEN_USAGE_TRACKING));
+};
+
 const readTrackingEnabled = async ({
   request,
   server,
@@ -42,12 +55,8 @@ const readTrackingEnabled = async ({
   request: KibanaRequest;
   server: SignificantEventsServer;
   spaceId: SpaceId;
-}): Promise<boolean> => {
-  const spaceRequest = requestForSpace(request, spaceId);
-  const soClient = server.core.savedObjects.getScopedClient(spaceRequest);
-  const uiSettingsClient = server.core.uiSettings.asScopedToClient(soClient);
-  return Boolean(await uiSettingsClient.get<boolean>(GEN_AI_SETTINGS_TOKEN_USAGE_TRACKING));
-};
+}): Promise<boolean> =>
+  isTokenTrackingEnabled({ request: requestForSpace(request, spaceId), server });
 
 export const resolveTokenTrackingCoverage = async ({
   request,
