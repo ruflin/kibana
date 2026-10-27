@@ -20,6 +20,7 @@ import type {
 import { useSignificantEventsCost } from '../hooks/use_significant_events_cost';
 import { useRunQuotas } from '../hooks/use_significant_events_run_quotas';
 import { CostEstimate } from './cost_estimate';
+import type { RunLimitsForm } from './use_run_limits_form';
 import type { TokenTrackingForm } from './use_token_tracking_form';
 
 jest.mock('../hooks/use_significant_events_cost');
@@ -191,10 +192,27 @@ const setCost = (value: Partial<ReturnType<typeof useSignificantEventsCost>> = {
   } as never);
 };
 
+const updateCostLimitDraft = jest.fn();
+const setCostLimitEnabled = jest.fn();
+let runLimits: Pick<
+  RunLimitsForm,
+  'costLimit' | 'updateCostLimitDraft' | 'setCostLimitEnabled' | 'isSaving'
+>;
+
+const setRunLimits = (overrides: Partial<typeof runLimits> = {}) => {
+  runLimits = {
+    costLimit: 0,
+    updateCostLimitDraft,
+    setCostLimitEnabled,
+    isSaving: false,
+    ...overrides,
+  };
+};
+
 const renderCost = () =>
   render(
     <I18nProvider>
-      <CostEstimate tokenTracking={tokenTracking} />
+      <CostEstimate tokenTracking={tokenTracking} runLimits={runLimits} />
     </I18nProvider>
   );
 
@@ -210,7 +228,78 @@ describe('CostEstimate', () => {
       isError: false,
     } as never);
     setTracking(true);
+    setRunLimits();
     setCost();
+  });
+
+  describe('daily cost limit', () => {
+    it('shows the limit switch next to the token tracking switch', () => {
+      renderCost();
+
+      expect(screen.getByTestId('nightshiftCostLimitEnabledSwitch')).not.toBeChecked();
+      expect(screen.getByTestId('nightshiftCostLimitEnabledSwitch')).toBeEnabled();
+      expect(screen.queryByTestId('nightshiftCostLimitInput')).not.toBeInTheDocument();
+    });
+
+    it('switches the limit on and off through the form', () => {
+      setRunLimits({ costLimit: 25 });
+      renderCost();
+
+      expect(screen.getByTestId('nightshiftCostLimitEnabledSwitch')).toBeChecked();
+      expect(screen.getByTestId('nightshiftCostLimitInput')).toHaveValue(25);
+      fireEvent.click(screen.getByTestId('nightshiftCostLimitEnabledSwitch'));
+
+      expect(setCostLimitEnabled).toHaveBeenCalledWith(false);
+    });
+
+    it('reports an edited amount to the form', () => {
+      setRunLimits({ costLimit: 25 });
+      renderCost();
+      fireEvent.change(screen.getByTestId('nightshiftCostLimitInput'), {
+        target: { value: '12.5' },
+      });
+
+      expect(updateCostLimitDraft).toHaveBeenCalledWith(12.5);
+    });
+
+    it('shows an error for an empty amount', () => {
+      setRunLimits({ costLimit: '' });
+      renderCost();
+
+      expect(screen.getByText(/Enter an amount from/)).toBeInTheDocument();
+    });
+
+    it('cannot be enabled while token tracking is off', () => {
+      setTracking(false);
+      renderCost();
+
+      expect(screen.getByTestId('nightshiftCostLimitEnabledSwitch')).toBeDisabled();
+      expect(screen.getByText(/Token usage tracking is turned off/)).toBeInTheDocument();
+    });
+
+    it('becomes available as soon as token tracking is switched on, before saving', () => {
+      setTracking(false, true, { enabled: true, savedEnabled: false, isDirty: true });
+      renderCost();
+
+      expect(screen.getByTestId('nightshiftCostLimitEnabledSwitch')).toBeEnabled();
+    });
+
+    it('keeps an existing limit switchable off but not editable while tracking is off', () => {
+      setTracking(false);
+      setRunLimits({ costLimit: 25 });
+      renderCost();
+
+      expect(screen.getByTestId('nightshiftCostLimitInput')).toBeDisabled();
+      expect(screen.getByTestId('nightshiftCostLimitEnabledSwitch')).toBeEnabled();
+    });
+
+    it('is disabled while saving', () => {
+      setRunLimits({ costLimit: 25, isSaving: true });
+      renderCost();
+
+      expect(screen.getByTestId('nightshiftCostLimitEnabledSwitch')).toBeDisabled();
+      expect(screen.getByTestId('nightshiftCostLimitInput')).toBeDisabled();
+    });
   });
 
   it('is hidden while privilege is unknown', () => {
@@ -328,7 +417,7 @@ describe('CostEstimate', () => {
     setTracking(true);
     rerender(
       <I18nProvider>
-        <CostEstimate tokenTracking={tokenTracking} />
+        <CostEstimate tokenTracking={tokenTracking} runLimits={runLimits} />
       </I18nProvider>
     );
 
@@ -497,7 +586,7 @@ describe('CostEstimate', () => {
     await waitFor(() => expect(retryCost).toHaveBeenCalled());
     rerender(
       <I18nProvider>
-        <CostEstimate tokenTracking={tokenTracking} />
+        <CostEstimate tokenTracking={tokenTracking} runLimits={runLimits} />
       </I18nProvider>
     );
     expect(screen.queryByText('Cost estimate unavailable')).not.toBeInTheDocument();
@@ -539,7 +628,7 @@ describe('CostEstimate', () => {
     expect(retryCost).not.toHaveBeenCalled();
     rerender(
       <I18nProvider>
-        <CostEstimate tokenTracking={tokenTracking} />
+        <CostEstimate tokenTracking={tokenTracking} runLimits={runLimits} />
       </I18nProvider>
     );
     expect(screen.queryByText('Unable to refresh cost estimate')).not.toBeInTheDocument();
@@ -603,7 +692,7 @@ describe('CostEstimate', () => {
     });
     rerender(
       <I18nProvider>
-        <CostEstimate tokenTracking={tokenTracking} />
+        <CostEstimate tokenTracking={tokenTracking} runLimits={runLimits} />
       </I18nProvider>
     );
     expect(screen.getByTestId('nightshiftCostDetails')).toHaveTextContent(

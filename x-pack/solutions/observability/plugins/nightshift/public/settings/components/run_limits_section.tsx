@@ -18,7 +18,6 @@ import {
 import { i18n } from '@kbn/i18n';
 import type { RunQuotaGroup } from '@kbn/significant-events-plugin/common';
 import { KbnDangerCallout, KbnInfoCallout } from '@kbn/ui-callout';
-import { CostLimitRow } from './cost_limit_row';
 import { isFiniteRunLimit, RUN_QUOTA_GROUPS } from './run_limit_draft';
 import { RunLimitRow, RUN_QUOTA_GROUP_LABELS } from './run_limit_row';
 import { RunQuotaExhaustionCallout } from './run_quota_exhaustion_callout';
@@ -29,15 +28,12 @@ export const RunLimitsSection = ({
   groups = RUN_QUOTA_GROUPS,
   form,
   description,
-  tokenTrackingEnabled,
   onSave,
   onConfirmSave,
 }: {
   groups?: readonly RunQuotaGroup[];
   form: RunLimitsForm;
   description?: ReactNode;
-  /** Shows the global daily cost limit when set; the limit is only enforced with token tracking. */
-  tokenTrackingEnabled?: boolean;
   onSave: () => Promise<void>;
   onConfirmSave: () => Promise<void>;
 }) => {
@@ -49,9 +45,6 @@ export const RunLimitsSection = ({
     saveError,
     updateLimitDraft,
     setLimitEnabled,
-    costLimit,
-    updateCostLimitDraft,
-    setCostLimitEnabled,
     showConfirmation,
     confirmationTitle,
     confirmationButtonText,
@@ -121,18 +114,6 @@ export const RunLimitsSection = ({
                   onEnabledChange={(enabled) => setLimitEnabled(group, enabled)}
                 />
               ))}
-              {tokenTrackingEnabled !== undefined && (
-                <>
-                  <EuiSpacer size="l" />
-                  <CostLimitRow
-                    costLimit={costLimit}
-                    tokenTrackingEnabled={tokenTrackingEnabled}
-                    disabled={!canManage || isSaving}
-                    onChange={updateCostLimitDraft}
-                    onEnabledChange={setCostLimitEnabled}
-                  />
-                </>
-              )}
             </EuiForm>
 
             <EuiSpacer size="s" />

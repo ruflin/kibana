@@ -160,9 +160,12 @@ export const useRunLimitsForm = ({ groups }: { groups: readonly RunQuotaGroup[] 
 
   const setCostLimitEnabled = useCallback(
     (enabled: boolean) => {
+      if (!enabled && isValidEnabledCostLimitDraft(costLimit)) {
+        lastEnabledCostLimit.current = costLimit;
+      }
       updateCostLimitDraft(enabled ? lastEnabledCostLimit.current : NO_COST_LIMIT);
     },
-    [updateCostLimitDraft]
+    [costLimit, updateCostLimitDraft]
   );
 
   const cancel = useCallback(() => {

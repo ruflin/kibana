@@ -116,7 +116,6 @@ export const DetectionsSettingsTab = () => {
         <RunLimitsSection
           groups={DETECTION_RUN_LIMIT_GROUPS}
           form={runLimits}
-          tokenTrackingEnabled={tokenTracking.savedEnabled}
           description={i18n.translate('xpack.nightshift.settings.detectionRunLimitsDescription', {
             defaultMessage:
               'These limits apply only to scheduled detection, manual runs are not limited. When a limit is reached, new scheduled runs are blocked until it resets.',
@@ -155,7 +154,7 @@ export const DetectionsSettingsTab = () => {
 
             <EuiHorizontalRule margin="l" />
 
-            <CostEstimate tokenTracking={tokenTracking} />
+            <CostEstimate tokenTracking={tokenTracking} runLimits={runLimits} />
 
             {!form.isDeveloperModeSaving && (
               <>

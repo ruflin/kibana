@@ -11,6 +11,7 @@ import { i18n } from '@kbn/i18n';
 import { useSignificantEventsCost } from '../hooks/use_significant_events_cost';
 import { useRunQuotas } from '../hooks/use_significant_events_run_quotas';
 import { getFormattedError } from '../../common/errors';
+import { CostLimitRow } from './cost_limit_row';
 import { CostData } from './cost_estimate_breakdown';
 import {
   CostHeaderActions,
@@ -19,9 +20,19 @@ import {
   TrackingCoverageCallout,
 } from './cost_estimate_details';
 import { SettingsSectionRow } from './settings_section';
+import type { RunLimitsForm } from './use_run_limits_form';
 import type { TokenTrackingForm } from './use_token_tracking_form';
 
-export const CostEstimate = ({ tokenTracking }: { tokenTracking: TokenTrackingForm }) => {
+export const CostEstimate = ({
+  tokenTracking,
+  runLimits,
+}: {
+  tokenTracking: TokenTrackingForm;
+  runLimits: Pick<
+    RunLimitsForm,
+    'costLimit' | 'updateCostLimitDraft' | 'setCostLimitEnabled' | 'isSaving'
+  >;
+}) => {
   const quotas = useRunQuotas();
   const canManage = quotas.data?.canManage === true;
   const cost = useSignificantEventsCost({
@@ -137,6 +148,14 @@ export const CostEstimate = ({ tokenTracking }: { tokenTracking: TokenTrackingFo
         canSaveAdvancedSettings={tokenTracking.canEdit}
         isUpdatingTracking={tokenTracking.isSaving}
         onChange={tokenTracking.updateEnabled}
+      />
+      <EuiSpacer size="m" />
+      <CostLimitRow
+        costLimit={runLimits.costLimit}
+        tokenTrackingEnabled={tokenTracking.enabled}
+        disabled={runLimits.isSaving}
+        onChange={runLimits.updateCostLimitDraft}
+        onEnabledChange={runLimits.setCostLimitEnabled}
       />
       {body && <EuiSpacer size="m" />}
       {body}
