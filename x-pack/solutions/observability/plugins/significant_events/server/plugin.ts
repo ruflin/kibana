@@ -76,6 +76,7 @@ import type {
   IScheduleSourceOnboardingOptions,
   RouteHandlerScopedClients,
 } from './routes/types';
+import { createDailyCostLimitCheck } from './lib/cost/daily_cost_limit';
 import { createPriceService } from './lib/cost/price_service';
 import type {
   SignificantEventsPluginSetupDependencies,
@@ -185,13 +186,29 @@ export class SignificantEventsPlugin
     core.savedObjects.registerType(runQuotaSettingsSavedObjectType);
     core.savedObjects.registerType(runQuotaLedgerSavedObjectType);
 
-    plugins.nightshiftInvestigations?.registerInvestigationQuota(async () => {
+    const priceService = createPriceService({
+      fetchFn: fetch,
+      getNow: () => new Date(),
+      logger: this.logger.get('cost'),
+      timeoutMs: 10_000,
+      cacheTtlMs: 6 * 60 * 60 * 1000,
+      maxBodyBytes: 4 * 1024 * 1024,
+      maxScopedRows: 10_000,
+      baseUrl: plugins.cloud?.baseUrl ?? 'https://cloud.elastic.co',
+    });
+
+    plugins.nightshiftInvestigations?.registerInvestigationQuota(async ({ request }) => {
       if (!this.server?.core) {
         throw new Error('Significant Events start services are unavailable');
       }
       return consumeRunQuota({
         internalRepository: createRunQuotaInternalRepository(this.server),
         group: 'investigation',
+        isCostLimitReached: createDailyCostLimitCheck({
+          request,
+          server: this.server,
+          priceService,
+        }),
       });
     });
 
@@ -565,17 +582,6 @@ export class SignificantEventsPlugin
         },
       })
     );
-
-    const priceService = createPriceService({
-      fetchFn: fetch,
-      getNow: () => new Date(),
-      logger: this.logger.get('cost'),
-      timeoutMs: 10_000,
-      cacheTtlMs: 6 * 60 * 60 * 1000,
-      maxBodyBytes: 4 * 1024 * 1024,
-      maxScopedRows: 10_000,
-      baseUrl: plugins.cloud?.baseUrl ?? 'https://cloud.elastic.co',
-    });
 
     registerRoutes({
       repository: significantEventsRouteRepository,

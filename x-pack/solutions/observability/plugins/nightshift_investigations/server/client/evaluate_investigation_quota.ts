@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import type { Logger } from '@kbn/core/server';
+import type { KibanaRequest, Logger } from '@kbn/core/server';
 import { withTimeout } from '@kbn/std';
 import type { InvestigationQuotaCallback, InvestigationQuotaResult } from '../types';
 
@@ -14,9 +14,11 @@ const ALLOWED: InvestigationQuotaResult = { allowed: true };
 
 export const evaluateInvestigationQuota = async ({
   callback,
+  request,
   logger,
 }: {
   callback?: InvestigationQuotaCallback;
+  request: KibanaRequest;
   logger: Logger;
 }): Promise<InvestigationQuotaResult> => {
   if (!callback) {
@@ -28,7 +30,7 @@ export const evaluateInvestigationQuota = async ({
 
   try {
     const result = await withTimeout({
-      promise: Promise.resolve().then(callback),
+      promise: Promise.resolve().then(() => callback({ request })),
       timeoutMs: INVESTIGATION_QUOTA_TIMEOUT_MS,
     });
 

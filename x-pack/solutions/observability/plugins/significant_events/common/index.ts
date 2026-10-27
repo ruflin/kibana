@@ -112,7 +112,15 @@ export {
 } from './maintenance/paused_callout_copy';
 export type { SignificantEventsMaintenanceState } from './maintenance/state_machine';
 
-export { DEFAULT_RUN_LIMITS, MAX_RUN_LIMIT, MIN_RUN_LIMIT, RUN_QUOTA_GROUPS } from './run_quotas';
+export {
+  DEFAULT_COST_LIMIT_USD,
+  DEFAULT_RUN_LIMITS,
+  MAX_COST_LIMIT_USD,
+  MAX_RUN_LIMIT,
+  MIN_COST_LIMIT_USD,
+  MIN_RUN_LIMIT,
+  RUN_QUOTA_GROUPS,
+} from './run_quotas';
 export type {
   RunQuotaConsumeRequest,
   RunQuotaConsumeResponse,

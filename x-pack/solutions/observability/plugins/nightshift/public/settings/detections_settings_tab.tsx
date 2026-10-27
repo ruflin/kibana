@@ -154,7 +154,7 @@ export const DetectionsSettingsTab = () => {
 
             <EuiHorizontalRule margin="l" />
 
-            <CostEstimate tokenTracking={tokenTracking} />
+            <CostEstimate tokenTracking={tokenTracking} runLimits={runLimits} />
 
             {!form.isDeveloperModeSaving && (
               <>

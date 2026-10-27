@@ -16,7 +16,11 @@ import {
   NIGHTSHIFT_USAGE_PARENT_ID,
 } from '@kbn/nightshift-shared';
 import { FEATURE_ID_TO_COST_BUDGET_GROUP, type TokenTrackingCoverage } from '../../../common/cost';
-import { calculateSignificantEventsCost, createUnavailableCostResponse } from './cost_service';
+import {
+  calculateSignificantEventsCost,
+  calculateTodayEstimatedCost,
+  createUnavailableCostResponse,
+} from './cost_service';
 import type { PriceMap } from './price_service';
 
 const NOW = new Date('2026-09-09T08:30:00.000Z');
@@ -677,5 +681,79 @@ describe('calculateSignificantEventsCost', () => {
     expect(response.today.groups.every((group) => group.status === 'unavailable')).toBe(true);
     expect(response.today.totalTokens).toBe(0);
     expect(response.trackingCoverage).toEqual(TRACKING_COVERAGE);
+  });
+});
+
+describe('calculateTodayEstimatedCost', () => {
+  const calculateToday = (esClient: ElasticsearchClient, prices: PriceMap = PRICES) =>
+    calculateTodayEstimatedCost({
+      esClient,
+      prices,
+      now: NOW,
+      logger: loggerMock.create() as unknown as Logger,
+    });
+
+  it('queries only the UTC today window and totals the cost across all groups', async () => {
+    const ranges: Array<{ gte?: string; lt?: string }> = [];
+    const esClient = createEsClient((params) => {
+      ranges.push(rangeOf(params));
+      return {
+        aggregations: aggregations({
+          total: 2700,
+          features: {
+            [NIGHTSHIFT_DISCOVERY_USAGE_ID]: featureBucket({
+              featureTotal: 1350,
+              models: [modelBucket({ key: SONNET, total: 1350, prompt: 1000, completion: 350 })],
+            }),
+            [NIGHTSHIFT_INVESTIGATION_USAGE_ID]: featureBucket({
+              featureTotal: 1350,
+              models: [modelBucket({ key: SONNET, total: 1350, prompt: 1000, completion: 350 })],
+            }),
+          },
+        }),
+      };
+    });
+
+    const cost = await calculateToday(esClient);
+
+    expect(ranges).toEqual([{ gte: TODAY_START, lt: PERIOD_END }]);
+    expect(cost).toBeCloseTo(2 * ((1000 * 4.5 + 350 * 21) / 1_000_000));
+  });
+
+  it('returns zero when the token usage data stream does not exist yet', async () => {
+    const esClient = createEsClient(() => {
+      throw Object.assign(new Error('no such index'), {
+        statusCode: 404,
+        body: { error: { type: 'index_not_found_exception' } },
+      });
+    });
+
+    await expect(calculateToday(esClient)).resolves.toBe(0);
+  });
+
+  it('returns null when nothing recorded today can be priced', async () => {
+    const esClient = createEsClient(() => ({
+      aggregations: aggregations({
+        total: 500,
+        features: {
+          [NIGHTSHIFT_DISCOVERY_USAGE_ID]: featureBucket({
+            featureTotal: 500,
+            models: [
+              modelBucket({ key: 'unknown-model', total: 500, prompt: 400, completion: 100 }),
+            ],
+          }),
+        },
+      }),
+    }));
+
+    await expect(calculateToday(esClient)).resolves.toBeNull();
+  });
+
+  it('rethrows other search errors so the caller can degrade', async () => {
+    const esClient = createEsClient(() => {
+      throw new Error('search failed');
+    });
+
+    await expect(calculateToday(esClient)).rejects.toThrow('search failed');
   });
 });

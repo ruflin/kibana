@@ -5,10 +5,17 @@
  * 2.0.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { i18n } from '@kbn/i18n';
 import type { RunQuotaGroup } from '@kbn/significant-events-plugin/common';
 import { useRunQuotas, useUpdateRunQuotas } from '../hooks/use_significant_events_run_quotas';
+import {
+  DEFAULT_ENABLED_COST_LIMIT_USD,
+  NO_COST_LIMIT,
+  isValidCostLimitDraft,
+  isValidEnabledCostLimitDraft,
+  type CostLimitDraft,
+} from './cost_limit_draft';
 import {
   buildRunQuotaSettingsUpdate,
   createRunQuotaDraftState,
@@ -35,6 +42,12 @@ export const useRunLimitsForm = ({ groups }: { groups: readonly RunQuotaGroup[] 
   const [draftState, setDraftState] = useState<RunQuotaDraftState>();
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [saveError, setSaveError] = useState<Error>();
+  // Undefined until the user edits the cost limit, so the saved value is shown without syncing.
+  const [costLimitDraft, setCostLimitDraft] = useState<CostLimitDraft>();
+  const lastEnabledCostLimit = useRef<number>(DEFAULT_ENABLED_COST_LIMIT_USD);
+  const savedCostLimit = quotas.data?.costLimitUsd ?? NO_COST_LIMIT;
+  const costLimit = costLimitDraft ?? savedCostLimit;
+  const isCostLimitDirty = costLimitDraft !== undefined && costLimitDraft !== savedCostLimit;
 
   useEffect(() => {
     if (!quotas.data) {
@@ -45,10 +58,18 @@ export const useRunLimitsForm = ({ groups }: { groups: readonly RunQuotaGroup[] 
     );
   }, [quotas.data]);
 
-  const update = useMemo(
-    () => (draftState ? buildRunQuotaSettingsUpdate(draftState) : undefined),
-    [draftState]
-  );
+  const update = useMemo(() => {
+    const runLimitsUpdate = draftState ? buildRunQuotaSettingsUpdate(draftState) : undefined;
+    if (!isCostLimitDirty) {
+      return runLimitsUpdate;
+    }
+    // An invalid run limit edit must block the save rather than be dropped from it.
+    const hasRunLimitChanges = draftState ? hasRunQuotaDraftChanges(draftState) : false;
+    if (!isValidCostLimitDraft(costLimit) || (hasRunLimitChanges && !runLimitsUpdate)) {
+      return undefined;
+    }
+    return { ...runLimitsUpdate, costLimitUsd: costLimit };
+  }, [costLimit, draftState, isCostLimitDirty]);
 
   const warnings = useMemo<RunLimitSaveWarnings>(() => {
     if (!draftState || !quotas.data) {
@@ -80,6 +101,7 @@ export const useRunLimitsForm = ({ groups }: { groups: readonly RunQuotaGroup[] 
     try {
       const response = await save(update);
       setDraftState(createRunQuotaDraftState(response));
+      setCostLimitDraft(undefined);
       setShowConfirmation(false);
       return 'saved';
     } catch (error) {
@@ -128,10 +150,29 @@ export const useRunLimitsForm = ({ groups }: { groups: readonly RunQuotaGroup[] 
     setDraftState((current) => (current ? setRunLimitEnabled(current, group, enabled) : current));
   }, []);
 
+  const updateCostLimitDraft = useCallback((nextCostLimit: CostLimitDraft) => {
+    setSaveError(undefined);
+    if (isValidEnabledCostLimitDraft(nextCostLimit)) {
+      lastEnabledCostLimit.current = nextCostLimit;
+    }
+    setCostLimitDraft(nextCostLimit);
+  }, []);
+
+  const setCostLimitEnabled = useCallback(
+    (enabled: boolean) => {
+      if (!enabled && isValidEnabledCostLimitDraft(costLimit)) {
+        lastEnabledCostLimit.current = costLimit;
+      }
+      updateCostLimitDraft(enabled ? lastEnabledCostLimit.current : NO_COST_LIMIT);
+    },
+    [costLimit, updateCostLimitDraft]
+  );
+
   const cancel = useCallback(() => {
     if (quotas.data) {
       setDraftState(createRunQuotaDraftState(quotas.data));
     }
+    setCostLimitDraft(undefined);
     setSaveError(undefined);
     setShowConfirmation(false);
   }, [quotas.data]);
@@ -154,7 +195,10 @@ export const useRunLimitsForm = ({ groups }: { groups: readonly RunQuotaGroup[] 
     quotas,
     draftState,
     update,
-    isDirty: draftState ? hasRunQuotaDraftChanges(draftState) : false,
+    isDirty: (draftState ? hasRunQuotaDraftChanges(draftState) : false) || isCostLimitDirty,
+    costLimit,
+    updateCostLimitDraft,
+    setCostLimitEnabled,
     isSaving,
     canManage: quotas.data?.canManage === true,
     saveError,

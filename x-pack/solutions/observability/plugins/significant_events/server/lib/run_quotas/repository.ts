@@ -42,6 +42,7 @@ export type RunQuotaSettingsPatch = RunQuotaSettingsUpdate;
 export const createDefaultRunQuotaSettingsAttributes = (): RunQuotaSettingsAttributes => ({
   enabled: DEFAULT_RUN_QUOTA_SETTINGS.enabled,
   limits: { ...DEFAULT_RUN_QUOTA_SETTINGS.limits },
+  costLimitUsd: DEFAULT_RUN_QUOTA_SETTINGS.costLimitUsd,
 });
 
 const mergeStoredSettings = (
@@ -130,6 +131,7 @@ export const patchRunQuotaSettings = async (
             {
               enabled: next.enabled,
               limits: next.limits,
+              costLimitUsd: next.costLimitUsd,
             },
             { version: currentSavedObject.version }
           )

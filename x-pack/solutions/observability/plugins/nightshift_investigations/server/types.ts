@@ -38,7 +38,9 @@ export interface InvestigationQuotaResult {
   allowed: boolean;
 }
 
-export type InvestigationQuotaCallback = () => Promise<InvestigationQuotaResult>;
+export type InvestigationQuotaCallback = (context: {
+  request: KibanaRequest;
+}) => Promise<InvestigationQuotaResult>;
 
 export interface NightshiftInvestigationsServerSetup {
   registerInvestigationQuota: (callback: InvestigationQuotaCallback) => void;
