@@ -48,6 +48,7 @@ const INDEX_TEMPLATE = {
         inference: {
           properties: {
             connector_id: { type: 'keyword' as const },
+            space_id: { type: 'keyword' as const },
             feature_id: { type: 'keyword' as const },
             parent_feature_id: { type: 'keyword' as const },
           },
@@ -61,6 +62,7 @@ export class TokenUsageLogger {
   private esClient?: ElasticsearchClient;
   private logger: Logger;
   private dataStreamReady = false;
+  private dataStreamSetup?: Promise<void>;
 
   constructor(logger: Logger) {
     this.logger = logger.get('token_usage');
@@ -105,34 +107,48 @@ export class TokenUsageLogger {
       return;
     }
 
+    // Concurrent calls share one setup so a burst of requests does not queue duplicate cluster state updates.
+    this.dataStreamSetup ??= this.setUpDataStream().finally(() => {
+      this.dataStreamSetup = undefined;
+    });
+    await this.dataStreamSetup;
+  }
+
+  private async setUpDataStream(): Promise<void> {
+    // The template is put once per Kibana process, not only when missing, so existing clusters receive mapping changes.
+    await this.esClient!.indices.putIndexTemplate({
+      name: INDEX_TEMPLATE_NAME,
+      ...INDEX_TEMPLATE,
+    });
+
+    const dataStreamExists = await this.esClient!.indices.exists({
+      index: DATA_STREAM_NAME,
+    });
+
+    if (!dataStreamExists) {
+      await this.createDataStream();
+    }
+
+    // The template only applies to new backing indices, so the write index needs the mappings before
+    // documents with new fields arrive, or they would be mapped dynamically. Older backing indices hold no
+    // such documents, and a blocked or conflicting one must not stop logging.
+    await this.esClient!.indices.putMapping({
+      index: DATA_STREAM_NAME,
+      write_index_only: true,
+      properties: INDEX_TEMPLATE.template.mappings.properties,
+    });
+
+    this.dataStreamReady = true;
+  }
+
+  private async createDataStream(): Promise<void> {
     try {
-      const templateExists = await this.esClient!.indices.existsIndexTemplate({
-        name: INDEX_TEMPLATE_NAME,
+      await this.esClient!.indices.createDataStream({
+        name: DATA_STREAM_NAME,
       });
-
-      if (!templateExists) {
-        await this.esClient!.indices.putIndexTemplate({
-          name: INDEX_TEMPLATE_NAME,
-          ...INDEX_TEMPLATE,
-        });
-        this.logger.info(`Created index template ${INDEX_TEMPLATE_NAME}`);
-      }
-
-      const dataStreamExists = await this.esClient!.indices.exists({
-        index: DATA_STREAM_NAME,
-      });
-
-      if (!dataStreamExists) {
-        await this.esClient!.indices.createDataStream({
-          name: DATA_STREAM_NAME,
-        });
-        this.logger.info(`Created data stream ${DATA_STREAM_NAME}`);
-      }
-
-      this.dataStreamReady = true;
+      this.logger.info(`Created data stream ${DATA_STREAM_NAME}`);
     } catch (error) {
       if (error?.meta?.body?.error?.type === 'resource_already_exists_exception') {
-        this.dataStreamReady = true;
         return;
       }
       throw error;
