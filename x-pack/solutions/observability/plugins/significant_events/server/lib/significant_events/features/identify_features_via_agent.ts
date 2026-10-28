@@ -95,6 +95,7 @@ export async function executeFeatureIdentificationAgent({
     params: {
       agentId: FEATURE_IDENTIFICATION_AGENT_ID,
       connectorId,
+      reasoningLevel: 'low',
       conversationId: conversation.id,
       storeConversation: true,
       nextInput: { message: userMessage },

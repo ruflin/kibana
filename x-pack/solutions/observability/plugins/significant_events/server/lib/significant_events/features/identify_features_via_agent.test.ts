@@ -111,6 +111,7 @@ describe('executeFeatureIdentificationAgent', () => {
         params: expect.objectContaining({
           agentId: FEATURE_IDENTIFICATION_AGENT_ID,
           connectorId: 'connector-1',
+          reasoningLevel: 'low',
           conversationId: 'conversation-1',
           storeConversation: true,
           nextInput: {
