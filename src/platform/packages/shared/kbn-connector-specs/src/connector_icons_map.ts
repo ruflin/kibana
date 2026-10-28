@@ -54,6 +54,7 @@ export const ConnectorIconsMap: Map<
     '.censys',
     lazy(() => import(/* webpackChunkName: "connectorIconCensys" */ './specs/censys/icon')),
   ],
+  ['.gitea', lazy(() => import(/* webpackChunkName: "connectorIconGitea" */ './specs/gitea/icon'))],
   [
     '.github',
     lazy(() => import(/* webpackChunkName: "connectorIconGithub" */ './specs/github/icon')),

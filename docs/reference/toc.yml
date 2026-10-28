@@ -105,6 +105,7 @@ toc:
           - file: connectors-kibana/firecrawl-action-type.md
           - file: connectors-kibana/gcp-iam-action-type.md
           - file: connectors-kibana/gcp-secret-manager-action-type.md
+          - file: connectors-kibana/gitea-action-type.md
           - file: connectors-kibana/github-action-type.md
           - file: connectors-kibana/gitlab-action-type.md
           - file: connectors-kibana/gmail-action-type.md
