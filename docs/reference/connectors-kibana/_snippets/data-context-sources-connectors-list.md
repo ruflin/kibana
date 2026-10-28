@@ -24,6 +24,7 @@
 - [Elasticsearch](/reference/connectors-kibana/elasticsearch-action-type.md): Search, index, and manage documents, retrieve mappings and aliases, and run ES|QL queries in Elasticsearch.
 - [Firecrawl](/reference/connectors-kibana/firecrawl-action-type.md): Scrape, search, map, and crawl the web using the Firecrawl API.
 - [Figma](/reference/connectors-kibana/figma-action-type.md): Browse design files, inspect structure, render nodes as images, and explore team projects in Figma.
+- [Gitea](/reference/connectors-kibana/gitea-action-type.md): Search repositories, manage issues and pull requests, browse files and commits, and inspect Actions runs in Gitea.
 - [GitHub](/reference/connectors-kibana/github-action-type.md): Search code, issues, and pull requests, access repository contents and metadata, and start a workflow from repository webhooks.
 - [GitLab](/reference/connectors-kibana/gitlab-action-type.md): Search projects, manage issues and merge requests, browse repository files, and trigger CI/CD pipelines in GitLab.
 - [Gmail](/reference/connectors-kibana/gmail-action-type.md): Search, read, label, quarantine, and send emails in Gmail.

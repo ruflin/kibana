@@ -1,0 +1,313 @@
+{
+  "operations": {
+    "addIssueLabels": [
+      {
+        "method": "post",
+        "pagination": "none",
+        "path": "/repos/{owner}/{repo}/issues/{index}/labels",
+        "source": "gitea"
+      }
+    ],
+    "createBranch": [
+      {
+        "method": "post",
+        "path": "/repos/{owner}/{repo}/branches",
+        "source": "gitea"
+      }
+    ],
+    "createIssue": [
+      {
+        "method": "post",
+        "path": "/repos/{owner}/{repo}/issues",
+        "source": "gitea"
+      }
+    ],
+    "createIssueComment": [
+      {
+        "method": "post",
+        "path": "/repos/{owner}/{repo}/issues/{index}/comments",
+        "source": "gitea"
+      }
+    ],
+    "createPullRequest": [
+      {
+        "method": "post",
+        "path": "/repos/{owner}/{repo}/pulls",
+        "source": "gitea"
+      }
+    ],
+    "getCommit": [
+      {
+        "method": "get",
+        "path": "/repos/{owner}/{repo}/git/commits/{sha}",
+        "source": "gitea"
+      }
+    ],
+    "getCurrentUser": [
+      {
+        "method": "get",
+        "path": "/user",
+        "source": "gitea"
+      }
+    ],
+    "getFileContents": [
+      {
+        "method": "get",
+        "pagination": "none",
+        "path": "/repos/{owner}/{repo}/contents",
+        "source": "gitea"
+      },
+      {
+        "method": "get",
+        "path": "/repos/{owner}/{repo}/contents/{filepath}",
+        "source": "gitea"
+      }
+    ],
+    "getIssue": [
+      {
+        "method": "get",
+        "path": "/repos/{owner}/{repo}/issues/{index}",
+        "source": "gitea"
+      }
+    ],
+    "getPullRequest": [
+      {
+        "method": "get",
+        "path": "/repos/{owner}/{repo}/pulls/{index}",
+        "source": "gitea"
+      }
+    ],
+    "getRepository": [
+      {
+        "method": "get",
+        "path": "/repos/{owner}/{repo}",
+        "source": "gitea"
+      }
+    ],
+    "getWorkflowRun": [
+      {
+        "method": "get",
+        "path": "/repos/{owner}/{repo}/actions/runs/{run}",
+        "source": "gitea"
+      }
+    ],
+    "listBranches": [
+      {
+        "method": "get",
+        "pagination": {
+          "request": {
+            "pageParam": "page",
+            "sizeParam": "limit"
+          },
+          "response": {
+            "itemsPath": ""
+          },
+          "style": "page"
+        },
+        "path": "/repos/{owner}/{repo}/branches",
+        "source": "gitea"
+      }
+    ],
+    "listCommits": [
+      {
+        "method": "get",
+        "pagination": {
+          "request": {
+            "pageParam": "page",
+            "sizeParam": "limit"
+          },
+          "response": {
+            "itemsPath": ""
+          },
+          "style": "page"
+        },
+        "path": "/repos/{owner}/{repo}/commits",
+        "source": "gitea"
+      }
+    ],
+    "listIssueComments": [
+      {
+        "method": "get",
+        "pagination": "none",
+        "path": "/repos/{owner}/{repo}/issues/{index}/comments",
+        "source": "gitea"
+      }
+    ],
+    "listIssues": [
+      {
+        "method": "get",
+        "pagination": {
+          "request": {
+            "pageParam": "page",
+            "sizeParam": "limit"
+          },
+          "response": {
+            "itemsPath": ""
+          },
+          "style": "page"
+        },
+        "path": "/repos/{owner}/{repo}/issues",
+        "source": "gitea"
+      }
+    ],
+    "listLabels": [
+      {
+        "method": "get",
+        "pagination": {
+          "request": {
+            "pageParam": "page",
+            "sizeParam": "limit"
+          },
+          "response": {
+            "itemsPath": ""
+          },
+          "style": "page"
+        },
+        "path": "/repos/{owner}/{repo}/labels",
+        "source": "gitea"
+      }
+    ],
+    "listPullRequestFiles": [
+      {
+        "method": "get",
+        "pagination": {
+          "request": {
+            "pageParam": "page",
+            "sizeParam": "limit"
+          },
+          "response": {
+            "itemsPath": ""
+          },
+          "style": "page"
+        },
+        "path": "/repos/{owner}/{repo}/pulls/{index}/files",
+        "source": "gitea"
+      }
+    ],
+    "listPullRequestReviews": [
+      {
+        "method": "get",
+        "pagination": {
+          "request": {
+            "pageParam": "page",
+            "sizeParam": "limit"
+          },
+          "response": {
+            "itemsPath": ""
+          },
+          "style": "page"
+        },
+        "path": "/repos/{owner}/{repo}/pulls/{index}/reviews",
+        "source": "gitea"
+      }
+    ],
+    "listPullRequests": [
+      {
+        "method": "get",
+        "pagination": {
+          "request": {
+            "pageParam": "page",
+            "sizeParam": "limit"
+          },
+          "response": {
+            "itemsPath": ""
+          },
+          "style": "page"
+        },
+        "path": "/repos/{owner}/{repo}/pulls",
+        "source": "gitea"
+      }
+    ],
+    "listReleases": [
+      {
+        "method": "get",
+        "pagination": {
+          "request": {
+            "pageParam": "page",
+            "sizeParam": "limit"
+          },
+          "response": {
+            "itemsPath": ""
+          },
+          "style": "page"
+        },
+        "path": "/repos/{owner}/{repo}/releases",
+        "source": "gitea"
+      }
+    ],
+    "listWorkflowRuns": [
+      {
+        "method": "get",
+        "pagination": {
+          "request": {
+            "pageParam": "page",
+            "sizeParam": "limit"
+          },
+          "response": {
+            "itemsPath": "workflow_runs",
+            "totalPath": "total_count"
+          },
+          "style": "page"
+        },
+        "path": "/repos/{owner}/{repo}/actions/runs",
+        "source": "gitea"
+      }
+    ],
+    "mergePullRequest": [
+      {
+        "method": "post",
+        "path": "/repos/{owner}/{repo}/pulls/{index}/merge",
+        "source": "gitea"
+      }
+    ],
+    "searchRepositories": [
+      {
+        "method": "get",
+        "pagination": {
+          "request": {
+            "pageParam": "page",
+            "sizeParam": "limit"
+          },
+          "response": {
+            "itemsPath": "data"
+          },
+          "style": "page"
+        },
+        "path": "/repos/search",
+        "source": "gitea"
+      }
+    ],
+    "searchUsers": [
+      {
+        "method": "get",
+        "pagination": {
+          "request": {
+            "pageParam": "page",
+            "sizeParam": "limit"
+          },
+          "response": {
+            "itemsPath": "data"
+          },
+          "style": "page"
+        },
+        "path": "/users/search",
+        "source": "gitea"
+      }
+    ],
+    "updateIssue": [
+      {
+        "method": "patch",
+        "path": "/repos/{owner}/{repo}/issues/{index}",
+        "source": "gitea"
+      }
+    ]
+  },
+  "sources": {
+    "gitea": {
+      "apiVersion": "29.0.0+dev-160-g55186ca39b",
+      "fetchedAt": "2026-10-28T16:18:59.427Z",
+      "format": "swagger",
+      "url": "https://gitea.com/swagger.v1.json"
+    }
+  }
+}

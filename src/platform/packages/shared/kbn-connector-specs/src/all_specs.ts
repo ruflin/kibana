@@ -18,6 +18,7 @@ export * from './specs/censys/censys';
 export * from './specs/databricks/databricks';
 export * from './specs/gcp_cloud_functions/gcp_cloud_functions';
 export * from './specs/figma/figma';
+export * from './specs/gitea/gitea';
 export * from './specs/github/github';
 export * from './specs/google_calendar/google_calendar';
 export * from './specs/google_docs/google_docs';

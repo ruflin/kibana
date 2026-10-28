@@ -1,0 +1,7 @@
+{
+  "updateIssue": {
+    "input": {
+      "title": "Updated title"
+    }
+  }
+}

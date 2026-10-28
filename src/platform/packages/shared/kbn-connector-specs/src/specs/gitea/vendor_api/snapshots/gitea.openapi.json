@@ -1,0 +1,4159 @@
+{
+  "components": {
+    "schemas": {
+      "APIError": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ActionWorkflowRun": {
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/User"
+          },
+          "artifacts_url": {
+            "type": "string"
+          },
+          "cancel_url": {
+            "type": "string"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "conclusion": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "display_title": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          },
+          "head_branch": {
+            "type": "string"
+          },
+          "head_repository": {
+            "$ref": "#/components/schemas/Repository"
+          },
+          "head_sha": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "jobs_url": {
+            "type": "string"
+          },
+          "logs_url": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "previous_attempt_url": {
+            "type": "string"
+          },
+          "pull_requests": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestMinimal"
+            },
+            "type": "array"
+          },
+          "repository": {
+            "$ref": "#/components/schemas/Repository"
+          },
+          "repository_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rerun_url": {
+            "type": "string"
+          },
+          "run_attempt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "run_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "trigger_actor": {
+            "$ref": "#/components/schemas/User"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ActionWorkflowRunsResponse": {
+        "properties": {
+          "total_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "workflow_runs": {
+            "items": {
+              "$ref": "#/components/schemas/ActionWorkflowRun"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "Attachment": {
+        "properties": {
+          "browser_download_url": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "download_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Branch": {
+        "properties": {
+          "commit": {
+            "$ref": "#/components/schemas/PayloadCommit"
+          },
+          "effective_branch_protection_name": {
+            "type": "string"
+          },
+          "enable_status_check": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "protected": {
+            "type": "boolean"
+          },
+          "required_approvals": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status_check_contexts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "user_can_merge": {
+            "type": "boolean"
+          },
+          "user_can_push": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ChangedFile": {
+        "properties": {
+          "additions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "changes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "contents_url": {
+            "type": "string"
+          },
+          "deletions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "previous_filename": {
+            "type": "string"
+          },
+          "raw_url": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Comment": {
+        "properties": {
+          "assets": {
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            },
+            "type": "array"
+          },
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "issue_url": {
+            "type": "string"
+          },
+          "original_author": {
+            "type": "string"
+          },
+          "original_author_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pull_request_url": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        },
+        "type": "object"
+      },
+      "Commit": {
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/User"
+          },
+          "commit": {
+            "$ref": "#/components/schemas/RepoCommit"
+          },
+          "committer": {
+            "$ref": "#/components/schemas/User"
+          },
+          "created": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/CommitAffectedFiles"
+            },
+            "type": "array"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "parents": {
+            "items": {
+              "$ref": "#/components/schemas/CommitMeta"
+            },
+            "type": "array"
+          },
+          "sha": {
+            "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/CommitStats"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "title": "Commit contains information generated from a Git commit.",
+        "type": "object"
+      },
+      "CommitAffectedFiles": {
+        "properties": {
+          "filename": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CommitMeta": {
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sha": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "title": "CommitMeta contains meta information of a commit in terms of API.",
+        "type": "object"
+      },
+      "CommitStats": {
+        "properties": {
+          "additions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "deletions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "CommitUser": {
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "title": "CommitUser contains information of a user in the context of a commit.",
+        "type": "object"
+      },
+      "ContentsResponse": {
+        "properties": {
+          "_links": {
+            "$ref": "#/components/schemas/FileLinksResponse"
+          },
+          "content": {
+            "type": "string"
+          },
+          "download_url": {
+            "type": "string"
+          },
+          "encoding": {
+            "type": "string"
+          },
+          "git_url": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "last_author_date": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_commit_message": {
+            "type": "string"
+          },
+          "last_commit_sha": {
+            "type": "string"
+          },
+          "last_committer_date": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lfs_oid": {
+            "type": "string"
+          },
+          "lfs_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha": {
+            "type": "string"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "submodule_git_url": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CreateBranchRepoOption": {
+        "properties": {
+          "new_branch_name": {
+            "type": "string",
+            "uniqueItems": true
+          },
+          "old_branch_name": {
+            "type": "string",
+            "uniqueItems": true
+          },
+          "old_ref_name": {
+            "type": "string",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "new_branch_name"
+        ],
+        "type": "object"
+      },
+      "CreateIssueCommentOption": {
+        "properties": {
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "CreateIssueOption": {
+        "properties": {
+          "assignee": {
+            "type": "string"
+          },
+          "assignees": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "body": {
+            "type": "string"
+          },
+          "closed": {
+            "type": "boolean"
+          },
+          "due_date": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "milestone": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "projects": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "CreatePullRequestOption": {
+        "properties": {
+          "allow_maintainer_edit": {
+            "type": "boolean"
+          },
+          "assignee": {
+            "type": "string"
+          },
+          "assignees": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "base": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "due_date": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "head": {
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "milestone": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "reviewers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "team_reviewers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "EditIssueOption": {
+        "properties": {
+          "assignee": {
+            "type": "string"
+          },
+          "assignees": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "body": {
+            "type": "string"
+          },
+          "content_version": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "due_date": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "milestone": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "projects": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "unset_due_date": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ExternalTracker": {
+        "properties": {
+          "external_tracker_format": {
+            "type": "string"
+          },
+          "external_tracker_regexp_pattern": {
+            "type": "string"
+          },
+          "external_tracker_style": {
+            "type": "string"
+          },
+          "external_tracker_url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ExternalWiki": {
+        "properties": {
+          "external_wiki_url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FileLinksResponse": {
+        "properties": {
+          "git": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string"
+          },
+          "self": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "InternalTracker": {
+        "properties": {
+          "allow_only_contributors_to_track_time": {
+            "type": "boolean"
+          },
+          "enable_issue_dependencies": {
+            "type": "boolean"
+          },
+          "enable_time_tracker": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "Issue": {
+        "properties": {
+          "assets": {
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            },
+            "type": "array"
+          },
+          "assignee": {
+            "$ref": "#/components/schemas/User"
+          },
+          "assignees": {
+            "items": {
+              "$ref": "#/components/schemas/User"
+            },
+            "type": "array"
+          },
+          "body": {
+            "type": "string"
+          },
+          "closed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "comments": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "content_version": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "due_date": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "is_locked": {
+            "type": "boolean"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "milestone": {
+            "$ref": "#/components/schemas/Milestone"
+          },
+          "number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "original_author": {
+            "type": "string"
+          },
+          "original_author_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pin_order": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/Project"
+            },
+            "type": "array"
+          },
+          "pull_request": {
+            "$ref": "#/components/schemas/PullRequestMeta"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "repository": {
+            "$ref": "#/components/schemas/RepositoryMeta"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "time_estimate": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        },
+        "type": "object"
+      },
+      "IssueLabelsOption": {
+        "properties": {
+          "labels": {
+            "items": {},
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "Label": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "exclusive": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "is_archived": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MergePullRequestOption": {
+        "properties": {
+          "delete_branch_after_merge": {
+            "type": "boolean"
+          },
+          "do": {
+            "enum": [
+              "merge",
+              "rebase",
+              "rebase-merge",
+              "squash",
+              "fast-forward-only",
+              "manually-merged"
+            ],
+            "type": "string"
+          },
+          "force_merge": {
+            "type": "boolean"
+          },
+          "head_commit_id": {
+            "type": "string"
+          },
+          "merge_commit_id": {
+            "type": "string"
+          },
+          "merge_message_field": {
+            "type": "string"
+          },
+          "merge_title_field": {
+            "type": "string"
+          },
+          "merge_when_checks_succeed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "do"
+        ],
+        "type": "object"
+      },
+      "Milestone": {
+        "properties": {
+          "closed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "closed_issues": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "due_on": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "open_issues": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Organization": {
+        "properties": {
+          "avatar_url": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "location": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "repo_admin_change_team_access": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "public",
+              "limited",
+              "private"
+            ],
+            "type": "string"
+          },
+          "website": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PRBranchInfo": {
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "repo": {
+            "$ref": "#/components/schemas/Repository"
+          },
+          "repo_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sha": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PayloadCommit": {
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "author": {
+            "$ref": "#/components/schemas/PayloadUser"
+          },
+          "committer": {
+            "$ref": "#/components/schemas/PayloadUser"
+          },
+          "id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "modified": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "removed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/PayloadCommitVerification"
+          }
+        },
+        "type": "object"
+      },
+      "PayloadCommitVerification": {
+        "properties": {
+          "payload": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "signer": {
+            "$ref": "#/components/schemas/PayloadUser"
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "PayloadUser": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Permission": {
+        "properties": {
+          "admin": {
+            "type": "boolean"
+          },
+          "pull": {
+            "type": "boolean"
+          },
+          "push": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "Project": {
+        "properties": {
+          "card_type": {
+            "type": "string"
+          },
+          "closed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "creator": {
+            "$ref": "#/components/schemas/User"
+          },
+          "creator_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "is_closed": {
+            "type": "boolean"
+          },
+          "num_closed_issues": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "num_issues": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "num_open_issues": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "owner_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "repo_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "template_type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "title": "Project represents a project.",
+        "type": "object"
+      },
+      "PullRequest": {
+        "properties": {
+          "additions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "allow_maintainer_edit": {
+            "type": "boolean"
+          },
+          "assignee": {
+            "$ref": "#/components/schemas/User"
+          },
+          "assignees": {
+            "items": {
+              "$ref": "#/components/schemas/User"
+            },
+            "type": "array"
+          },
+          "base": {
+            "$ref": "#/components/schemas/PRBranchInfo"
+          },
+          "body": {
+            "type": "string"
+          },
+          "changed_files": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "closed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "comments": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "content_version": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deletions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "diff_url": {
+            "type": "string"
+          },
+          "draft": {
+            "type": "boolean"
+          },
+          "due_date": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "head": {
+            "$ref": "#/components/schemas/PRBranchInfo"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "is_locked": {
+            "type": "boolean"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "merge_base": {
+            "type": "string"
+          },
+          "merge_commit_sha": {
+            "type": "string"
+          },
+          "mergeable": {
+            "type": "boolean"
+          },
+          "merged": {
+            "type": "boolean"
+          },
+          "merged_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "merged_by": {
+            "$ref": "#/components/schemas/User"
+          },
+          "milestone": {
+            "$ref": "#/components/schemas/Milestone"
+          },
+          "number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "patch_url": {
+            "type": "string"
+          },
+          "pin_order": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "requested_reviewers": {
+            "items": {
+              "$ref": "#/components/schemas/User"
+            },
+            "type": "array"
+          },
+          "requested_reviewers_teams": {
+            "items": {
+              "$ref": "#/components/schemas/Team"
+            },
+            "type": "array"
+          },
+          "review_comments": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        },
+        "type": "object"
+      },
+      "PullRequestMeta": {
+        "properties": {
+          "draft": {
+            "type": "boolean"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "merged": {
+            "type": "boolean"
+          },
+          "merged_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PullRequestMinimal": {
+        "properties": {
+          "base": {
+            "$ref": "#/components/schemas/PullRequestMinimalHead"
+          },
+          "head": {
+            "$ref": "#/components/schemas/PullRequestMinimalHead"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PullRequestMinimalHead": {
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "repo": {
+            "$ref": "#/components/schemas/PullRequestMinimalHeadRepo"
+          },
+          "sha": {
+            "type": "string"
+          }
+        },
+        "title": "PullRequestMinimalHead is a minimal description of one side of a pull request.",
+        "type": "object"
+      },
+      "PullRequestMinimalHeadRepo": {
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "title": "PullRequestMinimalHeadRepo is a minimal description of the repository on one side of a pull request.",
+        "type": "object"
+      },
+      "PullReview": {
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "comments_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "commit_id": {
+            "type": "string"
+          },
+          "dismissed": {
+            "type": "boolean"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "official": {
+            "type": "boolean"
+          },
+          "pull_request_url": {
+            "type": "string"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "APPROVED",
+              "PENDING",
+              "COMMENT",
+              "REQUEST_CHANGES",
+              "REQUEST_REVIEW"
+            ],
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "team": {
+            "$ref": "#/components/schemas/Team"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        },
+        "type": "object"
+      },
+      "Release": {
+        "properties": {
+          "assets": {
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            },
+            "type": "array"
+          },
+          "author": {
+            "$ref": "#/components/schemas/User"
+          },
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "draft": {
+            "type": "boolean"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prerelease": {
+            "type": "boolean"
+          },
+          "published_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "tag_name": {
+            "type": "string"
+          },
+          "tarball_url": {
+            "type": "string"
+          },
+          "target_commitish": {
+            "type": "string"
+          },
+          "upload_url": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "zipball_url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RepoCommit": {
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/CommitUser"
+          },
+          "committer": {
+            "$ref": "#/components/schemas/CommitUser"
+          },
+          "message": {
+            "type": "string"
+          },
+          "tree": {
+            "$ref": "#/components/schemas/CommitMeta"
+          },
+          "url": {
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/PayloadCommitVerification"
+          }
+        },
+        "title": "RepoCommit contains information of a commit in the context of a repository.",
+        "type": "object"
+      },
+      "RepoTransfer": {
+        "properties": {
+          "doer": {
+            "$ref": "#/components/schemas/User"
+          },
+          "recipient": {
+            "$ref": "#/components/schemas/User"
+          },
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/Team"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "Repository": {
+        "properties": {
+          "allow_fast_forward_only_merge": {
+            "type": "boolean"
+          },
+          "allow_manual_merge": {
+            "type": "boolean"
+          },
+          "allow_merge_commits": {
+            "type": "boolean"
+          },
+          "allow_merge_update": {
+            "type": "boolean"
+          },
+          "allow_rebase": {
+            "type": "boolean"
+          },
+          "allow_rebase_explicit": {
+            "type": "boolean"
+          },
+          "allow_rebase_update": {
+            "type": "boolean"
+          },
+          "allow_squash_merge": {
+            "type": "boolean"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "archived_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "autodetect_manual_merge": {
+            "type": "boolean"
+          },
+          "avatar_url": {
+            "type": "string"
+          },
+          "branch_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "clone_url": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "default_allow_maintainer_edit": {
+            "type": "boolean"
+          },
+          "default_branch": {
+            "type": "string"
+          },
+          "default_delete_branch_after_merge": {
+            "type": "boolean"
+          },
+          "default_merge_style": {
+            "type": "string"
+          },
+          "default_target_branch": {
+            "type": "string"
+          },
+          "default_update_style": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "empty": {
+            "type": "boolean"
+          },
+          "external_tracker": {
+            "$ref": "#/components/schemas/ExternalTracker"
+          },
+          "external_wiki": {
+            "$ref": "#/components/schemas/ExternalWiki"
+          },
+          "fork": {
+            "type": "boolean"
+          },
+          "forks_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "has_actions": {
+            "type": "boolean"
+          },
+          "has_code": {
+            "type": "boolean"
+          },
+          "has_issues": {
+            "type": "boolean"
+          },
+          "has_packages": {
+            "type": "boolean"
+          },
+          "has_projects": {
+            "type": "boolean"
+          },
+          "has_pull_requests": {
+            "type": "boolean"
+          },
+          "has_releases": {
+            "type": "boolean"
+          },
+          "has_wiki": {
+            "type": "boolean"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ignore_whitespace_conflicts": {
+            "type": "boolean"
+          },
+          "internal": {
+            "type": "boolean"
+          },
+          "internal_tracker": {
+            "$ref": "#/components/schemas/InternalTracker"
+          },
+          "language": {
+            "type": "string"
+          },
+          "languages_url": {
+            "type": "string"
+          },
+          "licenses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "link": {
+            "type": "string"
+          },
+          "mirror": {
+            "type": "boolean"
+          },
+          "mirror_interval": {
+            "type": "string"
+          },
+          "mirror_last_sync_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "mirror_updated": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "object_format_name": {
+            "enum": [
+              "sha1",
+              "sha256"
+            ],
+            "type": "string"
+          },
+          "open_issues_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "open_pr_counter": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "original_url": {
+            "type": "string"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/User"
+          },
+          "parent": {
+            "$ref": "#/components/schemas/Repository"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/Permission"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "projects_mode": {
+            "type": "string"
+          },
+          "release_counter": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "repo_transfer": {
+            "$ref": "#/components/schemas/RepoTransfer"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ssh_url": {
+            "type": "string"
+          },
+          "stars_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "template": {
+            "type": "boolean"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "watchers_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "website": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RepositoryMeta": {
+        "properties": {
+          "full_name": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SearchResults": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Repository"
+            },
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "Team": {
+        "properties": {
+          "can_create_org_repo": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "includes_all_repositories": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "organization": {
+            "$ref": "#/components/schemas/Organization"
+          },
+          "permission": {
+            "enum": [
+              "none",
+              "read",
+              "write",
+              "admin",
+              "owner"
+            ],
+            "type": "string"
+          },
+          "units": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "units_map": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "visibility": {
+            "enum": [
+              "public",
+              "limited",
+              "private"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "User": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "avatar_url": {
+            "type": "string"
+          },
+          "created": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "type": "string"
+          },
+          "followers_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "following_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "is_admin": {
+            "type": "boolean"
+          },
+          "language": {
+            "type": "string"
+          },
+          "last_login": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "login": {
+            "type": "string"
+          },
+          "login_name": {
+            "type": "string"
+          },
+          "prohibit_login": {
+            "type": "boolean"
+          },
+          "restricted": {
+            "type": "boolean"
+          },
+          "source_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "starred_repos_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "User",
+              "Organization",
+              "Bot"
+            ],
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "public",
+              "limited",
+              "private"
+            ],
+            "type": "string"
+          },
+          "website": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "AccessToken": {
+        "in": "query",
+        "name": "access_token",
+        "type": "apiKey"
+      },
+      "AuthorizationHeaderToken": {
+        "in": "header",
+        "name": "Authorization",
+        "type": "apiKey"
+      },
+      "BasicAuth": {
+        "scheme": "basic",
+        "type": "http"
+      },
+      "SudoHeader": {
+        "in": "header",
+        "name": "Sudo",
+        "type": "apiKey"
+      },
+      "SudoParam": {
+        "in": "query",
+        "name": "sudo",
+        "type": "apiKey"
+      },
+      "TOTPHeader": {
+        "in": "header",
+        "name": "X-GITEA-OTP",
+        "type": "apiKey"
+      },
+      "Token": {
+        "in": "query",
+        "name": "token",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "Gitea API"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/repos/search": {
+      "get": {
+        "operationId": "repoSearch",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "topic",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeDesc",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "uid",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "priority_owner_id",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "team_id",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "starredBy",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "private",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "is_private",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "template",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "archived",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exclusive",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResults"
+                }
+              }
+            }
+          },
+          "422": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}": {
+      "get": {
+        "operationId": "repoGet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Repository"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/actions/runs": {
+      "get": {
+        "operationId": "getWorkflowRuns",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "branch",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "head_sha",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exclude_pull_requests",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionWorkflowRunsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/actions/runs/{run}": {
+      "get": {
+        "operationId": "GetWorkflowRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionWorkflowRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/branches": {
+      "get": {
+        "operationId": "repoListBranches",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Branch"
+                  },
+                  "type": "array"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "repoCreateBranch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBranchRepoOption"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Branch"
+                }
+              }
+            }
+          },
+          "403": {},
+          "404": {},
+          "409": {},
+          "423": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/commits": {
+      "get": {
+        "operationId": "repoGetAllCommits",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sha",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stat",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "verification",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "files",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "not",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Commit"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "headers": {
+              "X-HasMore": {
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "X-Page": {
+                "schema": {
+                  "format": "int64",
+                  "type": "integer"
+                }
+              },
+              "X-PageCount": {
+                "schema": {
+                  "format": "int64",
+                  "type": "integer"
+                }
+              },
+              "X-PerPage": {
+                "schema": {
+                  "format": "int64",
+                  "type": "integer"
+                }
+              },
+              "X-Total-Count": {
+                "schema": {
+                  "format": "int64",
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "404": {},
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/contents": {
+      "get": {
+        "operationId": "repoGetContentsList",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ref",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ContentsResponse"
+                  },
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/contents/{filepath}": {
+      "get": {
+        "operationId": "repoGetContents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filepath",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ref",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentsResponse"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/git/commits/{sha}": {
+      "get": {
+        "operationId": "repoGetSingleCommit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sha",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stat",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "verification",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "files",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Commit"
+                }
+              }
+            }
+          },
+          "404": {},
+          "422": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/issues": {
+      "get": {
+        "operationId": "issueListIssues",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "enum": [
+                "closed",
+                "open",
+                "all"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "labels",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "enum": [
+                "issues",
+                "pulls"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "milestones",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_by",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assigned_by",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mentioned_by",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Issue"
+                  },
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      },
+      "post": {
+        "operationId": "issueCreateIssue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIssueOption"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Issue"
+                }
+              }
+            }
+          },
+          "403": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {},
+          "412": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "423": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/issues/{index}": {
+      "get": {
+        "operationId": "issueGetIssue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Issue"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      },
+      "patch": {
+        "operationId": "issueEditIssue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditIssueOption"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Issue"
+                }
+              }
+            }
+          },
+          "403": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {},
+          "412": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "423": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/issues/{index}/comments": {
+      "get": {
+        "operationId": "issueGetComments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Comment"
+                  },
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      },
+      "post": {
+        "operationId": "issueCreateComment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIssueCommentOption"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comment"
+                }
+              }
+            }
+          },
+          "403": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {},
+          "423": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/issues/{index}/labels": {
+      "post": {
+        "operationId": "issueAddLabel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueLabelsOption"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Label"
+                  },
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "403": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {},
+          "423": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/labels": {
+      "get": {
+        "operationId": "issueListLabels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Label"
+                  },
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/pulls": {
+      "get": {
+        "operationId": "repoListPullRequests",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "base_branch",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "default": "open",
+              "enum": [
+                "open",
+                "closed",
+                "all"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "enum": [
+                "oldest",
+                "recentupdate",
+                "recentclose",
+                "leastupdate",
+                "mostcomment",
+                "leastcomment",
+                "priority"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "milestone",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "labels",
+            "schema": {
+              "items": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "poster",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PullRequest"
+                  },
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "404": {},
+          "500": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "repoCreatePullRequest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePullRequestOption"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequest"
+                }
+              }
+            }
+          },
+          "403": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {},
+          "409": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "423": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/pulls/{index}": {
+      "get": {
+        "operationId": "repoGetPullRequest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequest"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/pulls/{index}/files": {
+      "get": {
+        "operationId": "repoGetPullRequestFiles",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip-to",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "whitespace",
+            "schema": {
+              "enum": [
+                "ignore-all",
+                "ignore-change",
+                "ignore-eol",
+                "show-all"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ChangedFile"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "headers": {
+              "X-HasMore": {
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "X-Page": {
+                "schema": {
+                  "format": "int64",
+                  "type": "integer"
+                }
+              },
+              "X-PageCount": {
+                "schema": {
+                  "format": "int64",
+                  "type": "integer"
+                }
+              },
+              "X-PerPage": {
+                "schema": {
+                  "format": "int64",
+                  "type": "integer"
+                }
+              },
+              "X-Total-Count": {
+                "schema": {
+                  "format": "int64",
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/pulls/{index}/merge": {
+      "post": {
+        "operationId": "repoMergePullRequest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergePullRequestOption"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {},
+          "403": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {},
+          "405": {},
+          "409": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "423": {
+            "headers": {
+              "message": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/pulls/{index}/reviews": {
+      "get": {
+        "operationId": "repoListPullReviews",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PullReview"
+                  },
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/releases": {
+      "get": {
+        "operationId": "repoListReleases",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "draft",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pre-release",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_filter",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Release"
+                  },
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      }
+    },
+    "/user": {
+      "get": {
+        "operationId": "userGetCurrent",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/search": {
+      "get": {
+        "operationId": "userSearch",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "uid",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/User"
+                      },
+                      "type": "array"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "BasicAuth": []
+    },
+    {
+      "Token": []
+    },
+    {
+      "AccessToken": []
+    },
+    {
+      "AuthorizationHeaderToken": []
+    },
+    {
+      "SudoParam": []
+    },
+    {
+      "SudoHeader": []
+    },
+    {
+      "TOTPHeader": []
+    }
+  ],
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ]
+}
