@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import { EuiFlexGroup, EuiFlexItem } from '@elastic/eui';
+import { EuiFlexGroup, EuiFlexItem, EuiText } from '@elastic/eui';
 import type { InferenceConnector } from '@kbn/inference-common';
 import React from 'react';
 import { ConnectorIcon } from '../../components/ui/connector_icon';
@@ -50,11 +50,14 @@ export function buildConnectorMenuItem({
   selectedConnectorId,
   resolvedConnectorId,
   panelId,
+  label,
 }: {
   connector: InferenceConnector | undefined;
   selectedConnectorId: string | undefined;
   resolvedConnectorId: string | undefined;
   panelId: number;
+  /** Shown above the connector name when the menu holds more than one model row. */
+  label?: string;
 }): { name: React.ReactNode; panel: number } {
   const connectorName =
     connector?.name ??
@@ -71,6 +74,11 @@ export function buildConnectorMenuItem({
           <ConnectorIcon connectorName={connector?.name} />
         </EuiFlexItem>
         <EuiFlexItem className="eui-textTruncate" css={{ minWidth: 0 }}>
+          {label && (
+            <EuiText size="xs" color="subdued">
+              {label}
+            </EuiText>
+          )}
           {connectorName}
         </EuiFlexItem>
       </EuiFlexGroup>

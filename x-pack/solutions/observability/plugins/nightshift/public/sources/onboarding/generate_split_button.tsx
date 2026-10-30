@@ -7,9 +7,8 @@
 
 import { EuiFlexGroup, EuiFlexItem, EuiIconTip } from '@elastic/eui';
 import type { InferenceConnector } from '@kbn/inference-common';
-import { GEN_AI_SETTINGS_DEFAULT_AI_CONNECTOR_DEFAULT_ONLY } from '@kbn/management-settings-ids';
 import { useIsCpsMultiProject } from '@kbn/cps-utils';
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useKibana } from '../../hooks/use_kibana';
 import {
@@ -23,6 +22,7 @@ import {
   GENERATE_CONFIG_ARIA_LABEL,
 } from './translations';
 import { buildConnectorMenuItem, buildConnectorSelectionPanel } from './context_menu_helpers';
+import { useGenerateConnectors } from './use_generate_connectors';
 import type { OnboardingConfig } from './types';
 import { ContextMenuSplitButton } from '../../components/ui/context_menu_split_button';
 import type {
@@ -64,43 +64,18 @@ export const GenerateSplitButton = ({
   isLoading,
   size,
 }: GenerateSplitButtonProps) => {
-  const { settings, cps } = useKibana().services;
+  const { cps } = useKibana().services;
   const isCpsMultiProject = useIsCpsMultiProject(cps?.cpsManager);
-  const defaultConnectorOnly = settings.client.get<boolean>(
-    GEN_AI_SETTINGS_DEFAULT_AI_CONNECTOR_DEFAULT_ONLY,
-    false
-  );
-  const featuresConnector = useMemo(
-    () => allConnectors.find((c) => c.connectorId === config.connectors.features),
-    [allConnectors, config.connectors.features]
-  );
-  const queriesConnector = useMemo(
-    () => allConnectors.find((c) => c.connectorId === config.connectors.queries),
-    [allConnectors, config.connectors.queries]
-  );
+  const {
+    defaultConnectorOnly,
+    featuresConnector,
+    queriesConnector,
+    onSelectFeaturesConnector,
+    onSelectQueriesConnector,
+  } = useGenerateConnectors({ config, allConnectors, onConfigChange });
   const isFeaturesRunDisabled = isRunDisabled || !featuresConnector;
   const isQueriesRunDisabled = isRunDisabled || !queriesConnector;
   const isCombinedRunDisabled = isFeaturesRunDisabled || isQueriesRunDisabled;
-
-  const onSelectFeaturesConnector = useCallback(
-    (connectorId: string) => {
-      onConfigChange({
-        ...config,
-        connectors: { ...config.connectors, features: connectorId },
-      });
-    },
-    [config, onConfigChange]
-  );
-
-  const onSelectQueriesConnector = useCallback(
-    (connectorId: string) => {
-      onConfigChange({
-        ...config,
-        connectors: { ...config.connectors, queries: connectorId },
-      });
-    },
-    [config, onConfigChange]
-  );
 
   const buildPanels = useCallback(
     ({ resetMenu, closeMenu }: MenuHelpers) => [

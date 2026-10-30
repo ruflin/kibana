@@ -60,6 +60,16 @@ export const MODEL_SELECTION_PANEL_TITLE = i18n.translate(
   { defaultMessage: 'Model selection' }
 );
 
+export const FEATURES_MODEL_ROW_LABEL = i18n.translate(
+  'xpack.nightshift.streamsView.featuresModelRowLabel',
+  { defaultMessage: 'KI features model' }
+);
+
+export const QUERIES_MODEL_ROW_LABEL = i18n.translate(
+  'xpack.nightshift.streamsView.queriesModelRowLabel',
+  { defaultMessage: 'KI queries model' }
+);
+
 export const DEFAULT_MODEL_BADGE_LABEL = i18n.translate(
   'xpack.nightshift.streamsView.defaultModelBadgeLabel',
   { defaultMessage: 'Default' }

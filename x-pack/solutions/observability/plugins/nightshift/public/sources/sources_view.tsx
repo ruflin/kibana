@@ -21,6 +21,7 @@ import { useBlocksNewActivity } from '../data/maintenance/use_significant_events
 import { useKiGeneration } from './onboarding/ki_generation_context';
 import { FindSignificantEventsButton } from './find_significant_events_button';
 import { GenerateSplitButton } from './onboarding/generate_split_button';
+import type { GenerateRun, RowGenerateProps } from './onboarding/types';
 import { getGenerateDisabledTooltip } from './onboarding/translations';
 import { ConfirmSourceActionModal, type SourceAction } from './confirm_source_action_modal';
 import { SourcesTable } from './sources_table';
@@ -69,7 +70,6 @@ export function SourcesView() {
     awaitingRunSourceIds,
     sourceStatusMap,
     cancelOnboarding,
-    bulkScheduleOnboarding,
     bulkOnboardAll,
     bulkOnboardFeaturesOnly,
     bulkOnboardQueriesOnly,
@@ -155,6 +155,28 @@ export function SourcesView() {
       // Only scheduled rows leave the selection, so failed ones can be retried without re-picking.
       setSelectedSourceIds((current) => current.filter((id) => !scheduledIds.includes(id)));
     };
+
+  const rowGenerateActions: Record<GenerateRun, (sourceIds: string[]) => Promise<string[]>> = {
+    all: bulkOnboardAll,
+    features: bulkOnboardFeaturesOnly,
+    queries: bulkOnboardQueriesOnly,
+  };
+  const rowGenerate: RowGenerateProps = {
+    config: onboardingConfig,
+    allConnectors,
+    featuresResolvedConnectorId: featuresConnectors.resolvedConnectorId,
+    queriesResolvedConnectorId: queriesConnectors.resolvedConnectorId,
+    isRunDisabled:
+      blocksActivity ||
+      isConnectorCatalogUnavailable ||
+      featuresConnectors.loading ||
+      queriesConnectors.loading ||
+      isScheduling,
+    onConfigChange: setOnboardingConfig,
+    onRun: (rowSourceId, run) => {
+      void rowGenerateActions[run]([rowSourceId]);
+    },
+  };
 
   const onConfirmPendingAction = () => {
     if (!pendingAction) {
@@ -320,9 +342,7 @@ export function SourcesView() {
                 onToggleSourceEnabled={(source, enabled) =>
                   setSourceEnabled.mutate({ sourceId: source.id, enabled })
                 }
-                onOnboardSource={(onboardingSourceId) =>
-                  bulkScheduleOnboarding([onboardingSourceId])
-                }
+                generate={rowGenerate}
                 onStopOnboarding={cancelOnboarding}
                 onDeleteSource={(source) => setPendingAction({ action: 'delete', source })}
               />

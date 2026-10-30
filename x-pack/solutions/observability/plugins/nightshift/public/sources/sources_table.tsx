@@ -30,6 +30,7 @@ import { KnowledgeIndicatorsColumn } from './knowledge_indicators_column';
 import { QueriesColumn } from './queries_column';
 import { SignificantEventsColumn } from './significant_events_column';
 import { SourceActionsColumn } from './source_actions_column';
+import type { RowGenerateProps } from './onboarding/types';
 import {
   ACTIONS_COLUMN_HEADER,
   ENABLED_COLUMN_HEADER,
@@ -66,7 +67,7 @@ interface ISourcesTableProps {
   /** Opens the source flyout; it is read-only without `canManage`. */
   onOpenSource: (source: NightshiftSource) => void;
   onToggleSourceEnabled: (source: NightshiftSource, enabled: boolean) => void;
-  onOnboardSource: (sourceId: string) => void;
+  generate: RowGenerateProps;
   onStopOnboarding: (sourceId: string) => void;
   onDeleteSource: (source: NightshiftSource) => void;
 }
@@ -85,7 +86,7 @@ export function SourcesTable({
   pendingEnabledSourceId,
   onOpenSource,
   onToggleSourceEnabled,
-  onOnboardSource,
+  generate,
   onStopOnboarding,
   onDeleteSource,
 }: ISourcesTableProps) {
@@ -112,7 +113,7 @@ export function SourcesTable({
         blocksActivity={blocksActivity}
         isOnboardPending={generatingSourceIds.includes(source.id)}
         onboardTooltip={onboardTooltip}
-        onOnboard={onOnboardSource}
+        generate={generate}
         onStopOnboarding={onStopOnboarding}
         onDelete={onDeleteSource}
       />

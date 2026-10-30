@@ -60,6 +60,10 @@ export const SOURCES_TABLE_CAPTION = i18n.translate('xpack.nightshift.sources.ta
   defaultMessage: 'Sources',
 });
 
+export const SOURCE_ACTIONS_LABEL = i18n.translate('xpack.nightshift.sources.actionsLabel', {
+  defaultMessage: 'Source actions',
+});
+
 export const RUN_SOURCE_ONBOARDING_BUTTON_LABEL = i18n.translate(
   'xpack.nightshift.sources.runOnboardingButtonLabel',
   { defaultMessage: 'Onboard source' }
