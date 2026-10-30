@@ -83,7 +83,6 @@ jest.mock('../data/maintenance/use_significant_events_maintenance', () => ({
   useBlocksNewActivity: () => ({ blocksActivity: false }),
 }));
 jest.mock('../components/search_bar', () => ({ SignificantEventsSearchBar: () => null }));
-jest.mock('./onboarding/generate_split_button', () => ({ GenerateSplitButton: () => null }));
 jest.mock('./find_significant_events_button', () => ({ FindSignificantEventsButton: () => null }));
 jest.mock('./sources_table', () => ({
   SourcesTable: ({

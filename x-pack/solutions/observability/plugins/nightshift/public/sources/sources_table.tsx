@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import type { Criteria, EuiBasicTableColumn, EuiTableSelectionType } from '@elastic/eui';
+import type { Criteria, EuiBasicTableColumn } from '@elastic/eui';
 import {
   EuiCode,
   EuiFlexGroup,
@@ -30,6 +30,7 @@ import { KnowledgeIndicatorsColumn } from './knowledge_indicators_column';
 import { QueriesColumn } from './queries_column';
 import { SignificantEventsColumn } from './significant_events_column';
 import { SourceActionsColumn } from './source_actions_column';
+import type { RowGenerateProps } from './onboarding/types';
 import {
   ACTIONS_COLUMN_HEADER,
   ENABLED_COLUMN_HEADER,
@@ -51,7 +52,6 @@ interface ISourcesTableProps {
   sources: NightshiftSource[];
   onboardingResultMap: Record<string, SignificantEventsWorkflowStatusResult>;
   searchText: string;
-  selection?: EuiTableSelectionType<NightshiftSource>;
   /** When true, per-row onboard actions are disabled (global pause / status loading). */
   blocksActivity?: boolean;
   /** Sources whose onboard request is in flight or accepted and not yet reflected in status. */
@@ -66,17 +66,16 @@ interface ISourcesTableProps {
   /** Opens the source flyout; it is read-only without `canManage`. */
   onOpenSource: (source: NightshiftSource) => void;
   onToggleSourceEnabled: (source: NightshiftSource, enabled: boolean) => void;
-  onOnboardSource: (sourceId: string) => void;
+  generate: RowGenerateProps;
   onStopOnboarding: (sourceId: string) => void;
   onDeleteSource: (source: NightshiftSource) => void;
 }
 
-/** Catalog table with selection, inline enable switch, onboarding status and row actions. */
+/** Catalog table with inline enable switch, onboarding status and per-row actions. */
 export function SourcesTable({
   sources,
   onboardingResultMap,
   searchText,
-  selection,
   blocksActivity = false,
   generatingSourceIds = [],
   awaitingRunSourceIds = [],
@@ -85,7 +84,7 @@ export function SourcesTable({
   pendingEnabledSourceId,
   onOpenSource,
   onToggleSourceEnabled,
-  onOnboardSource,
+  generate,
   onStopOnboarding,
   onDeleteSource,
 }: ISourcesTableProps) {
@@ -112,7 +111,7 @@ export function SourcesTable({
         blocksActivity={blocksActivity}
         isOnboardPending={generatingSourceIds.includes(source.id)}
         onboardTooltip={onboardTooltip}
-        onOnboard={onOnboardSource}
+        generate={generate}
         onStopOnboarding={onStopOnboarding}
         onDelete={onDeleteSource}
       />
@@ -249,7 +248,6 @@ export function SourcesTable({
       itemId="id"
       items={items}
       columns={columns}
-      selection={selection}
       noItemsMessage={NO_SOURCES_MESSAGE}
       sorting={{ sort: { field: 'title', direction: 'asc' } }}
       pagination={{ pageIndex, pageSize: page.size, pageSizeOptions: PAGE_SIZE_OPTIONS }}
