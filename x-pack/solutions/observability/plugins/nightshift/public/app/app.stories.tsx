@@ -42,7 +42,9 @@ const NightshiftLandingStory = ({
   >
     <MockAppHeaderProvider>
       <EuiPageTemplate restrictWidth={false}>
-        <NightshiftAppHeader onSettingsClick={noop} settingsHref="/app/nightshift/settings" />
+        <NightshiftAppHeader
+          navItems={{ settings: { href: '/app/nightshift/settings', onClick: noop } }}
+        />
         <EuiPageTemplate.Section component="div" color="subdued" restrictWidth="900px">
           <NightshiftApp />
         </EuiPageTemplate.Section>

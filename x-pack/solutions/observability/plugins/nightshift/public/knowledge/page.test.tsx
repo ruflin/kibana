@@ -113,6 +113,21 @@ it('marks only the Decision Trees tab with the developer mode badge', async () =
   ]);
 });
 
+it('links Back from Knowledge to Nightshift', async () => {
+  renderPage('/knowledge/knowledge_indicators', {
+    knowledge_indicators: knowledgeIndicatorsEnabled,
+    cortex: settledOff,
+    memory: settledOff,
+    decision_trees: settledOff,
+  });
+
+  expect(await screen.findByTestId('knowledgeIndicatorsTab')).toBeInTheDocument();
+  expect(mockAppHeader.mock.lastCall[0]).toMatchObject({
+    page: 'knowledge',
+    back: { href: '/app/nightshift/', label: 'Nightshift' },
+  });
+});
+
 it('redirects a Decision Trees deep link when the tab is hidden', async () => {
   const { history } = renderPage('/knowledge/decision_trees', {
     knowledge_indicators: knowledgeIndicatorsEnabled,

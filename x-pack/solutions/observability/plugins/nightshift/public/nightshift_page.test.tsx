@@ -7,6 +7,7 @@
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
+import { EuiProvider } from '@elastic/eui';
 import { createMemoryHistory } from 'history';
 import { APP_HEADER_TEST_SUBJECTS } from '@kbn/app-header';
 import { MockAppHeaderProvider } from '@kbn/app-header/mocks';
@@ -16,6 +17,7 @@ import { OBSERVABILITY_OVERVIEW_APP_ID } from '@kbn/deeplinks-observability';
 import { NIGHTSHIFT_UI_PRIVILEGES } from '@kbn/nightshift-shared';
 import { NightshiftPage } from './nightshift_page';
 import { Router } from '@kbn/shared-ux-router';
+import { useBreadcrumbs } from '@kbn/observability-shared-plugin/public';
 import { useKibana } from './hooks/use_kibana';
 import { useSignificantEventsAvailability } from './data/availability/use_significant_events_availability';
 import { useOnboardingVisibility } from './onboarding/use_onboarding_visibility';
@@ -69,27 +71,35 @@ jest.mock('./pages/detection/page', () => {
     ),
   };
 });
-jest.mock('./settings/page', () => ({
-  SettingsPage: ({ headerProps }: { headerProps: { onCustomContextClick?: () => void } }) => {
-    const [draft, setDraft] = React.useState('');
+jest.mock('./settings/page', () => {
+  const { NightshiftAppHeader } = jest.requireActual('./components/app_header');
+  return {
+    SettingsPage: ({
+      headerProps,
+    }: {
+      headerProps: NightshiftAppHeaderProps & { onCustomContextClick?: () => void };
+    }) => {
+      const [draft, setDraft] = React.useState('');
 
-    return (
-      <div data-test-subj="settingsPageStub">
-        <input
-          data-test-subj="settingsPageDraftStub"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-        />
-        <button
-          data-test-subj="settingsPageOpenCustomContextStub"
-          onClick={headerProps.onCustomContextClick}
-        >
-          Open custom context
-        </button>
-      </div>
-    );
-  },
-}));
+      return (
+        <div data-test-subj="settingsPageStub">
+          <NightshiftAppHeader navItems={headerProps.navItems} page="settings" />
+          <input
+            data-test-subj="settingsPageDraftStub"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <button
+            data-test-subj="settingsPageOpenCustomContextStub"
+            onClick={headerProps.onCustomContextClick}
+          >
+            Open custom context
+          </button>
+        </div>
+      );
+    },
+  };
+});
 jest.mock('./hooks/use_kibana', () => ({ useKibana: jest.fn() }));
 jest.mock('./hooks/use_developer_mode', () => ({
   useDeveloperMode: () => ({
@@ -107,6 +117,7 @@ jest.mock('./service_account/use_investigator_service_account', () => ({
 
 const mockUseKibana = useKibana as jest.Mock;
 const mockUseSignificantEventsAvailability = useSignificantEventsAvailability as jest.Mock;
+const mockUseBreadcrumbs = useBreadcrumbs as jest.Mock;
 const mockUseOnboardingVisibility = useOnboardingVisibility as jest.Mock;
 const getUrlForApp = jest.fn(
   (appId: string, { path }: { path: string }) =>
@@ -120,11 +131,13 @@ function renderPage(initialPath = '/') {
   const history = createMemoryHistory({ initialEntries: [initialPath] });
   const renderResult = render(
     <I18nProvider>
-      <MockAppHeaderProvider>
-        <Router history={history}>
-          <NightshiftPage />
-        </Router>
-      </MockAppHeaderProvider>
+      <EuiProvider>
+        <MockAppHeaderProvider>
+          <Router history={history}>
+            <NightshiftPage />
+          </Router>
+        </MockAppHeaderProvider>
+      </EuiProvider>
     </I18nProvider>
   );
   return { ...renderResult, history };
@@ -356,43 +369,33 @@ describe('NightshiftPage', () => {
     expect(history.location.search).toBe('?entity=checkout&signalsSearch=latency');
   });
 
-  it('shows the Detections header actions and marks Detections as the Settings origin', async () => {
-    renderPage('/detections/events');
-
-    expect(await screen.findByTestId('detectionPageStub')).toBeInTheDocument();
-    expect(screen.getByTestId(APP_HEADER_TEST_SUBJECTS.title)).toHaveTextContent('Detections');
-    expect(screen.queryByTestId('nightshiftAppStub')).not.toBeInTheDocument();
-
-    await openAppMenuOverflow();
-    const knowledgeLink = await screen.findByTestId('nightshiftKnowledgeLink');
-    expect(knowledgeLink).toHaveAttribute('href', '/app/nightshift/knowledge');
-    expect(screen.getAllByRole('menuitem')[0]).toBe(knowledgeLink);
-
-    await act(async () => fireEvent.click(knowledgeLink));
-    expect(navigateToUrl).toHaveBeenCalledWith('/app/nightshift/knowledge');
-
-    const sourcesLink = screen.getByTestId('nightshiftSourcesLink');
-    expect(sourcesLink).toBeVisible();
-    expect(sourcesLink).toHaveAttribute('href', '/app/nightshift/sources');
-
-    await act(async () => fireEvent.click(sourcesLink));
-    expect(navigateToUrl).toHaveBeenCalledWith('/app/nightshift/sources');
-
-    const settingsLink = screen.getByTestId('nightshiftSettingsLink');
-    expect(settingsLink).toBeVisible();
-    expect(settingsLink).toHaveAttribute(
-      'href',
-      '/app/nightshift/settings/detections?origin=detections'
-    );
-    expect(screen.queryByTestId('nightshiftAutomationsPrimaryAction')).not.toBeInTheDocument();
-
-    await act(async () => fireEvent.click(settingsLink));
-    expect(navigateToUrl).toHaveBeenLastCalledWith(
-      '/app/nightshift/settings/detections?origin=detections'
-    );
-  });
-
   describe('app menu', () => {
+    const NIGHTSHIFT_MENU_TEST_IDS = [
+      'nightshiftAutomationsPrimaryAction',
+      'nightshiftDetectionsPrimaryAction',
+      'nightshiftKnowledgeLink',
+      'nightshiftSourcesLink',
+      'nightshiftSettingsLink',
+    ];
+    const TOP_LEVEL_PATHS = [
+      '/',
+      '/automations',
+      '/detections/events',
+      '/knowledge/knowledge_indicators',
+      '/sources',
+      '/settings/general',
+    ];
+
+    const getMenuTestIds = async (): Promise<string[]> => {
+      await openAppMenuOverflow();
+      return NIGHTSHIFT_MENU_TEST_IDS.filter((testId) => screen.queryByTestId(testId) !== null);
+    };
+
+    const renderAndWaitForHeader = async (path: string) => {
+      renderPage(path);
+      await screen.findByTestId(APP_HEADER_TEST_SUBJECTS.title);
+    };
+
     const withServices = (overrides: Record<string, unknown>) => {
       const { services } = mockUseKibana();
       mockUseKibana.mockReturnValue({
@@ -411,6 +414,133 @@ describe('NightshiftPage', () => {
         },
       });
     };
+
+    it.each(TOP_LEVEL_PATHS)('shows the same menu on %s', async (path) => {
+      withServices({ nightshiftInvestigations: { investigationsClient: { fetch: jest.fn() } } });
+      await renderAndWaitForHeader(path);
+
+      expect(await getMenuTestIds()).toEqual(NIGHTSHIFT_MENU_TEST_IDS);
+    });
+
+    it.each(TOP_LEVEL_PATHS)(
+      'hides Automations on %s without the investigations client',
+      async (path) => {
+        await renderAndWaitForHeader(path);
+
+        expect(await getMenuTestIds()).toEqual(
+          NIGHTSHIFT_MENU_TEST_IDS.filter(
+            (testId) => testId !== 'nightshiftAutomationsPrimaryAction'
+          )
+        );
+      }
+    );
+
+    it.each(['/', '/detections/events', '/sources'])(
+      'shows only Knowledge and Settings on %s before the first investigation',
+      async (path) => {
+        const { services } = mockUseKibana();
+        mockUseKibana.mockReturnValue({
+          services: {
+            ...services,
+            nightshiftInvestigations: { investigationsClient: {} },
+          },
+        });
+        mockUseOnboardingVisibility.mockReturnValue({
+          isLoading: false,
+          showOnboarding: true,
+          dismiss: jest.fn(),
+        });
+        await renderAndWaitForHeader(path);
+
+        expect(await getMenuTestIds()).toEqual([
+          'nightshiftKnowledgeLink',
+          'nightshiftSettingsLink',
+        ]);
+      }
+    );
+
+    // Settings renders nothing without manage and configure, so only the other pages show the menu.
+    it.each(TOP_LEVEL_PATHS.filter((path) => !path.startsWith('/settings')))(
+      'hides Settings on %s without manage and configure',
+      async (path) => {
+        mockUseKibana.mockReturnValue({
+          services: {
+            ...mockUseKibana().services,
+            application: {
+              ...mockUseKibana().services.application,
+              capabilities: {
+                nightshift: {
+                  [NIGHTSHIFT_UI_PRIVILEGES.show]: true,
+                  [NIGHTSHIFT_UI_PRIVILEGES.configure]: true,
+                },
+              },
+            },
+          },
+        });
+        await renderAndWaitForHeader(path);
+
+        expect(await getMenuTestIds()).not.toContain('nightshiftSettingsLink');
+      }
+    );
+
+    describe('back navigation', () => {
+      const getBackLink = () => screen.getByTestId(APP_HEADER_TEST_SUBJECTS.back);
+
+      it('goes back from the Automations list to Nightshift', async () => {
+        withServices({ nightshiftInvestigations: { investigationsClient: { fetch: jest.fn() } } });
+        renderPage('/automations');
+
+        await screen.findByTestId(APP_HEADER_TEST_SUBJECTS.title);
+        expect(getBackLink()).toHaveAttribute('href', '/app/nightshift/');
+        expect(getBackLink()).toHaveAttribute('aria-label', 'Back to Nightshift');
+      });
+
+      it.each(['/automations/automation-1', '/automations/automation-1/runs', '/automations/new'])(
+        'goes back from %s to Automations',
+        async (path) => {
+          withServices({
+            nightshiftInvestigations: { investigationsClient: { fetch: jest.fn() } },
+          });
+          renderPage(path);
+
+          await screen.findByTestId(APP_HEADER_TEST_SUBJECTS.title);
+          expect(getBackLink()).toHaveAttribute('href', '/app/nightshift/automations');
+          expect(getBackLink()).toHaveAttribute('aria-label', 'Back to Automations');
+        }
+      );
+    });
+
+    describe('breadcrumbs', () => {
+      const getBreadcrumbs = (): Array<{ text: string; href?: string }> => {
+        const { calls } = mockUseBreadcrumbs.mock;
+        return calls[calls.length - 1][0];
+      };
+
+      it.each([
+        ['/detections/events', ['Nightshift', 'Detections']],
+        ['/sources', ['Nightshift', 'Detections', 'Sources']],
+        ['/knowledge/knowledge_indicators', ['Nightshift', 'Knowledge']],
+        ['/settings/general', ['Nightshift', 'Settings']],
+        ['/automations', ['Nightshift', 'Automations']],
+        ['/automations/automation-1', ['Nightshift', 'Automations', 'Automation details']],
+      ])('shows the Back hierarchy for %s', async (path, expectedTexts) => {
+        withServices({ nightshiftInvestigations: { investigationsClient: { fetch: jest.fn() } } });
+        renderPage(path);
+        await screen.findByTestId(APP_HEADER_TEST_SUBJECTS.title);
+
+        expect(getBreadcrumbs().map(({ text }) => text)).toEqual(expectedTexts);
+      });
+
+      it('links Detections in the Sources breadcrumb to the Detections page', async () => {
+        renderPage('/sources');
+        await screen.findByTestId(APP_HEADER_TEST_SUBJECTS.title);
+
+        expect(getBreadcrumbs()[1]).toMatchObject({
+          text: 'Detections',
+          href: '/app/nightshift/detections/events',
+        });
+      });
+    });
 
     it('shows the Automations button when the API and feature flag are available', async () => {
       withServices({ nightshiftInvestigations: { investigationsClient: { fetch: jest.fn() } } });

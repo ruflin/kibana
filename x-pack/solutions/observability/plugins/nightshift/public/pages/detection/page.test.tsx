@@ -18,8 +18,12 @@ import { useDeveloperMode } from '../../hooks/use_developer_mode';
 import type { DetectionTabId } from './detection_tabs';
 import { DetectionPage } from './page';
 
+const mockAppHeader = jest.fn();
 jest.mock('../../components/app_header', () => ({
-  NightshiftAppHeader: () => <div data-test-subj="nightshiftAppHeaderStub" />,
+  NightshiftAppHeader: (props: unknown) => {
+    mockAppHeader(props);
+    return <div data-test-subj="nightshiftAppHeaderStub" />;
+  },
 }));
 jest.mock('../../data/detection_overview/use_detection_overview');
 jest.mock('../../data/detection_entities/use_detection_entities');
@@ -114,6 +118,15 @@ describe('DetectionPage', () => {
       'aria-selected',
       'true'
     );
+  });
+
+  it('links Back from Detections to Nightshift', () => {
+    renderPage();
+
+    expect(mockAppHeader.mock.lastCall[0]).toMatchObject({
+      page: 'detection',
+      back: { href: '/app/nightshift/', label: 'Nightshift' },
+    });
   });
 
   it('shows the paused detection process status', async () => {

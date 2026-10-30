@@ -11,6 +11,7 @@ import { NIGHTSHIFT_APP_ID } from '@kbn/deeplinks-observability';
 import { i18n } from '@kbn/i18n';
 import { Redirect, useHistory, useParams } from 'react-router-dom';
 import { NightshiftAppHeader } from '../components/app_header';
+import type { NightshiftNavHeaderProps } from '../components/app_header';
 import { useKibana } from '../hooks/use_kibana';
 import { useKnowledgeTabsAvailability } from './hooks/use_knowledge_tabs_availability';
 import {
@@ -38,7 +39,7 @@ const nightshiftLabel = i18n.translate('xpack.nightshift.knowledgePage.backToNig
   defaultMessage: 'Nightshift',
 });
 
-export type KnowledgePageHeaderProps = Record<string, never>;
+export type KnowledgePageHeaderProps = NightshiftNavHeaderProps;
 
 const KnowledgeLoadingSpinner = () => (
   <EuiLoadingSpinner size="xl" data-test-subj="nightshiftKnowledgePageLoading" />

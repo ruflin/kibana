@@ -8,7 +8,11 @@
 import React, { useMemo } from 'react';
 import { AppHeader } from '@kbn/app-header';
 import type { AppHeaderBack, AppHeaderTab } from '@kbn/app-header';
-import type { AppMenuConfig, AppMenuRunActionParams } from '@kbn/core-chrome-app-menu-components';
+import type {
+  AppMenuConfig,
+  AppMenuItemType,
+  AppMenuRunActionParams,
+} from '@kbn/core-chrome-app-menu-components';
 import { getEbtProps } from '@kbn/ebt-click';
 import { i18n } from '@kbn/i18n';
 import { NIGHTSHIFT_EBT_ACTIONS, NIGHTSHIFT_EBT_ELEMENTS } from '../common/ebt_constants';
@@ -91,156 +95,157 @@ const applyEbtProps = (
   });
 };
 
-export interface NightshiftAppHeaderProps {
-  page?: 'landing' | 'automations' | 'detection' | 'knowledge' | 'settings' | 'sources';
-  onSourcesClick?: () => void | Promise<void>;
-  sourcesHref?: string;
-  onKnowledgeClick?: () => void | Promise<void>;
-  knowledgeHref?: string;
-  onSettingsClick?: () => void | Promise<void>;
-  settingsHref?: string;
-  onAutomationsClick?: () => void | Promise<void>;
-  automationsHref?: string;
-  onDetectionsClick?: () => void | Promise<void>;
-  detectionsHref?: string;
+/** A top-level Nightshift destination shown in the header menu. */
+export interface NightshiftNavItem {
+  href: string;
+  onClick: () => void | Promise<void>;
+}
+
+/** Top-level destinations. An omitted entry is hidden on every page. */
+export interface NightshiftNavItems {
+  automations?: NightshiftNavItem;
+  detections?: NightshiftNavItem;
+  knowledge?: NightshiftNavItem;
+  sources?: NightshiftNavItem;
+  settings?: NightshiftNavItem;
+}
+
+export type NightshiftHeaderPage =
+  | 'landing'
+  | 'automations'
+  | 'detection'
+  | 'knowledge'
+  | 'settings'
+  | 'sources';
+
+/** Header props every top-level Nightshift page receives, so the menu is the same on each. */
+export interface NightshiftNavHeaderProps {
+  navItems?: NightshiftNavItems;
+}
+
+export interface NightshiftAppHeaderProps extends NightshiftNavHeaderProps {
+  page?: NightshiftHeaderPage;
   tabs?: AppHeaderTab[];
   back?: AppHeaderBack;
 }
 
+type NightshiftNavKey = keyof NightshiftNavItems;
+
+interface NightshiftNavDefinition {
+  id: string;
+  label: string;
+  iconType: 'workflow' | 'visGauge' | 'documentation' | 'database' | 'gear';
+  testId: string;
+  ebtProps: typeof settingsEbtProps;
+  /** Moved into the "More" menu. Without it the menu picks its own split by item count. */
+  overflow: boolean;
+}
+
+/** Label, icon, test id, EBT attributes and placement of each menu item. Order is `NIGHTSHIFT_NAV_ORDER`. */
+const NIGHTSHIFT_NAV_DEFINITIONS: Record<NightshiftNavKey, NightshiftNavDefinition> = {
+  automations: {
+    id: 'nightshiftAutomations',
+    label: automationsLabel,
+    iconType: 'workflow',
+    testId: 'nightshiftAutomationsPrimaryAction',
+    ebtProps: automationsEbtProps,
+    overflow: false,
+  },
+  detections: {
+    id: 'nightshiftDetections',
+    label: detectionsLabel,
+    iconType: 'visGauge',
+    testId: 'nightshiftDetectionsPrimaryAction',
+    ebtProps: detectionsEbtProps,
+    overflow: false,
+  },
+  knowledge: {
+    id: 'nightshiftKnowledge',
+    label: knowledgeLabel,
+    iconType: 'documentation',
+    testId: 'nightshiftKnowledgeLink',
+    ebtProps: knowledgeEbtProps,
+    overflow: true,
+  },
+  sources: {
+    id: 'nightshiftSources',
+    label: sourcesLabel,
+    iconType: 'database',
+    testId: 'nightshiftSourcesLink',
+    ebtProps: sourcesEbtProps,
+    overflow: true,
+  },
+  settings: {
+    id: 'nightshiftSettings',
+    label: settingsLabel,
+    iconType: 'gear',
+    testId: 'nightshiftSettingsLink',
+    ebtProps: settingsEbtProps,
+    overflow: true,
+  },
+};
+
+const NIGHTSHIFT_NAV_ORDER: readonly NightshiftNavKey[] = [
+  'automations',
+  'detections',
+  'knowledge',
+  'sources',
+  'settings',
+];
+
+/** The menu item that represents each page. The landing page has none. */
+const PAGE_NAV_KEY: Partial<Record<NightshiftHeaderPage, NightshiftNavKey>> = {
+  automations: 'automations',
+  detection: 'detections',
+  knowledge: 'knowledge',
+  sources: 'sources',
+  settings: 'settings',
+};
+
+/** Builds the header menu for a page. Items keep one order and placement on every page. */
+export const getNightshiftMenuItems = (
+  navItems: NightshiftNavItems,
+  page: NightshiftHeaderPage
+): AppMenuItemType[] => {
+  const selectedKey = PAGE_NAV_KEY[page];
+
+  return NIGHTSHIFT_NAV_ORDER.flatMap((key): AppMenuItemType[] => {
+    const navItem = navItems[key];
+    if (!navItem) {
+      return [];
+    }
+
+    const { id, label, iconType, testId, ebtProps, overflow } = NIGHTSHIFT_NAV_DEFINITIONS[key];
+
+    return [
+      {
+        id,
+        label,
+        iconType,
+        href: navItem.href,
+        testId,
+        overflow,
+        isSelected: key === selectedKey,
+        run: (params?: AppMenuRunActionParams) => {
+          applyEbtProps(ebtProps, params);
+          void navItem.onClick();
+        },
+      },
+    ];
+  });
+};
+
+const NO_NAV_ITEMS: NightshiftNavItems = {};
+
 export function NightshiftAppHeader({
   page = 'landing',
-  onSourcesClick,
-  sourcesHref,
-  onKnowledgeClick,
-  knowledgeHref,
-  onSettingsClick,
-  settingsHref,
-  onAutomationsClick,
-  automationsHref,
-  onDetectionsClick,
-  detectionsHref,
+  navItems = NO_NAV_ITEMS,
   tabs,
   back,
 }: NightshiftAppHeaderProps): React.ReactElement {
-  const isLandingPage = page === 'landing';
-  const isDetectionPage = page === 'detection';
   const menu = useMemo<AppMenuConfig>(
-    () => ({
-      items: [
-        // Landing: Automations and Detections buttons; Settings in overflow.
-        ...(isLandingPage && onAutomationsClick && automationsHref
-          ? [
-              {
-                id: 'nightshiftAutomations',
-                label: automationsLabel,
-                iconType: 'workflow',
-                href: automationsHref,
-                run: (params?: AppMenuRunActionParams) => {
-                  applyEbtProps(automationsEbtProps, params);
-                  void onAutomationsClick();
-                },
-                testId: 'nightshiftAutomationsPrimaryAction',
-              },
-            ]
-          : []),
-        ...(isLandingPage && onDetectionsClick && detectionsHref
-          ? [
-              {
-                id: 'nightshiftDetections',
-                label: detectionsLabel,
-                iconType: 'visGauge' as const,
-                href: detectionsHref,
-                run: (params?: AppMenuRunActionParams) => {
-                  applyEbtProps(detectionsEbtProps, params);
-                  void onDetectionsClick();
-                },
-                testId: 'nightshiftDetectionsPrimaryAction',
-              },
-            ]
-          : []),
-        // Landing and Detections: Knowledge in overflow.
-        ...((isLandingPage || isDetectionPage) && onKnowledgeClick && knowledgeHref
-          ? [
-              {
-                id: 'nightshiftKnowledge',
-                label: knowledgeLabel,
-                iconType: 'documentation' as const,
-                href: knowledgeHref,
-                run: (params?: AppMenuRunActionParams) => {
-                  applyEbtProps(knowledgeEbtProps, params);
-                  void onKnowledgeClick();
-                },
-                testId: 'nightshiftKnowledgeLink',
-                overflow: true,
-              },
-            ]
-          : []),
-        ...(isLandingPage && onSettingsClick && settingsHref
-          ? [
-              {
-                id: 'nightshiftSettings',
-                label: settingsLabel,
-                iconType: 'gear' as const,
-                href: settingsHref,
-                run: (params?: AppMenuRunActionParams) => {
-                  applyEbtProps(settingsEbtProps, params);
-                  void onSettingsClick();
-                },
-                testId: 'nightshiftSettingsLink',
-                overflow: true,
-              },
-            ]
-          : []),
-
-        // Detections: Sources and Settings as buttons.
-        ...(isDetectionPage && onSourcesClick && sourcesHref
-          ? [
-              {
-                id: 'nightshiftSources',
-                label: sourcesLabel,
-                iconType: 'database' as const,
-                href: sourcesHref,
-                run: (params?: AppMenuRunActionParams) => {
-                  applyEbtProps(sourcesEbtProps, params);
-                  void onSourcesClick();
-                },
-                testId: 'nightshiftSourcesLink',
-              },
-            ]
-          : []),
-        ...(isDetectionPage && onSettingsClick && settingsHref
-          ? [
-              {
-                id: 'nightshiftSettings',
-                label: settingsLabel,
-                iconType: 'gear' as const,
-                href: settingsHref,
-                run: (params?: AppMenuRunActionParams) => {
-                  applyEbtProps(settingsEbtProps, params);
-                  void onSettingsClick();
-                },
-                testId: 'nightshiftSettingsLink',
-              },
-            ]
-          : []),
-
-        // All other pages: no menu items.
-      ],
-    }),
-    [
-      automationsHref,
-      detectionsHref,
-      isDetectionPage,
-      isLandingPage,
-      knowledgeHref,
-      onAutomationsClick,
-      onDetectionsClick,
-      onKnowledgeClick,
-      onSourcesClick,
-      onSettingsClick,
-      settingsHref,
-      sourcesHref,
-    ]
+    () => ({ items: getNightshiftMenuItems(navItems, page) }),
+    [navItems, page]
   );
 
   return (
@@ -248,7 +253,7 @@ export function NightshiftAppHeader({
       title={
         page === 'automations'
           ? automationsLabel
-          : isDetectionPage
+          : page === 'detection'
           ? DETECTION_PAGE_TITLE
           : page === 'knowledge'
           ? KNOWLEDGE_PAGE_TITLE
