@@ -147,7 +147,9 @@ const tryResolveView = async ({
   if (!view) {
     return undefined;
   }
-  const fields = await getViewFields({ name: resourceName, esClient });
+  // A view whose stored query no longer runs (e.g. its backing index was removed) must still
+  // resolve by name, otherwise target resolution aborts the whole ES|QL generation.
+  const fields = await getViewFields({ name: resourceName, esClient }).catch(() => []);
   return {
     name: resourceName,
     type: EsResourceType.view,

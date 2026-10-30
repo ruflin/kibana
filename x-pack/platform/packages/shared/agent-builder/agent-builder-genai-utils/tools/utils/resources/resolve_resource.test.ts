@@ -337,6 +337,41 @@ describe('resolveResource', () => {
       });
     });
 
+    it('resolves a broken ES|QL view with no fields when its stored query fails', async () => {
+      esClient.indices.resolveIndex.mockRejectedValue(
+        new esErrors.ResponseError({ statusCode: 404 } as any)
+      );
+      esClient.esql.getView.mockResolvedValue({
+        views: [{ name: '$.logs.ecs', query: 'FROM logs.ecs', description: 'Broken view' }],
+      } as never);
+      esClient.esql.query.mockRejectedValue(
+        new esErrors.ResponseError({
+          statusCode: 400,
+          body: {
+            error: {
+              type: 'verification_exception',
+              reason: 'Unknown index [logs.ecs] referenced by view [$.logs.ecs]',
+            },
+          },
+        } as any)
+      );
+
+      const result = await resolveResourceForEsql({
+        resourceName: '$.logs.ecs',
+        esClient,
+        includeViews: true,
+      });
+
+      expect(result).toEqual({
+        name: '$.logs.ecs',
+        type: EsResourceType.view,
+        fields: [],
+        description: 'Broken view',
+        query: 'FROM logs.ecs',
+        isTsdb: false,
+      });
+    });
+
     it('does not resolve views when includeViews is not set', async () => {
       esClient.indices.resolveIndex.mockRejectedValue(
         new esErrors.ResponseError({ statusCode: 404 } as any)
