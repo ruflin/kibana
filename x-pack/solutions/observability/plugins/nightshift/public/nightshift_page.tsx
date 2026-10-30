@@ -6,7 +6,7 @@
  */
 
 import { css } from '@emotion/react';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { EuiFlexGroup, EuiLoadingSpinner, EuiPageTemplate, useEuiTheme } from '@elastic/eui';
 import { Route, Routes } from '@kbn/shared-ux-router';
 import { Redirect, useHistory, useLocation, useParams } from 'react-router-dom';
@@ -28,6 +28,7 @@ import {
   SETTINGS_PAGE_TITLE,
   SOURCES_PAGE_TITLE,
 } from './components/app_header';
+import type { NightshiftNavItems } from './components/app_header';
 import { AutomationsPage } from './automations/automations_page';
 import { useKibana } from './hooks/use_kibana';
 import { useDeveloperMode } from './hooks/use_developer_mode';
@@ -116,9 +117,6 @@ export function NightshiftPage(): React.ReactElement | null {
   const settingsHref = application.getUrlForApp(NIGHTSHIFT_APP_ID, {
     path: '/settings',
   });
-  const detectionSettingsHref = application.getUrlForApp(NIGHTSHIFT_APP_ID, {
-    path: '/settings/detections?origin=detections',
-  });
   const knowledgeHref = application.getUrlForApp(NIGHTSHIFT_APP_ID, {
     path: '/knowledge',
   });
@@ -141,10 +139,6 @@ export function NightshiftPage(): React.ReactElement | null {
   const navigateToSettings = useCallback(
     () => application.navigateToUrl(settingsHref),
     [application, settingsHref]
-  );
-  const navigateToDetectionSettings = useCallback(
-    () => application.navigateToUrl(detectionSettingsHref),
-    [application, detectionSettingsHref]
   );
   const navigateToKnowledge = useCallback(
     () => application.navigateToUrl(knowledgeHref),
@@ -189,6 +183,38 @@ export function NightshiftPage(): React.ReactElement | null {
   const isOnboarding = !canUseAutomationsPage && onboarding.showOnboarding;
   // Before the first investigation the page is only about onboarding, as in the design.
   const hidesHeaderActions = isOnboarding && !onboarding.latestInvestigation;
+  // One menu for every top-level page. Automations, Detections and Sources wait for onboarding.
+  const navItems = useMemo<NightshiftNavItems>(
+    () => ({
+      ...(canUseAutomations &&
+        !hidesHeaderActions && {
+          automations: { href: automationsHref, onClick: navigateToAutomations },
+        }),
+      ...(!hidesHeaderActions && {
+        detections: { href: detectionsHref, onClick: navigateToDetections },
+        sources: { href: sourcesHref, onClick: navigateToSources },
+      }),
+      knowledge: { href: knowledgeHref, onClick: navigateToKnowledge },
+      ...(canManageAndConfigure && {
+        settings: { href: settingsHref, onClick: navigateToSettings },
+      }),
+    }),
+    [
+      automationsHref,
+      canManageAndConfigure,
+      canUseAutomations,
+      detectionsHref,
+      hidesHeaderActions,
+      knowledgeHref,
+      navigateToAutomations,
+      navigateToDetections,
+      navigateToKnowledge,
+      navigateToSettings,
+      navigateToSources,
+      settingsHref,
+      sourcesHref,
+    ]
+  );
 
   // Nightshift only works as its service account, so a space that is not set up shows the setup
   // step instead of the app. A failed status read (e.g. missing privileges) does not block it.
@@ -197,22 +223,24 @@ export function NightshiftPage(): React.ReactElement | null {
   const isSetupPending = requiresSetup && serviceAccount.isLoading;
   const needsSetup =
     requiresSetup && serviceAccount.isSuccess && !isNightshiftSetUp(serviceAccount.data);
+  const nightshiftRootLabel = i18n.translate('xpack.nightshift.breadcrumbs.linkText', {
+    defaultMessage: 'Nightshift',
+  });
+  const automationsBreadcrumbLabel = i18n.translate('xpack.nightshift.automations.breadcrumb', {
+    defaultMessage: 'Automations',
+  });
   useBreadcrumbs(
     [
       {
         href: basePath.prepend(NIGHTSHIFT_APP_ROUTE),
-        text: i18n.translate('xpack.nightshift.breadcrumbs.linkText', {
-          defaultMessage: 'Nightshift',
-        }),
+        text: nightshiftRootLabel,
         deepLinkId: NIGHTSHIFT_APP_ID,
       },
       ...(pathname.startsWith('/automations')
         ? [
             {
               ...(isAutomationDetailRoute && { href: automationsHref }),
-              text: i18n.translate('xpack.nightshift.automations.breadcrumb', {
-                defaultMessage: 'Automations',
-              }),
+              text: automationsBreadcrumbLabel,
             },
             ...(isAutomationDetailRoute && !pathname.includes('/runs') && !pathname.endsWith('/new')
               ? [
@@ -227,7 +255,9 @@ export function NightshiftPage(): React.ReactElement | null {
         : []),
       ...(isSettingsPage ? [{ text: SETTINGS_PAGE_TITLE }] : []),
       ...(isKnowledgePage ? [{ text: KNOWLEDGE_PAGE_TITLE }] : []),
-      ...(isSourcesPage ? [{ text: SOURCES_PAGE_TITLE }] : []),
+      ...(isSourcesPage
+        ? [{ href: detectionsHref, text: DETECTION_PAGE_TITLE }, { text: SOURCES_PAGE_TITLE }]
+        : []),
       ...(isDetectionPage ? [{ text: DETECTION_PAGE_TITLE }] : []),
     ],
     { serverless }
@@ -342,6 +372,7 @@ export function NightshiftPage(): React.ReactElement | null {
           <Route path="/settings/:tab?">
             <SettingsPage
               headerProps={{
+                navItems,
                 onCustomContextClick: canViewCustomContext ? openCustomContextFlyout : undefined,
               }}
             />
@@ -357,16 +388,7 @@ export function NightshiftPage(): React.ReactElement | null {
         >
           <Routes>
             <Route path="/detections/:tab?">
-              <DetectionRoute
-                headerProps={{
-                  onSourcesClick: navigateToSources,
-                  sourcesHref,
-                  onKnowledgeClick: navigateToKnowledge,
-                  knowledgeHref,
-                  onSettingsClick: canManageAndConfigure ? navigateToDetectionSettings : undefined,
-                  settingsHref: canManageAndConfigure ? detectionSettingsHref : undefined,
-                }}
-              />
+              <DetectionRoute headerProps={{ navItems }} />
             </Route>
           </Routes>
         </React.Suspense>
@@ -380,7 +402,7 @@ export function NightshiftPage(): React.ReactElement | null {
         >
           <Routes>
             <Route path="/sources/:sourceId?">
-              <SourcesPage headerProps={{}} />
+              <SourcesPage headerProps={{ navItems }} />
             </Route>
           </Routes>
         </React.Suspense>
@@ -394,7 +416,7 @@ export function NightshiftPage(): React.ReactElement | null {
         >
           <Routes>
             <Route path="/knowledge/:tab?">
-              <KnowledgePage headerProps={{}} />
+              <KnowledgePage headerProps={{ navItems }} />
             </Route>
           </Routes>
         </React.Suspense>
@@ -402,22 +424,18 @@ export function NightshiftPage(): React.ReactElement | null {
         <>
           <NightshiftAppHeader
             page={canUseAutomationsPage ? 'automations' : 'landing'}
-            onKnowledgeClick={navigateToKnowledge}
-            knowledgeHref={knowledgeHref}
-            onSettingsClick={canManageAndConfigure ? navigateToSettings : undefined}
-            settingsHref={canManageAndConfigure ? settingsHref : undefined}
-            onAutomationsClick={
-              canUseAutomations && !hidesHeaderActions ? navigateToAutomations : undefined
-            }
-            automationsHref={canUseAutomations && !hidesHeaderActions ? automationsHref : undefined}
-            onDetectionsClick={!hidesHeaderActions ? navigateToDetections : undefined}
-            detectionsHref={!hidesHeaderActions ? detectionsHref : undefined}
+            navItems={navItems}
             back={
               canUseAutomationsPage
-                ? {
-                    href: application.getUrlForApp(NIGHTSHIFT_APP_ID, { path: '/' }),
-                    label: 'Nightshift',
-                  }
+                ? isAutomationDetailRoute
+                  ? {
+                      href: automationsHref,
+                      label: automationsBreadcrumbLabel,
+                    }
+                  : {
+                      href: application.getUrlForApp(NIGHTSHIFT_APP_ID, { path: '/' }),
+                      label: nightshiftRootLabel,
+                    }
                 : undefined
             }
           />

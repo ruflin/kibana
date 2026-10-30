@@ -32,7 +32,7 @@ import React, {
 } from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { NightshiftAppHeader } from '../../components/app_header';
-import type { NightshiftAppHeaderProps } from '../../components/app_header';
+import type { NightshiftNavHeaderProps } from '../../components/app_header';
 import { NIGHTSHIFT_EBT_ACTIONS, NIGHTSHIFT_EBT_ELEMENTS } from '../../common/ebt_constants';
 import {
   NIGHTSHIFT_EVENT_ID_QUERY_PARAM,
@@ -68,15 +68,7 @@ const SignalsTab = lazy(() =>
   import('./signals/signals_tab').then(({ SignalsTab: Tab }) => ({ default: Tab }))
 );
 
-export type DetectionPageHeaderProps = Pick<
-  NightshiftAppHeaderProps,
-  | 'onSourcesClick'
-  | 'sourcesHref'
-  | 'onKnowledgeClick'
-  | 'knowledgeHref'
-  | 'onSettingsClick'
-  | 'settingsHref'
->;
+export type DetectionPageHeaderProps = NightshiftNavHeaderProps;
 
 export const DetectionPage = ({
   headerProps,
@@ -229,8 +221,8 @@ export const DetectionPage = ({
             <EntitiesPanel
               timeRange={timeRange}
               selection={selection}
-              knowledgeHref={headerProps.knowledgeHref}
-              onKnowledgeClick={headerProps.onKnowledgeClick}
+              knowledgeHref={headerProps.navItems?.knowledge?.href}
+              onKnowledgeClick={headerProps.navItems?.knowledge?.onClick}
             />
           </EuiFlexItem>
           <EuiFlexItem

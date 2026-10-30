@@ -135,27 +135,28 @@ describe('SettingsPage', () => {
     expect(history.location.pathname).toBe('/settings/investigations');
   });
 
-  it.each([
-    {
-      path: '/settings/detections?origin=detections',
-      expectedHref: '/app/nightshift/detections/events',
-      expectedLabel: 'Detections',
-    },
-    {
-      path: '/settings/detections',
-      expectedHref: '/app/nightshift/',
-      expectedLabel: 'Nightshift',
-    },
-  ])(
-    'links back to $expectedLabel from Detections settings for the matching origin',
-    ({ path, expectedHref, expectedLabel }) => {
+  it.each(['/settings/general', '/settings/detections', '/settings/detections?origin=detections'])(
+    'links back to Nightshift from %s',
+    (path) => {
       renderPage(path);
 
       expect(screen.getByTestId('nightshiftSettingsBackLink')).toHaveAttribute(
         'href',
-        expectedHref
+        '/app/nightshift/'
       );
-      expect(screen.getByTestId('nightshiftSettingsBackLink')).toHaveTextContent(expectedLabel);
+      expect(screen.getByTestId('nightshiftSettingsBackLink')).toHaveTextContent('Nightshift');
     }
   );
+
+  it('keeps Nightshift as the Back target when switching tabs from Detections', () => {
+    renderPage('/settings/detections?origin=detections');
+
+    fireEvent.click(screen.getByTestId('nightshiftSettingsTab-general'));
+
+    expect(screen.getByTestId('nightshiftSettingsBackLink')).toHaveAttribute(
+      'href',
+      '/app/nightshift/'
+    );
+    expect(screen.getByTestId('nightshiftSettingsBackLink')).toHaveTextContent('Nightshift');
+  });
 });
