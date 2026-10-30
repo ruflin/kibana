@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { AppHeaderBack, AppHeaderTab } from '@kbn/app-header';
+import type { AppHeaderTab } from '@kbn/app-header';
 import { createMemoryHistory } from 'history';
 import { I18nProvider } from '@kbn/i18n-react';
 import { Route, Router } from '@kbn/shared-ux-router';
@@ -18,11 +18,8 @@ import { SettingsPage } from './page';
 jest.mock('../hooks/use_kibana');
 jest.mock('./hooks/use_apps_enabled');
 jest.mock('../components/app_header', () => ({
-  NightshiftAppHeader: ({ back, tabs }: { back: AppHeaderBack; tabs: AppHeaderTab[] }) => (
+  NightshiftAppHeader: ({ tabs }: { tabs: AppHeaderTab[] }) => (
     <div>
-      <a href={back.href} data-test-subj="nightshiftSettingsBackLink">
-        {back.label}
-      </a>
       {tabs.map((tab) => (
         <a
           key={tab.id}
@@ -135,27 +132,9 @@ describe('SettingsPage', () => {
     expect(history.location.pathname).toBe('/settings/investigations');
   });
 
-  it.each([
-    {
-      path: '/settings/detections?origin=detections',
-      expectedHref: '/app/nightshift/detections/events',
-      expectedLabel: 'Detections',
-    },
-    {
-      path: '/settings/detections',
-      expectedHref: '/app/nightshift/',
-      expectedLabel: 'Nightshift',
-    },
-  ])(
-    'links back to $expectedLabel from Detections settings for the matching origin',
-    ({ path, expectedHref, expectedLabel }) => {
-      renderPage(path);
+  it('renders no back link, since the left nav carries the navigation', () => {
+    renderPage('/settings/detections?origin=detections');
 
-      expect(screen.getByTestId('nightshiftSettingsBackLink')).toHaveAttribute(
-        'href',
-        expectedHref
-      );
-      expect(screen.getByTestId('nightshiftSettingsBackLink')).toHaveTextContent(expectedLabel);
-    }
-  );
+    expect(screen.queryByTestId('nightshiftSettingsBackLink')).not.toBeInTheDocument();
+  });
 });

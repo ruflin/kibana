@@ -53,16 +53,7 @@ export function SourcesPage({
 
   return (
     <>
-      <NightshiftAppHeader
-        {...headerProps}
-        page="sources"
-        back={{
-          href: application.getUrlForApp(NIGHTSHIFT_APP_ID, { path: '/detections/events' }),
-          label: i18n.translate('xpack.nightshift.sourcesPage.backToDetectionsLabel', {
-            defaultMessage: 'Detections',
-          }),
-        }}
-      />
+      <NightshiftAppHeader {...headerProps} page="sources" />
       <EuiPageTemplate.Section component="div" restrictWidth={false}>
         {isMaintenanceStatusLoading && (
           <>

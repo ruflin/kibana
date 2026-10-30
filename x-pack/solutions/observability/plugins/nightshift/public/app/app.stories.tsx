@@ -19,8 +19,6 @@ import {
 import { NightshiftApp } from './app';
 import { NightshiftAppHeader } from '../components/app_header';
 
-const noop = () => undefined;
-
 interface NightshiftLandingStoryProps {
   initialEntry?: string;
   lifecycleScenario?: NightshiftLifecycleScenario;
@@ -42,7 +40,7 @@ const NightshiftLandingStory = ({
   >
     <MockAppHeaderProvider>
       <EuiPageTemplate restrictWidth={false}>
-        <NightshiftAppHeader onSettingsClick={noop} settingsHref="/app/nightshift/settings" />
+        <NightshiftAppHeader />
         <EuiPageTemplate.Section component="div" color="subdued" restrictWidth="900px">
           <NightshiftApp />
         </EuiPageTemplate.Section>

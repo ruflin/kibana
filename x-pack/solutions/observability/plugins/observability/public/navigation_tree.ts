@@ -17,7 +17,7 @@ import { AIChatExperience } from '@kbn/ai-assistant-common';
 import { AI_CHAT_EXPERIENCE_TYPE } from '@kbn/management-settings-ids';
 import { getWorkflowsNavPanel } from '@kbn/deeplinks-workflows';
 import { EVALS_APP_ID } from '@kbn/deeplinks-evals';
-import { NIGHTSHIFT_ENABLED_FLAG } from '@kbn/nightshift-shared';
+import { getNightshiftCapabilities, NIGHTSHIFT_ENABLED_FLAG } from '@kbn/nightshift-shared';
 import type { Location } from 'history';
 import { NightshiftNavigationIcon } from '@kbn/observability-shared-plugin/public';
 import { getAlertsNavPanel, shouldIncludeStackManagementRules } from './nav/get_alerts_nav_panel';
@@ -48,6 +48,18 @@ function isEditingFromDashboard(
   return isVizApp && hasOriginatingApp;
 }
 
+/** Nightshift children are active under their own route, not under the Investigations root. */
+const nightshiftChildIsActive =
+  (section: string) =>
+  ({
+    pathNameSerialized,
+    prepend,
+  }: {
+    pathNameSerialized: string;
+    prepend: (path: string) => string;
+  }) =>
+    pathNameSerialized.startsWith(prepend(`/app/nightshift/${section}`));
+
 function createNavTree({
   coreStart,
   significantEventsAvailable,
@@ -65,6 +77,9 @@ function createNavTree({
   ingestHubAvailable?: boolean;
   entityInventoryNavGroup?: PanelOpenerChildDefinition;
 }) {
+  const { canManageAndConfigure } = getNightshiftCapabilities(
+    coreStart.application.capabilities.nightshift
+  );
   const navTree: NavigationTreeDefinition = {
     body: [
       ...(significantEventsAvailable
@@ -72,6 +87,36 @@ function createNavTree({
             {
               link: 'nightshift' as const,
               icon: NightshiftNavigationIcon,
+              // Deep links that are not visible in the project side nav are dropped from the tree.
+              children: [
+                {
+                  link: 'nightshift:automations' as const,
+                  getIsActive: nightshiftChildIsActive('automations'),
+                },
+                {
+                  link: 'nightshift:detections' as const,
+                  getIsActive: nightshiftChildIsActive('detections'),
+                },
+                {
+                  link: 'nightshift:knowledge_indicators' as const,
+                  title: i18n.translate('xpack.observability.obltNav.nightshift.knowledge', {
+                    defaultMessage: 'Knowledge',
+                  }),
+                  getIsActive: nightshiftChildIsActive('knowledge'),
+                },
+                {
+                  link: 'nightshift:sources' as const,
+                  getIsActive: nightshiftChildIsActive('sources'),
+                },
+                ...(canManageAndConfigure
+                  ? [
+                      {
+                        link: 'nightshift:settings' as const,
+                        getIsActive: nightshiftChildIsActive('settings'),
+                      },
+                    ]
+                  : []),
+              ],
             },
           ]
         : []),
