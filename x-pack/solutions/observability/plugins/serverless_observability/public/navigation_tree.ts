@@ -16,6 +16,7 @@ import { i18n } from '@kbn/i18n';
 import { DATA_MANAGEMENT_NAV_ID } from '@kbn/deeplinks-management';
 import { getWorkflowsNavPanel } from '@kbn/deeplinks-workflows';
 import { EVALS_APP_ID } from '@kbn/deeplinks-evals';
+import { getNightshiftCapabilities } from '@kbn/nightshift-shared';
 import {
   getAlertsNavPanel,
   NightshiftNavigationIcon,
@@ -30,6 +31,18 @@ export function filterForFeatureAvailability<
   }
   return [node];
 }
+
+/** Nightshift children are active under their own route, not under the Investigations root. */
+const nightshiftChildIsActive =
+  (section: string) =>
+  ({
+    pathNameSerialized,
+    prepend,
+  }: {
+    pathNameSerialized: string;
+    prepend: (path: string) => string;
+  }) =>
+    pathNameSerialized.startsWith(prepend(`/app/nightshift/${section}`));
 
 export const createNavigationTree = ({
   core,
@@ -50,12 +63,45 @@ export const createNavigationTree = ({
   showAiAssistant?: boolean;
   entityInventoryNavGroup?: PanelOpenerChildDefinition;
 }): NavigationTreeDefinition => {
+  const { canManageAndConfigure } = getNightshiftCapabilities(
+    core.application.capabilities.nightshift
+  );
   return {
     body: [
       ...filterForFeatureAvailability(
         {
           link: 'nightshift' as const,
           icon: NightshiftNavigationIcon,
+          // Deep links that are not visible in the project side nav are dropped from the tree.
+          children: [
+            {
+              link: 'nightshift:automations' as const,
+              getIsActive: nightshiftChildIsActive('automations'),
+            },
+            {
+              link: 'nightshift:detections' as const,
+              getIsActive: nightshiftChildIsActive('detections'),
+            },
+            {
+              link: 'nightshift:knowledge_indicators' as const,
+              title: i18n.translate('xpack.serverlessObservability.nav.nightshift.knowledge', {
+                defaultMessage: 'Knowledge',
+              }),
+              getIsActive: nightshiftChildIsActive('knowledge'),
+            },
+            {
+              link: 'nightshift:sources' as const,
+              getIsActive: nightshiftChildIsActive('sources'),
+            },
+            ...(canManageAndConfigure
+              ? [
+                  {
+                    link: 'nightshift:settings' as const,
+                    getIsActive: nightshiftChildIsActive('settings'),
+                  },
+                ]
+              : []),
+          ],
         },
         significantEventsAvailable
       ),

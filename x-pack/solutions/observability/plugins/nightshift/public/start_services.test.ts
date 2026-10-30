@@ -6,7 +6,7 @@
  */
 
 import type { AppUpdater } from '@kbn/core/public';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, of } from 'rxjs';
 import { FocusedSignificantEventService } from './chat/focused_significant_event_service';
 import { startNightshiftServices } from './start_services';
 
@@ -40,6 +40,7 @@ describe('startNightshiftServices', () => {
       } as never,
       chrome: {} as never,
       focusedSignificantEventService: new FocusedSignificantEventService(),
+      automationsFlag$: of(false),
     });
 
     subscription.unsubscribe();

@@ -15,6 +15,7 @@ import {
 } from '@kbn/core/public';
 import { NIGHTSHIFT_APP_ID, type NightshiftLinkId } from '@kbn/deeplinks-observability';
 import { i18n } from '@kbn/i18n';
+import { NIGHTSHIFT_ENABLED_FLAG } from '@kbn/nightshift-shared';
 import { BehaviorSubject, type Subscription } from 'rxjs';
 import { NIGHTSHIFT_APP_ROUTE } from '../common/constants';
 import { NightshiftSettingsLocatorDefinition } from '../common/locators';
@@ -68,6 +69,15 @@ export class NightshiftPlugin
       visibleIn: [],
       deepLinks: [
         {
+          id: 'automations' satisfies NightshiftLinkId,
+          title: i18n.translate('xpack.nightshift.automationsDeepLinkTitle', {
+            defaultMessage: 'Automations',
+          }),
+          path: '/automations',
+          visibleIn: [],
+          keywords: ['automations', 'significant events'],
+        },
+        {
           id: 'detections' satisfies NightshiftLinkId,
           title: i18n.translate('xpack.nightshift.detectionsDeepLinkTitle', {
             defaultMessage: 'Detections',
@@ -102,6 +112,15 @@ export class NightshiftPlugin
           path: '/knowledge/knowledge_indicators',
           visibleIn: [],
           keywords: ['knowledge indicators', 'ki', 'kis', 'knowledge', 'significant events'],
+        },
+        {
+          id: 'settings' satisfies NightshiftLinkId,
+          title: i18n.translate('xpack.nightshift.settingsDeepLinkTitle', {
+            defaultMessage: 'Settings',
+          }),
+          path: '/settings',
+          visibleIn: [],
+          keywords: ['settings', 'significant events'],
         },
       ],
       updater$: this.appUpdater$,
@@ -146,6 +165,7 @@ export class NightshiftPlugin
           context: this.context,
           chrome: coreStart.chrome,
           focusedSignificantEventService: this.focusedSignificantEventService,
+          automationsFlag$: coreStart.featureFlags.getBooleanValue$(NIGHTSHIFT_ENABLED_FLAG, false),
         });
       })
       .catch((error) => {

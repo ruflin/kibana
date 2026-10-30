@@ -113,17 +113,8 @@ export function NightshiftPage(): React.ReactElement | null {
   const { canShow, canManage, canManageAndConfigure } = getNightshiftCapabilities(
     application.capabilities.nightshift
   );
-  const settingsHref = application.getUrlForApp(NIGHTSHIFT_APP_ID, {
-    path: '/settings',
-  });
-  const detectionSettingsHref = application.getUrlForApp(NIGHTSHIFT_APP_ID, {
-    path: '/settings/detections?origin=detections',
-  });
   const knowledgeHref = application.getUrlForApp(NIGHTSHIFT_APP_ID, {
     path: '/knowledge',
-  });
-  const sourcesHref = application.getUrlForApp(NIGHTSHIFT_APP_ID, {
-    path: '/sources',
   });
   const nightshiftEnabled = featureFlags.useBooleanValue(NIGHTSHIFT_ENABLED_FLAG, false);
   const canUseAutomations =
@@ -131,32 +122,9 @@ export function NightshiftPage(): React.ReactElement | null {
   const automationsHref = application.getUrlForApp(NIGHTSHIFT_APP_ID, {
     path: '/automations',
   });
-  const detectionsHref = application.getUrlForApp(NIGHTSHIFT_APP_ID, {
-    path: '/detections/events',
-  });
-  const navigateToDetections = useCallback(
-    () => application.navigateToUrl(detectionsHref),
-    [application, detectionsHref]
-  );
-  const navigateToSettings = useCallback(
-    () => application.navigateToUrl(settingsHref),
-    [application, settingsHref]
-  );
-  const navigateToDetectionSettings = useCallback(
-    () => application.navigateToUrl(detectionSettingsHref),
-    [application, detectionSettingsHref]
-  );
   const navigateToKnowledge = useCallback(
     () => application.navigateToUrl(knowledgeHref),
     [application, knowledgeHref]
-  );
-  const navigateToSources = useCallback(
-    () => application.navigateToUrl(sourcesHref),
-    [application, sourcesHref]
-  );
-  const navigateToAutomations = useCallback(
-    () => application.navigateToUrl(automationsHref),
-    [application, automationsHref]
   );
   const isKnowledgePage = pathname === '/knowledge' || pathname.startsWith('/knowledge/');
   const isSourcesPage = pathname === '/sources' || pathname.startsWith('/sources/');
@@ -187,8 +155,6 @@ export function NightshiftPage(): React.ReactElement | null {
     dismissOnboarding();
   }, [dismissOnboarding, history]);
   const isOnboarding = !canUseAutomationsPage && onboarding.showOnboarding;
-  // Before the first investigation the page is only about onboarding, as in the design.
-  const hidesHeaderActions = isOnboarding && !onboarding.latestInvestigation;
 
   // Nightshift only works as its service account, so a space that is not set up shows the setup
   // step instead of the app. A failed status read (e.g. missing privileges) does not block it.
@@ -359,12 +325,8 @@ export function NightshiftPage(): React.ReactElement | null {
             <Route path="/detections/:tab?">
               <DetectionRoute
                 headerProps={{
-                  onSourcesClick: navigateToSources,
-                  sourcesHref,
                   onKnowledgeClick: navigateToKnowledge,
                   knowledgeHref,
-                  onSettingsClick: canManageAndConfigure ? navigateToDetectionSettings : undefined,
-                  settingsHref: canManageAndConfigure ? detectionSettingsHref : undefined,
                 }}
               />
             </Route>
@@ -400,27 +362,7 @@ export function NightshiftPage(): React.ReactElement | null {
         </React.Suspense>
       ) : (
         <>
-          <NightshiftAppHeader
-            page={canUseAutomationsPage ? 'automations' : 'landing'}
-            onKnowledgeClick={navigateToKnowledge}
-            knowledgeHref={knowledgeHref}
-            onSettingsClick={canManageAndConfigure ? navigateToSettings : undefined}
-            settingsHref={canManageAndConfigure ? settingsHref : undefined}
-            onAutomationsClick={
-              canUseAutomations && !hidesHeaderActions ? navigateToAutomations : undefined
-            }
-            automationsHref={canUseAutomations && !hidesHeaderActions ? automationsHref : undefined}
-            onDetectionsClick={!hidesHeaderActions ? navigateToDetections : undefined}
-            detectionsHref={!hidesHeaderActions ? detectionsHref : undefined}
-            back={
-              canUseAutomationsPage
-                ? {
-                    href: application.getUrlForApp(NIGHTSHIFT_APP_ID, { path: '/' }),
-                    label: 'Nightshift',
-                  }
-                : undefined
-            }
-          />
+          <NightshiftAppHeader page={canUseAutomationsPage ? 'automations' : 'landing'} />
           <EuiPageTemplate.Section
             component="div"
             color={isHomePage ? 'transparent' : undefined}

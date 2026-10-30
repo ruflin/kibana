@@ -81,6 +81,29 @@ describe('Navigation Tree', () => {
     expect(navigation.body.find((item) => item.link === 'nightshift')).toBeUndefined();
   });
 
+  it('lists the Nightshift pages under Nightshift and adds Settings only for managers', () => {
+    const childLinks = (navigation: NavigationTreeDefinition) =>
+      navigation.body
+        .find((item) => item.link === 'nightshift')
+        ?.children?.map((child) => child.link);
+
+    expect(childLinks(createNavigationTree({ core, significantEventsAvailable: true }))).toEqual([
+      'nightshift:automations',
+      'nightshift:detections',
+      'nightshift:knowledge_indicators',
+      'nightshift:sources',
+    ]);
+
+    core.application.capabilities = {
+      ...core.application.capabilities,
+      nightshift: { show: true, manage: true, configure: true },
+    };
+
+    expect(childLinks(createNavigationTree({ core, significantEventsAvailable: true }))).toContain(
+      'nightshift:settings'
+    );
+  });
+
   it('lists Manage jobs to Stack Management anomaly detection jobs first under ML anomaly detection nav', () => {
     const { body } = createNavigationTree({ core }) as NavigationTreeDefinition;
     const mlNode = body.find((item) => item.id === 'machine_learning-landing');
