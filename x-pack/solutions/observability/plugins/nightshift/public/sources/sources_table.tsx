@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import type { Criteria, EuiBasicTableColumn, EuiTableSelectionType } from '@elastic/eui';
+import type { Criteria, EuiBasicTableColumn } from '@elastic/eui';
 import {
   EuiCode,
   EuiFlexGroup,
@@ -52,7 +52,6 @@ interface ISourcesTableProps {
   sources: NightshiftSource[];
   onboardingResultMap: Record<string, SignificantEventsWorkflowStatusResult>;
   searchText: string;
-  selection?: EuiTableSelectionType<NightshiftSource>;
   /** When true, per-row onboard actions are disabled (global pause / status loading). */
   blocksActivity?: boolean;
   /** Sources whose onboard request is in flight or accepted and not yet reflected in status. */
@@ -72,12 +71,11 @@ interface ISourcesTableProps {
   onDeleteSource: (source: NightshiftSource) => void;
 }
 
-/** Catalog table with selection, inline enable switch, onboarding status and row actions. */
+/** Catalog table with inline enable switch, onboarding status and per-row actions. */
 export function SourcesTable({
   sources,
   onboardingResultMap,
   searchText,
-  selection,
   blocksActivity = false,
   generatingSourceIds = [],
   awaitingRunSourceIds = [],
@@ -250,7 +248,6 @@ export function SourcesTable({
       itemId="id"
       items={items}
       columns={columns}
-      selection={selection}
       noItemsMessage={NO_SOURCES_MESSAGE}
       sorting={{ sort: { field: 'title', direction: 'asc' } }}
       pagination={{ pageIndex, pageSize: page.size, pageSizeOptions: PAGE_SIZE_OPTIONS }}

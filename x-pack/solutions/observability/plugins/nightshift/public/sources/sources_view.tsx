@@ -7,7 +7,7 @@
 
 import { EuiButton, EuiEmptyPrompt, EuiFlexGroup, EuiFlexItem, EuiText } from '@elastic/eui';
 import type { NightshiftSource } from '@kbn/nightshift-shared';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useHistory, useLocation, useParams } from 'react-router-dom';
 import { getNightshiftCapabilities } from '@kbn/nightshift-shared';
 import { LoadingPanel } from '../components/ui/loading_panel';
@@ -20,12 +20,9 @@ import { SignificantEventsSearchBar } from '../components/search_bar';
 import { useBlocksNewActivity } from '../data/maintenance/use_significant_events_maintenance';
 import { useKiGeneration } from './onboarding/ki_generation_context';
 import { FindSignificantEventsButton } from './find_significant_events_button';
-import { GenerateSplitButton } from './onboarding/generate_split_button';
 import type { GenerateRun, RowGenerateProps } from './onboarding/types';
-import { getGenerateDisabledTooltip } from './onboarding/translations';
 import { ConfirmSourceActionModal, type SourceAction } from './confirm_source_action_modal';
 import { SourcesTable } from './sources_table';
-import { isOnboardingInProgress } from './utils';
 import {
   CREATE_SOURCE_BUTTON_LABEL,
   EMPTY_STATE_BODY,
@@ -132,30 +129,6 @@ export function SourcesView() {
     source: NightshiftSource;
   }>();
 
-  const isSourceActionable = useCallback(
-    (source: NightshiftSource) => {
-      // The onboarding route rejects disabled sources.
-      if (!source.enabled || generatingSourceIds.includes(source.id)) {
-        return false;
-      }
-      // No status yet means nothing has run for the source, e.g. it was just created.
-      return !isOnboardingInProgress(sourceStatusMap[source.id]?.status);
-    },
-    [generatingSourceIds, sourceStatusMap]
-  );
-
-  // Ids, not objects: the selection then follows refetches, and a deleted source drops out.
-  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
-  const selectedSources = sources.filter(({ id }) => selectedSourceIds.includes(id));
-
-  const onboardSelectedSources =
-    (onboard: (sourceIds: string[]) => Promise<string[]>) => async () => {
-      const sourceIds = selectedSources.filter(isSourceActionable).map(({ id }) => id);
-      const scheduledIds = await onboard(sourceIds);
-      // Only scheduled rows leave the selection, so failed ones can be retried without re-picking.
-      setSelectedSourceIds((current) => current.filter((id) => !scheduledIds.includes(id)));
-    };
-
   const rowGenerateActions: Record<GenerateRun, (sourceIds: string[]) => Promise<string[]>> = {
     all: bulkOnboardAll,
     features: bulkOnboardFeaturesOnly,
@@ -222,36 +195,6 @@ export function SourcesView() {
                 >
                   {CREATE_SOURCE_BUTTON_LABEL}
                 </EuiButton>
-              </EuiFlexItem>
-            )}
-            {canManage && (
-              <EuiFlexItem grow={false}>
-                <GenerateSplitButton
-                  size="s"
-                  config={onboardingConfig}
-                  allConnectors={allConnectors}
-                  connectorError={connectorError}
-                  featuresResolvedConnectorId={featuresConnectors.resolvedConnectorId}
-                  queriesResolvedConnectorId={queriesConnectors.resolvedConnectorId}
-                  onConfigChange={setOnboardingConfig}
-                  onRun={onboardSelectedSources(bulkOnboardAll)}
-                  onRunFeaturesOnly={onboardSelectedSources(bulkOnboardFeaturesOnly)}
-                  onRunQueriesOnly={onboardSelectedSources(bulkOnboardQueriesOnly)}
-                  isRunDisabled={
-                    blocksActivity ||
-                    selectedSources.length === 0 ||
-                    isConnectorCatalogUnavailable ||
-                    featuresConnectors.loading ||
-                    queriesConnectors.loading ||
-                    isScheduling
-                  }
-                  runDisabledTooltip={getGenerateDisabledTooltip({
-                    activityBlockTooltip,
-                    hasSelectedStreams: selectedSources.length > 0,
-                  })}
-                  isConfigDisabled={selectedSources.length === 0}
-                  isLoading={isScheduling}
-                />
               </EuiFlexItem>
             )}
             <EuiFlexItem grow={false}>
@@ -325,16 +268,6 @@ export function SourcesView() {
                 awaitingRunSourceIds={awaitingRunSourceIds}
                 activityBlockTooltip={activityBlockTooltip}
                 canManage={canManage}
-                selection={
-                  canManage
-                    ? {
-                        selected: selectedSources,
-                        onSelectionChange: (selected) =>
-                          setSelectedSourceIds(selected.map(({ id }) => id)),
-                        selectable: isSourceActionable,
-                      }
-                    : undefined
-                }
                 pendingEnabledSourceId={
                   setSourceEnabled.isLoading ? setSourceEnabled.variables?.sourceId : undefined
                 }
