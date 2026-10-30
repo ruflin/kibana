@@ -96,7 +96,7 @@ it('renders an enabled deep link without waiting for unrelated gates', async () 
   expect(screen.queryByTestId('nightshiftKnowledgePageLoading')).not.toBeInTheDocument();
 });
 
-it('marks only the Decision Trees tab with the developer mode badge', async () => {
+it('renders the visible sub-tabs in the page body and marks only Decision Trees with the code icon', async () => {
   renderPage('/knowledge/decision_trees', {
     knowledge_indicators: knowledgeIndicatorsEnabled,
     cortex: settledOff,
@@ -105,12 +105,18 @@ it('marks only the Decision Trees tab with the developer mode badge', async () =
   });
 
   expect(await screen.findByTestId('decisionTreesTab')).toBeInTheDocument();
-  const { tabs } = mockAppHeader.mock.lastCall[0];
-  expect(tabs.map(({ id, badge }: { id: string; badge?: unknown }) => ({ id, badge }))).toEqual([
-    { id: 'knowledge_indicators', badge: undefined },
-    { id: 'memory', badge: undefined },
-    { id: 'decision_trees', badge: { iconType: 'code' } },
-  ]);
+  expect(screen.getByTestId('nightshiftKnowledgeTab-knowledge_indicators')).toBeInTheDocument();
+  expect(screen.getByTestId('nightshiftKnowledgeTab-memory')).toBeInTheDocument();
+  expect(screen.queryByTestId('nightshiftKnowledgeTab-cortex')).not.toBeInTheDocument();
+  expect(
+    screen.getByTestId('nightshiftKnowledgeTab-decision_trees').querySelector('[data-euiicon-type]')
+  ).toHaveAttribute('data-euiicon-type', 'code');
+  expect(
+    screen.getByTestId('nightshiftKnowledgeTab-memory').querySelector('[data-euiicon-type]')
+  ).toBeNull();
+  expect(mockAppHeader).toHaveBeenCalledWith(
+    expect.not.objectContaining({ tabs: expect.anything() })
+  );
 });
 
 it('redirects a Decision Trees deep link when the tab is hidden', async () => {

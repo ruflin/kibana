@@ -12,6 +12,7 @@ import { getNightshiftCapabilities } from '@kbn/nightshift-shared';
 import { KbnDangerCallout, KbnInfoCallout } from '@kbn/ui-callout';
 import React, { useCallback } from 'react';
 import { NightshiftAppHeader } from '../components/app_header';
+import type { NightshiftHeaderNavigation } from '../components/app_header';
 import { getWorkflowFailureMessage } from '../common/errors';
 import { SignificantEventsPageProvider } from '../data/discovery/significant_events_page_context';
 import { useBlocksNewActivity } from '../data/maintenance/use_significant_events_maintenance';
@@ -21,7 +22,7 @@ import { PausedActivityCallout } from './paused_activity_callout';
 import { SourcesView } from './sources_view';
 import { ONBOARDING_FAILURE_TITLE } from './translations';
 
-export type SourcesPageHeaderProps = Record<string, never>;
+export type SourcesPageHeaderProps = NightshiftHeaderNavigation;
 
 export function SourcesPage({
   headerProps,
@@ -53,16 +54,7 @@ export function SourcesPage({
 
   return (
     <>
-      <NightshiftAppHeader
-        {...headerProps}
-        page="sources"
-        back={{
-          href: application.getUrlForApp(NIGHTSHIFT_APP_ID, { path: '/detections/events' }),
-          label: i18n.translate('xpack.nightshift.sourcesPage.backToDetectionsLabel', {
-            defaultMessage: 'Detections',
-          }),
-        }}
-      />
+      <NightshiftAppHeader {...headerProps} page="sources" />
       <EuiPageTemplate.Section component="div" restrictWidth={false}>
         {isMaintenanceStatusLoading && (
           <>
