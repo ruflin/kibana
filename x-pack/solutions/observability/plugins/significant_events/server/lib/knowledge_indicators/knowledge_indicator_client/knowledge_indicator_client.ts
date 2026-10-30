@@ -337,8 +337,8 @@ export class KnowledgeIndicatorClient {
     return this.orchestrator.deleteQueries(sourceId, queryIds);
   }
 
-  deleteAllQueries(sourceId: string): Promise<void> {
-    return this.orchestrator.deleteAllQueries(sourceId);
+  deleteAllQueries(sourceId: string, options?: { keepRules?: boolean }): Promise<void> {
+    return this.orchestrator.deleteAllQueries(sourceId, options);
   }
 
   setSourceRulesEnabled(sourceId: string, enabled: boolean): Promise<void> {
@@ -347,6 +347,10 @@ export class KnowledgeIndicatorClient {
 
   deleteOwnedRules(sourceId: string): Promise<void> {
     return this.orchestrator.deleteOwnedRules(sourceId);
+  }
+
+  markOwnedRulesObsolete(sourceId: string): Promise<void> {
+    return this.orchestrator.markOwnedRulesObsolete(sourceId);
   }
 
   promoteQueries(sourceId: string, queryIds: string[]): Promise<PromoteQueriesResult> {

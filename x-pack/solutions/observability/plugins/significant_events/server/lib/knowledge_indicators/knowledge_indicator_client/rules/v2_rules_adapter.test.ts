@@ -32,6 +32,7 @@ function makeRulesClientMock() {
     bulkDeleteRules: jest.fn(),
     bulkEnableRules: jest.fn().mockResolvedValue({ errors: [] }),
     bulkDisableRules: jest.fn().mockResolvedValue({ errors: [] }),
+    getRule: jest.fn(),
     ruleExists: jest.fn(),
     findRules: jest.fn().mockResolvedValue({ items: [], total: 0, page: 1, perPage: 500 }),
     getTags: jest.fn().mockResolvedValue([]),
@@ -703,6 +704,90 @@ describe('RulesAdapterV2', () => {
 
       await expect(adapter.updateRule('rule-1', updateDefinition)).resolves.toBeUndefined();
       expect(mock.createRule).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('markOwnedRulesObsolete', () => {
+    const ownedRuleIn = (mock: ReturnType<typeof makeRulesClientMock>, ids: string[]) =>
+      mock.findRules.mockImplementation(async ({ filter }: { filter: string }) => ({
+        items: filter.includes('nightshift:source:') ? ids.map((id) => ({ id })) : [],
+        total: filter.includes('nightshift:source:') ? ids.length : 0,
+        page: 1,
+        perPage: 500,
+      }));
+
+    it('disables the owned rules, then swaps their ownership tags for the obsolete tag and keeps them', async () => {
+      const mock = makeRulesClientMock();
+      ownedRuleIn(mock, ['r1']);
+      mock.getRule.mockResolvedValue({
+        id: 'r1',
+        metadata: {
+          tags: ['nightshift:source:my-stream', METRIC_SERIES_RULE_TAG],
+        },
+      });
+      const adapter = makeAdapter(mock);
+
+      await adapter.markOwnedRulesObsolete('my-stream');
+
+      expect(mock.bulkDisableRules).toHaveBeenCalledWith({ ids: ['r1'] });
+      expect(mock.updateRule).toHaveBeenCalledWith({
+        id: 'r1',
+        data: {
+          metadata: { tags: [METRIC_SERIES_RULE_TAG, 'nightshift:obsolete:my-stream'] },
+        },
+      });
+      expect(mock.bulkDisableRules.mock.invocationCallOrder[0]).toBeLessThan(
+        mock.updateRule.mock.invocationCallOrder[0]
+      );
+      expect(mock.bulkDeleteRules).not.toHaveBeenCalled();
+    });
+
+    it('drops the legacy stream tag too, since it is an ownership tag', async () => {
+      const mock = makeRulesClientMock();
+      mock.findRules.mockImplementation(async ({ filter }: { filter: string }) => ({
+        items: filter.includes('sigevents:stream:') ? [{ id: 'legacy-1' }] : [],
+        total: filter.includes('sigevents:stream:') ? 1 : 0,
+        page: 1,
+        perPage: 500,
+      }));
+      mock.getRule.mockResolvedValue({
+        id: 'legacy-1',
+        metadata: { tags: ['sigevents:stream:my-stream'] },
+      });
+      const adapter = makeAdapter(mock);
+
+      await adapter.markOwnedRulesObsolete('my-stream');
+
+      expect(mock.updateRule).toHaveBeenCalledWith({
+        id: 'legacy-1',
+        data: { metadata: { tags: ['nightshift:obsolete:my-stream'] } },
+      });
+    });
+
+    it('skips a rule that is already gone', async () => {
+      const mock = makeRulesClientMock();
+      ownedRuleIn(mock, ['gone-1']);
+      mock.getRule.mockRejectedValue(Boom.notFound());
+      const adapter = makeAdapter(mock);
+
+      await expect(adapter.markOwnedRulesObsolete('my-stream')).resolves.toBeUndefined();
+      expect(mock.updateRule).not.toHaveBeenCalled();
+    });
+
+    it('marks the other owned rules and reports the ones that failed', async () => {
+      const mock = makeRulesClientMock();
+      ownedRuleIn(mock, ['r1', 'r2']);
+      mock.getRule.mockResolvedValue({
+        id: 'r',
+        metadata: { tags: ['nightshift:source:my-stream'] },
+      });
+      mock.updateRule.mockRejectedValueOnce(new Error('update failed')).mockResolvedValue({});
+      const adapter = makeAdapter(mock);
+
+      await expect(adapter.markOwnedRulesObsolete('my-stream')).rejects.toThrow(
+        'Failed to mark 1 rule(s) of source my-stream obsolete'
+      );
+      expect(mock.updateRule).toHaveBeenCalledTimes(2);
     });
   });
 

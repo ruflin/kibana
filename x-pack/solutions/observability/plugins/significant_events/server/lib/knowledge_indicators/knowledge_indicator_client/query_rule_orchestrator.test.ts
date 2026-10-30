@@ -51,6 +51,7 @@ function createOrchestrator({
       ),
     updateRule: jest.fn().mockResolvedValue(undefined),
     bulkDeleteRules: jest.fn().mockResolvedValue(undefined),
+    markOwnedRulesObsolete: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<IRulesManagementClient>;
 
   const writer = {
@@ -495,6 +496,41 @@ describe('QueryRuleOrchestrator', () => {
     });
   });
 
+  describe('deleteAllQueries', () => {
+    it('deletes the query records and uninstalls the rules of rule-backed queries', async () => {
+      const { orchestrator, rulesManagementClient, writer } = createOrchestrator({
+        currentLinks: [makeLink({ id: 'q-1', ruleBacked: true })],
+      });
+
+      await orchestrator.deleteAllQueries(SOURCE);
+
+      expect(rulesManagementClient.bulkDeleteRules).toHaveBeenCalledWith(['rule-q-1']);
+      expect(writer.bulk).toHaveBeenCalledWith(SOURCE, [{ delete: expect.anything() }]);
+    });
+
+    it('deletes the query records but keeps the rules with keepRules', async () => {
+      const { orchestrator, rulesManagementClient, writer } = createOrchestrator({
+        currentLinks: [makeLink({ id: 'q-1', ruleBacked: true })],
+      });
+
+      await orchestrator.deleteAllQueries(SOURCE, { keepRules: true });
+
+      expect(rulesManagementClient.bulkDeleteRules).not.toHaveBeenCalled();
+      expect(writer.bulk).toHaveBeenCalledWith(SOURCE, [{ delete: expect.anything() }]);
+    });
+  });
+
+  describe('markOwnedRulesObsolete', () => {
+    it('delegates to the rules client, which keeps the rules and marks them obsolete', async () => {
+      const { orchestrator, rulesManagementClient } = createOrchestrator();
+
+      await orchestrator.markOwnedRulesObsolete(SOURCE);
+
+      expect(rulesManagementClient.markOwnedRulesObsolete).toHaveBeenCalledWith(SOURCE);
+      expect(rulesManagementClient.bulkDeleteRules).not.toHaveBeenCalled();
+    });
+  });
+
   describe('reconcileSource', () => {
     function makeReconcileLink(overrides: Partial<QueryLink> = {}): QueryLink {
       return {
@@ -551,6 +587,7 @@ describe('QueryRuleOrchestrator', () => {
         findOwnedRuleIds: jest.fn().mockResolvedValue([]),
         findSourceIdsWithOwnedRules: jest.fn().mockResolvedValue([]),
         findRuleIdsByTagPrefix: jest.fn().mockResolvedValue([]),
+        markOwnedRulesObsolete: jest.fn().mockResolvedValue(undefined),
       };
     }
 

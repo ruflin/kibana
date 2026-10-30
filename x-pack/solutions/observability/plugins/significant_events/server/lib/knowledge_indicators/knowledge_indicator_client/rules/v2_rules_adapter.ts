@@ -22,6 +22,7 @@ import {
   RULE_OWNERSHIP_TAG_PREFIXES,
   sourceIdFromOwnershipTag,
   toLegacyStreamTag,
+  toObsoleteSourceTag,
   toSourceTag,
   type IRulesManagementClient,
   type RuleOwnershipTagPrefix,
@@ -31,6 +32,7 @@ import {
 const FIND_PAGE_SIZE = 500;
 const RULE_EXISTS_CONCURRENCY = 10;
 const CONFLICT_UPDATE_CONCURRENCY = 10;
+const RULE_RETAG_CONCURRENCY = 10;
 
 const isScheduleLimitError = (error: unknown): boolean =>
   isBoom(error) &&
@@ -50,6 +52,7 @@ export interface RulesAdapterV2Params {
     | 'bulkEnableRules'
     | 'bulkDisableRules'
     | 'findRules'
+    | 'getRule'
     | 'getTags'
     | 'ruleExists'
   >;
@@ -183,6 +186,45 @@ export class RulesAdapterV2 implements IRulesManagementClient {
       [toSourceTag(sourceId), toLegacyStreamTag(sourceId)].map((tag) => this.findRuleIdsByTag(tag))
     );
     return uniq(perTag.flat());
+  }
+
+  async markOwnedRulesObsolete(sourceId: string): Promise<void> {
+    const ids = await this.findOwnedRuleIds(sourceId);
+    // Disabled before the retag, so a rule of a deleted source stops firing even if the retag fails.
+    await this.setRulesEnabled(ids, false);
+    const limit = pLimit(RULE_RETAG_CONCURRENCY);
+    const results = await Promise.allSettled(
+      ids.map((id) => limit(() => this.retagRuleAsObsolete(id, sourceId)))
+    );
+    const failures = results.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `Failed to mark ${failures.length} rule(s) of source ${sourceId} obsolete`
+      );
+    }
+  }
+
+  /** Swaps the ownership tags for the obsolete tag. A rule that is already gone is skipped. */
+  private async retagRuleAsObsolete(id: string, sourceId: string): Promise<void> {
+    const rule = await this.rulesClient.getRule({ id }).catch((error) => {
+      if (isBoom(error) && error.output.statusCode === 404) {
+        return undefined;
+      }
+      throw error;
+    });
+    if (!rule) {
+      return;
+    }
+    const otherTags = (rule.metadata.tags ?? []).filter(
+      (tag) => sourceIdFromOwnershipTag(tag) === undefined
+    );
+    await this.rulesClient.updateRule({
+      id,
+      data: { metadata: { tags: [...otherTags, toObsoleteSourceTag(sourceId)] } },
+    });
   }
 
   async findSourceIdsWithOwnedRules(): Promise<string[]> {

@@ -33,7 +33,8 @@ export const createSourceDeleteTool = ({
   description: dedent`
     Delete a Nightshift source of the current space. This cannot be undone. It deletes the source's
     ES|QL view and, as when a source is deleted in the UI, cleans up what belongs to it: its
-    Knowledge Indicators and rules, and cancels any running onboarding.
+    Knowledge Indicators, and cancels any running onboarding. Its rules are disabled and kept,
+    marked obsolete, for a later cleanup.
 
     Disabling the source with the update tool keeps all of that. Prefer it when the user only wants
     the source to stop running.
@@ -60,7 +61,7 @@ export const createSourceDeleteTool = ({
         'xpack.significantEvents.agentBuilder.tools.sourceDelete.confirmation.message',
         {
           defaultMessage:
-            'Delete source "{source}"? Its view, Knowledge Indicators and rules are removed too, and any running onboarding is cancelled. This cannot be undone.',
+            'Delete source "{source}"? Its view and Knowledge Indicators are removed too, its rules are disabled and kept, and any running onboarding is cancelled. This cannot be undone.',
           values: { source },
         }
       ),

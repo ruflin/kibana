@@ -96,7 +96,10 @@ export const DELETE_SOURCE_ACTION_LABEL = i18n.translate(
 
 export const DELETE_SOURCE_ACTION_DESCRIPTION = i18n.translate(
   'xpack.nightshift.sources.deleteActionDescription',
-  { defaultMessage: 'Delete this source, its knowledge indicators and rules' }
+  {
+    defaultMessage:
+      'Delete this source and its knowledge indicators. Its rules are disabled, not deleted.',
+  }
 );
 
 export const CREATE_SOURCE_BUTTON_LABEL = i18n.translate(

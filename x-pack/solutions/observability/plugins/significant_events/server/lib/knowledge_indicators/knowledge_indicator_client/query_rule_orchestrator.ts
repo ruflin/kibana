@@ -307,7 +307,15 @@ export class QueryRuleOrchestrator {
     await this.rulesManagementClient.bulkDeleteRules(ids);
   }
 
-  async deleteAllQueries(sourceId: string): Promise<void> {
+  markOwnedRulesObsolete(sourceId: string): Promise<void> {
+    return this.rulesManagementClient.markOwnedRulesObsolete(sourceId);
+  }
+
+  /** With `keepRules`, the query records go but their rules stay, for a deleted source. */
+  async deleteAllQueries(
+    sourceId: string,
+    { keepRules = false }: { keepRules?: boolean } = {}
+  ): Promise<void> {
     if (!this.isSignificantEventsEnabled) {
       this.logger.debug(
         `Skipping deleteAllQueries for source "${sourceId}" because significant events feature is disabled.`
@@ -319,7 +327,7 @@ export class QueryRuleOrchestrator {
       includeExpired: true,
     });
     const ruleBacked = currentLinks.filter((link) => link.rule_backed);
-    if (ruleBacked.length > 0) {
+    if (!keepRules && ruleBacked.length > 0) {
       await uninstallQueries(this.rulesManagementClient, ruleBacked);
     }
     if (currentLinks.length === 0) {

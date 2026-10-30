@@ -62,6 +62,7 @@ const makeKiClient = (reconcileIds: string[] = [], ownedRuleIds: string[] = reco
   findSourceIdsWithOwnedRules: jest.fn().mockResolvedValue(ownedRuleIds),
   getSourceIdsToReconcile: jest.fn().mockResolvedValue(reconcileIds),
   deleteOwnedRules: jest.fn().mockResolvedValue(undefined),
+  markOwnedRulesObsolete: jest.fn().mockResolvedValue(undefined),
   deleteAllQueries: jest.fn().mockResolvedValue(undefined),
   deleteIndicators: jest.fn().mockResolvedValue(undefined),
 });
@@ -96,7 +97,7 @@ describe('reconcileSourceCatalog', () => {
     expect(cancelBySource.mock.invocationCallOrder[0]).toBeLessThan(
       kiClient.setSourceRulesEnabled.mock.invocationCallOrder[0]
     );
-    expect(kiClient.deleteOwnedRules).not.toHaveBeenCalled();
+    expect(kiClient.markOwnedRulesObsolete).not.toHaveBeenCalled();
   });
 
   it('aligns the remaining sources and sweeps orphans before reporting a failing source', async () => {
@@ -250,12 +251,12 @@ describe('reconcileSourceCatalog', () => {
       sourceSlug: 'orphan-b-slug',
       request,
     });
-    expect(kiClient.deleteOwnedRules).toHaveBeenCalledWith('gone-1');
+    expect(kiClient.markOwnedRulesObsolete).toHaveBeenCalledWith('gone-1');
   });
 
   it('retires the other gone sources when retiring one fails', async () => {
     const kiClient = makeKiClient(['gone-1', 'gone-2']);
-    kiClient.deleteOwnedRules.mockRejectedValueOnce(new Error('rules unavailable'));
+    kiClient.markOwnedRulesObsolete.mockRejectedValueOnce(new Error('rules unavailable'));
 
     await expect(
       reconcileSourceCatalog({
@@ -267,7 +268,7 @@ describe('reconcileSourceCatalog', () => {
       })
     ).rejects.toThrow('rules unavailable');
 
-    expect(kiClient.deleteOwnedRules).toHaveBeenCalledWith('gone-2');
+    expect(kiClient.markOwnedRulesObsolete).toHaveBeenCalledWith('gone-2');
   });
 
   it('enables rules for an enabled source and leaves onboarding running', async () => {
@@ -362,10 +363,12 @@ describe('reconcileSourceCatalog', () => {
       request,
     });
 
-    expect(kiClient.deleteOwnedRules).toHaveBeenCalledWith('gone-source');
-    expect(kiClient.deleteAllQueries).toHaveBeenCalledWith('gone-source');
+    expect(kiClient.markOwnedRulesObsolete).toHaveBeenCalledWith('gone-source');
+    expect(kiClient.deleteAllQueries).toHaveBeenCalledWith('gone-source', { keepRules: true });
     expect(kiClient.deleteIndicators).toHaveBeenCalledWith('gone-source');
-    expect(kiClient.deleteOwnedRules).not.toHaveBeenCalledWith('enabled-source');
+    expect(kiClient.markOwnedRulesObsolete).not.toHaveBeenCalledWith('enabled-source');
+    // A deleted source keeps its rules for a later cleanup, so none are deleted here.
+    expect(kiClient.deleteOwnedRules).not.toHaveBeenCalled();
   });
 
   it('retires the state object of a deleted source that has no indicators or rules left', async () => {
@@ -487,7 +490,7 @@ describe('reconcileSourceCatalog', () => {
       })
     ).rejects.toThrow('write failed');
 
-    expect(kiClient.deleteOwnedRules).not.toHaveBeenCalled();
+    expect(kiClient.markOwnedRulesObsolete).not.toHaveBeenCalled();
     expect(kiClient.deleteIndicators).not.toHaveBeenCalled();
   });
 
@@ -507,7 +510,7 @@ describe('reconcileSourceCatalog', () => {
       sourceSlug: 'gone-source-slug',
       request,
     });
-    expect(kiClient.deleteOwnedRules).not.toHaveBeenCalled();
+    expect(kiClient.markOwnedRulesObsolete).not.toHaveBeenCalled();
   });
 
   it('cancels the run of a deleted source before retiring its knowledge', async () => {
@@ -525,9 +528,9 @@ describe('reconcileSourceCatalog', () => {
       sourceSlug: 'gone-source-slug',
       request,
     });
-    expect(kiClient.deleteOwnedRules).toHaveBeenCalledWith('gone-source');
+    expect(kiClient.markOwnedRulesObsolete).toHaveBeenCalledWith('gone-source');
     expect(cancelBySource.mock.invocationCallOrder[0]).toBeLessThan(
-      kiClient.deleteOwnedRules.mock.invocationCallOrder[0]
+      kiClient.markOwnedRulesObsolete.mock.invocationCallOrder[0]
     );
   });
 

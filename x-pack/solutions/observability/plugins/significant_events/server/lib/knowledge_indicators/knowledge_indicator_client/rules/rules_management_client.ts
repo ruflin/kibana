@@ -41,6 +41,15 @@ export const toSourceTag = (sourceId: string): string =>
 export const toLegacyStreamTag = (sourceId: string): string =>
   `${LEGACY_RULE_STREAM_TAG_PREFIX}${sourceId}`;
 
+/**
+ * Tag on the rules of a deleted source: `nightshift:obsolete:<sourceId>`. Those rules are disabled
+ * and carry no ownership tag, so no sweep reattaches them. A cleanup may remove them later.
+ */
+export const NIGHTSHIFT_RULE_OBSOLETE_TAG_PREFIX = 'nightshift:obsolete:' as const;
+
+export const toObsoleteSourceTag = (sourceId: string): string =>
+  `${NIGHTSHIFT_RULE_OBSOLETE_TAG_PREFIX}${sourceId}`;
+
 /** Source id carried by either ownership tag, or `undefined` for an unrelated tag. */
 export const sourceIdFromOwnershipTag = (tag: string): string | undefined => {
   const prefix = RULE_OWNERSHIP_TAG_PREFIXES.find((candidate) => tag.startsWith(candidate));
@@ -89,6 +98,12 @@ export interface IRulesManagementClient {
 
   /** Every rule id carrying a tag that starts with `prefix`, in the client's space. */
   findRuleIdsByTagPrefix(prefix: RuleOwnershipTagPrefix): Promise<string[]>;
+
+  /**
+   * Disables the rules owned by a deleted source and swaps their ownership tags for
+   * `nightshift:obsolete:<sourceId>`. The rules are kept, not deleted.
+   */
+  markOwnedRulesObsolete(sourceId: string): Promise<void>;
 }
 
 /** Engine-independent Significant Events definition translated to Alerting v2 by the adapter. */

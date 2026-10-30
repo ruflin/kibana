@@ -35,8 +35,14 @@ type CatalogKiClient = Pick<
   | 'findSourceIdsWithOwnedRules'
   | 'getSourceIdsToReconcile'
   | 'deleteOwnedRules'
+  | 'markOwnedRulesObsolete'
   | 'deleteAllQueries'
   | 'deleteIndicators'
+>;
+
+type DeletedSourceKiClient = Pick<
+  CatalogKiClient,
+  'markOwnedRulesObsolete' | 'deleteAllQueries' | 'deleteIndicators'
 >;
 
 /** The `processed_by` of the markers written for the detections of a deleted source. */
@@ -67,9 +73,9 @@ export async function retireSourceDetections({
 }
 
 /**
- * Drops the owned rules, queries and knowledge indicators of a source id. Onboarding runs, the view
- * and the saved object are left alone. The reconcile calls it for ids that left the catalog, and
- * `resetSourceKnowledge` or `retireDeletedSource` after cancelling the source's run.
+ * Drops the owned rules, queries and knowledge indicators of a source id that is being reset, so
+ * its rules are not left behind for a query that no longer exists. Onboarding runs, the view and
+ * the saved object are left alone. Deleted sources use `retireDeletedSourceKnowledge` instead.
  */
 export async function retireSourceKnowledge({
   sourceId,
@@ -80,6 +86,22 @@ export async function retireSourceKnowledge({
 }): Promise<void> {
   await kiClient.deleteOwnedRules(sourceId);
   await kiClient.deleteAllQueries(sourceId);
+  await kiClient.deleteIndicators(sourceId);
+}
+
+/**
+ * Retires the knowledge of a deleted source. Its rules are disabled and marked obsolete, not
+ * deleted, so a cleanup can remove them later; its queries and knowledge indicators are deleted.
+ */
+export async function retireDeletedSourceKnowledge({
+  sourceId,
+  kiClient,
+}: {
+  sourceId: string;
+  kiClient: DeletedSourceKiClient;
+}): Promise<void> {
+  await kiClient.markOwnedRulesObsolete(sourceId);
+  await kiClient.deleteAllQueries(sourceId, { keepRules: true });
   await kiClient.deleteIndicators(sourceId);
 }
 
@@ -150,7 +172,7 @@ export async function retireDeletedSource({
   request,
 }: {
   source: Pick<NightshiftSource, 'id' | 'slug'>;
-  kiClient: Pick<CatalogKiClient, 'deleteOwnedRules' | 'deleteAllQueries' | 'deleteIndicators'>;
+  kiClient: DeletedSourceKiClient;
   onboardingClient?: Pick<OnboardingClient, 'cancelBySource'>;
   sourceKnowledgeState: SourceKnowledgeStateClient;
   request: KibanaRequest;
@@ -162,7 +184,7 @@ export async function retireDeletedSource({
     cleanup: () =>
       sourceKnowledgeState.retire({
         sourceId: source.id,
-        run: () => retireSourceKnowledge({ sourceId: source.id, kiClient }),
+        run: () => retireDeletedSourceKnowledge({ sourceId: source.id, kiClient }),
       }),
   });
 }
@@ -344,7 +366,7 @@ export const createSourceChangeListener =
  * keyed by slug and live in the request space, so they are matched against this
  * space's catalog only.
  * Ids that still have knowledge indicators, owned rules or a knowledge state object but
- * no catalog row are then retired.
+ * no catalog row are then retired: their rules are disabled and marked obsolete, not deleted.
  */
 export async function reconcileSourceCatalog({
   sourcesClient,
@@ -457,16 +479,16 @@ export async function reconcileSourceCatalog({
       continue;
     }
     try {
-      // Detections first: the rules and indicators removed below are how a later sweep finds this
-      // id, so a failed marker write must leave them in place for the retry.
+      // Detections first: the indicators retired below are how a later sweep finds this id, so a
+      // failed marker write must leave them in place for the retry.
       await retireSourceDetections({ sourceId, getDetectionClient });
       if (sourceKnowledgeState) {
         await sourceKnowledgeState.retire({
           sourceId,
-          run: () => retireSourceKnowledge({ sourceId, kiClient }),
+          run: () => retireDeletedSourceKnowledge({ sourceId, kiClient }),
         });
       } else {
-        await retireSourceKnowledge({ sourceId, kiClient });
+        await retireDeletedSourceKnowledge({ sourceId, kiClient });
       }
     } catch (error) {
       if (!isRetryableConflict(error)) {

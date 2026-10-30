@@ -36,6 +36,7 @@ const makeHandlerParams = ({ sourceIds }: { sourceIds: string[] }): HandlerParam
         findSourceIdsWithOwnedRules: jest.fn().mockResolvedValue(sourceIds),
         setSourceRulesEnabled: jest.fn().mockResolvedValue(undefined),
         deleteOwnedRules: jest.fn().mockResolvedValue(undefined),
+        markOwnedRulesObsolete: jest.fn().mockResolvedValue(undefined),
         deleteAllQueries: jest.fn().mockResolvedValue(undefined),
         deleteIndicators: jest.fn().mockResolvedValue(undefined),
       }),
@@ -108,6 +109,7 @@ describe('reconcileSourceRoute', () => {
         getKnowledgeIndicatorClient: jest.fn().mockResolvedValue({
           setSourceRulesEnabled: jest.fn().mockResolvedValue(undefined),
           deleteOwnedRules: jest.fn().mockResolvedValue(undefined),
+          markOwnedRulesObsolete: jest.fn().mockResolvedValue(undefined),
           deleteAllQueries: jest.fn().mockResolvedValue(undefined),
           deleteIndicators: jest.fn().mockResolvedValue(undefined),
         }),

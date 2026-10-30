@@ -32,7 +32,7 @@ const ACTION_COPY: Record<
       }),
     body: i18n.translate('xpack.nightshift.sources.deleteModal.body', {
       defaultMessage:
-        'The source, its knowledge indicators and its rules are deleted. Detections and significant events already found are kept.',
+        'The source and its knowledge indicators are deleted. Its rules are disabled and kept, so they can be cleaned up later. Detections and significant events already found are kept.',
     }),
     confirmLabel: i18n.translate('xpack.nightshift.sources.deleteModal.confirm', {
       defaultMessage: 'Delete source',
