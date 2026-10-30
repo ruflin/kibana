@@ -51,13 +51,20 @@ The conversation ids are derived from the scenarios, so a re-run replaces the ea
 the claims pipeline (`claim-intake`, `policy-lookup`, `fraud-check`, `payment-processor`,
 `notification-dispatch`, `postgres`) during a fraud-check timeout, with a Redis and Kafka red herring.
 It writes the claims logs, a source over them, 15 knowledge indicators, two rules, two detections and
-two events. No AI connector or inference call is needed. Run it from the repo root against a running
-stack:
+two events. No AI connector or inference call is needed.
+
+Run it from the repo root against a local serverless Observability Complete stack (Nightshift is
+enabled there through `serverless.oblt.complete.yml`):
 
 ```sh
-node -r @kbn/setup-node-env x-pack/solutions/observability/plugins/nightshift/scripts/seed_nightshift_demo.ts \
-  --es-url http://localhost:9200 --kibana-url http://localhost:5601
+node -r @kbn/setup-node-env x-pack/solutions/observability/plugins/nightshift/scripts/seed_nightshift_demo.ts
 ```
+
+The script finds Elasticsearch on `localhost:9200` and Kibana on `localhost:5601`, trying HTTPS before
+HTTP and the `elastic_serverless` user before `elastic`, the same way `scripts/kibana_api_common.sh`
+does. A self-signed certificate is accepted for localhost only. Pass `--es-url`, `--kibana-url`,
+`--es-username` or `--es-password` to skip detection for a service. If Nightshift is not enabled on the
+target, the script stops before writing anything.
 
 - It resumes Significant Events first, if a previous run paused it, and pauses it again after the
   rules are created. The real rules and workflows then do not act on the demo data. The
@@ -66,9 +73,8 @@ node -r @kbn/setup-node-env x-pack/solutions/observability/plugins/nightshift/sc
   because they are time-bounded.
 - Re-running without `--clean` replaces the demo events and detections instead of duplicating them.
 - `--live` raises one scripted event every 2 minutes until Ctrl+C.
-- `--es-username` and `--es-password` default to `elastic` and `changeme`. Elasticsearch must run with
-  security enabled: the detection overview calls `_security/user/_has_privileges`, which does not exist
-  without it.
+- Elasticsearch must run with security enabled: the detection overview calls
+  `_security/user/_has_privileges`, which does not exist without it.
 
 Not covered yet: investigations, automations, onboarding suggestions, Cortex, Memory and decision trees.
 Those pages stay empty after the seed.

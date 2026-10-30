@@ -143,6 +143,23 @@ const listDemoSources = async (
   return response.data.sources;
 };
 
+/** Fails early when Nightshift is not enabled, for example on a serverless project without the Complete tier. */
+export const assertNightshiftAvailable = async (ctx: DemoContext): Promise<void> => {
+  const response = await kibanaRequest<{ available: boolean }>(
+    ctx.connection,
+    'GET',
+    '/internal/significant_events/availability'
+  );
+  if (response.status >= 300 || !response.data.available) {
+    throw new Error(
+      `Nightshift is not available on ${ctx.connection.kibanaUrl} (HTTP ${response.status}). ` +
+        'Start serverless Observability with the Complete tier (serverless.oblt.complete.yml), ' +
+        'or a stateful stack with the nightshift feature flags.'
+    );
+  }
+  ctx.log.info('Nightshift is available');
+};
+
 /** Resumes Significant Events if a previous run paused it, because writes are blocked while paused. */
 export const resumeIfPaused = async (ctx: DemoContext): Promise<void> => {
   const status = await kibanaRequest<{ state: string }>(

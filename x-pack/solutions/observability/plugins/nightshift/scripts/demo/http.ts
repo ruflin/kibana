@@ -5,6 +5,8 @@
  * 2.0.
  */
 
+import { Agent, fetch } from 'undici';
+
 export interface DemoAuth {
   username: string;
   password: string;
@@ -22,6 +24,17 @@ export interface HttpResult<T> {
   data: T;
 }
 
+/** Accepts the self-signed certificate of a local serverless stack, for localhost only. */
+const LOCAL_HTTPS_AGENT = new Agent({ connect: { rejectUnauthorized: false } });
+
+export const isLocalHttps = (url: string): boolean => {
+  const { protocol, hostname } = new URL(url);
+  return protocol === 'https:' && (hostname === 'localhost' || hostname === '127.0.0.1');
+};
+
+export const dispatcherFor = (url: string): Agent | undefined =>
+  isLocalHttps(url) ? LOCAL_HTTPS_AGENT : undefined;
+
 const authHeader = ({ username, password }: DemoAuth): string =>
   `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
 
@@ -33,7 +46,8 @@ export const kibanaRequest = async <T>(
   body?: unknown
 ): Promise<HttpResult<T>> => {
   const spacePrefix = connection.space === 'default' ? '' : `/s/${connection.space}`;
-  const response = await fetch(`${connection.kibanaUrl}${spacePrefix}${path}`, {
+  const url = `${connection.kibanaUrl}${spacePrefix}${path}`;
+  const response = await fetch(url, {
     method,
     headers: {
       'kbn-xsrf': 'nightshift-demo',
@@ -42,6 +56,7 @@ export const kibanaRequest = async <T>(
       authorization: authHeader(connection.auth),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
+    dispatcher: dispatcherFor(url),
   });
   const text = await response.text();
   return { status: response.status, data: text ? (JSON.parse(text) as T) : (undefined as T) };
@@ -54,13 +69,15 @@ export const esRequest = async <T>(
   path: string,
   body?: unknown
 ): Promise<HttpResult<T>> => {
-  const response = await fetch(`${connection.esUrl}${path}`, {
+  const url = `${connection.esUrl}${path}`;
+  const response = await fetch(url, {
     method,
     headers: {
       'content-type': 'application/json',
       authorization: authHeader(connection.auth),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
+    dispatcher: dispatcherFor(url),
   });
   const text = await response.text();
   return { status: response.status, data: text ? (JSON.parse(text) as T) : (undefined as T) };
@@ -79,13 +96,15 @@ export const bulkCreate = async (
     JSON.stringify({ create: { _index: dataStream } }),
     JSON.stringify(document),
   ]);
-  const response = await fetch(`${connection.esUrl}/_bulk?refresh=wait_for`, {
+  const url = `${connection.esUrl}/_bulk?refresh=wait_for`;
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
       'content-type': 'application/x-ndjson',
       authorization: authHeader(connection.auth),
     },
     body: `${lines.join('\n')}\n`,
+    dispatcher: dispatcherFor(url),
   });
   const data = (await response.json()) as {
     errors: boolean;
