@@ -493,6 +493,28 @@ describe('AppHeaderView', () => {
     expect(screen.getByText('3')).toBeInTheDocument();
   });
 
+  it('renders EBT click attributes on tabs', () => {
+    render(
+      <AppHeaderView
+        tabs={[
+          {
+            id: 'alerts',
+            label: 'Alerts',
+            'data-test-subj': 'alertsTab',
+            'data-ebt-action': 'viewAlerts',
+            'data-ebt-element': 'nightshiftPageHeader',
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId('alertsTab')).toHaveAttribute('data-ebt-action', 'viewAlerts');
+    expect(screen.getByTestId('alertsTab')).toHaveAttribute(
+      'data-ebt-element',
+      'nightshiftPageHeader'
+    );
+  });
+
   it('renders tab actions in an ellipsis popover without triggering tab navigation', () => {
     const onTabClick = jest.fn();
     const onCopy = jest.fn();

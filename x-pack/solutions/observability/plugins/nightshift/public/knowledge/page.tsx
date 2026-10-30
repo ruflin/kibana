@@ -6,12 +6,18 @@
  */
 
 import React from 'react';
-import { EuiLoadingSpinner, EuiPageTemplate } from '@elastic/eui';
-import { NIGHTSHIFT_APP_ID } from '@kbn/deeplinks-observability';
-import { i18n } from '@kbn/i18n';
+import {
+  EuiIcon,
+  EuiLoadingSpinner,
+  EuiPageTemplate,
+  EuiSpacer,
+  EuiTab,
+  EuiTabs,
+} from '@elastic/eui';
+import { reactRouterNavigate } from '@kbn/kibana-react-plugin/public';
 import { Redirect, useHistory, useParams } from 'react-router-dom';
 import { NightshiftAppHeader } from '../components/app_header';
-import { useKibana } from '../hooks/use_kibana';
+import type { NightshiftHeaderNavigation } from '../components/app_header';
 import { useKnowledgeTabsAvailability } from './hooks/use_knowledge_tabs_availability';
 import {
   getVisibleKnowledgeTabs,
@@ -34,11 +40,7 @@ const DecisionTreesTab = React.lazy(() =>
   import('./decision_trees/tab').then((module) => ({ default: module.DecisionTreesTab }))
 );
 
-const nightshiftLabel = i18n.translate('xpack.nightshift.knowledgePage.backToNightshiftLabel', {
-  defaultMessage: 'Nightshift',
-});
-
-export type KnowledgePageHeaderProps = Record<string, never>;
+export type KnowledgePageHeaderProps = NightshiftHeaderNavigation;
 
 const KnowledgeLoadingSpinner = () => (
   <EuiLoadingSpinner size="xl" data-test-subj="nightshiftKnowledgePageLoading" />
@@ -55,7 +57,6 @@ export function KnowledgePage({
 }: {
   headerProps: KnowledgePageHeaderProps;
 }): React.ReactElement {
-  const { application } = useKibana().services;
   const { tab } = useParams<{ tab?: string }>();
   const history = useHistory();
   const availability = useKnowledgeTabsAvailability();
@@ -77,31 +78,25 @@ export function KnowledgePage({
   }
 
   const visibleTabs = getVisibleKnowledgeTabs(availability);
-  const tabs = visibleTabs.map((id) => ({
-    id,
-    label: KNOWLEDGE_TAB_LABELS[id],
-    isSelected: tab === id,
-    ...(id === 'decision_trees' && { badge: { iconType: 'code' } }),
-    href: application.getUrlForApp(NIGHTSHIFT_APP_ID, { path: `/knowledge/${id}` }),
-    onClick: (event?: React.MouseEvent) => {
-      event?.preventDefault();
-      history.push(`/knowledge/${id}`);
-    },
-    'data-test-subj': `nightshiftKnowledgeTab-${id}`,
-  }));
 
   return (
     <>
-      <NightshiftAppHeader
-        {...headerProps}
-        page="knowledge"
-        back={{
-          href: application.getUrlForApp(NIGHTSHIFT_APP_ID, { path: '/' }),
-          label: nightshiftLabel,
-        }}
-        tabs={tabs}
-      />
+      <NightshiftAppHeader {...headerProps} page="knowledge" />
       <EuiPageTemplate.Section component="div" restrictWidth={false}>
+        <EuiTabs size="s">
+          {visibleTabs.map((id) => (
+            <EuiTab
+              key={id}
+              isSelected={tab === id}
+              {...reactRouterNavigate(history, `/knowledge/${id}`)}
+              data-test-subj={`nightshiftKnowledgeTab-${id}`}
+            >
+              {KNOWLEDGE_TAB_LABELS[id]}
+              {id === 'decision_trees' && <EuiIcon type="code" aria-hidden="true" />}
+            </EuiTab>
+          ))}
+        </EuiTabs>
+        <EuiSpacer size="m" />
         <React.Suspense fallback={<KnowledgeLoadingSpinner />}>
           {tab === 'knowledge_indicators' && <KnowledgeIndicatorsTab />}
           {tab === 'cortex' && <CortexTab />}

@@ -6,12 +6,13 @@
  */
 
 import React from 'react';
-import { EuiPageTemplate } from '@elastic/eui';
-import { NIGHTSHIFT_APP_ID } from '@kbn/deeplinks-observability';
+import { EuiPageTemplate, EuiSpacer, EuiTab, EuiTabs } from '@elastic/eui';
 import { i18n } from '@kbn/i18n';
 import { getNightshiftCapabilities } from '@kbn/nightshift-shared';
-import { Redirect, useHistory, useLocation, useParams } from 'react-router-dom';
+import { reactRouterNavigate } from '@kbn/kibana-react-plugin/public';
+import { Redirect, useHistory, useParams } from 'react-router-dom';
 import { NightshiftAppHeader } from '../components/app_header';
+import type { NightshiftHeaderNavigation } from '../components/app_header';
 import { useKibana } from '../hooks/use_kibana';
 import { DetectionsSettingsTab } from './detections_settings_tab';
 import { GeneralSettingsTab } from './general_settings_tab';
@@ -23,14 +24,6 @@ import {
   isSettingsTabId,
   type SettingsTabId,
 } from './settings_tabs';
-
-const nightshiftLabel = i18n.translate('xpack.nightshift.settingsPage.backToNightshiftLabel', {
-  defaultMessage: 'Nightshift',
-});
-
-const detectionsLabel = i18n.translate('xpack.nightshift.settingsPage.backToDetectionsLabel', {
-  defaultMessage: 'Detections',
-});
 
 const settingsTabLabels: Record<SettingsTabId, string> = {
   general: i18n.translate('xpack.nightshift.settingsPage.tabs.general', {
@@ -44,16 +37,15 @@ const settingsTabLabels: Record<SettingsTabId, string> = {
   }),
 };
 
-interface SettingsPageHeaderProps {
+type SettingsPageHeaderProps = NightshiftHeaderNavigation & {
   onCustomContextClick?: () => void;
-}
+};
 
 export function SettingsPage({ headerProps }: { headerProps: SettingsPageHeaderProps }) {
-  const { onCustomContextClick } = headerProps;
+  const { onCustomContextClick, ...navigation } = headerProps;
   const { application } = useKibana().services;
   const { tab } = useParams<{ tab?: string }>();
   const history = useHistory();
-  const { search } = useLocation();
   const isAppsEnabled = useAppsEnabled();
   const { canManage } = getNightshiftCapabilities(application.capabilities.nightshift);
 
@@ -67,33 +59,23 @@ export function SettingsPage({ headerProps }: { headerProps: SettingsPageHeaderP
     return <Redirect to={`/settings/${getDefaultSettingsTab(visibleTabs)}`} />;
   }
 
-  const tabs = visibleTabs.map((id) => ({
-    id,
-    label: settingsTabLabels[id],
-    isSelected: tab === id,
-    href: application.getUrlForApp(NIGHTSHIFT_APP_ID, { path: `/settings/${id}` }),
-    onClick: (event?: React.MouseEvent) => {
-      event?.preventDefault();
-      history.push(`/settings/${id}`);
-    },
-    'data-test-subj': `nightshiftSettingsTab-${id}`,
-  }));
-  const backToDetections =
-    tab === 'detections' && new URLSearchParams(search).get('origin') === 'detections';
-
   return (
     <>
-      <NightshiftAppHeader
-        page="settings"
-        back={{
-          href: application.getUrlForApp(NIGHTSHIFT_APP_ID, {
-            path: backToDetections ? '/detections/events' : '/',
-          }),
-          label: backToDetections ? detectionsLabel : nightshiftLabel,
-        }}
-        tabs={tabs}
-      />
+      <NightshiftAppHeader {...navigation} page="settings" />
       <EuiPageTemplate.Section component="div" restrictWidth={false}>
+        <EuiTabs size="s">
+          {visibleTabs.map((id) => (
+            <EuiTab
+              key={id}
+              isSelected={tab === id}
+              {...reactRouterNavigate(history, `/settings/${id}`)}
+              data-test-subj={`nightshiftSettingsTab-${id}`}
+            >
+              {settingsTabLabels[id]}
+            </EuiTab>
+          ))}
+        </EuiTabs>
+        <EuiSpacer size="m" />
         {tab === 'general' && <GeneralSettingsTab />}
         {tab === 'investigations' && (
           <InvestigationsSettingsTab

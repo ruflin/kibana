@@ -125,6 +125,10 @@ export interface AppHeaderTab {
   href?: string;
   badge?: AppHeaderTabBadge;
   'data-test-subj'?: string;
+  /** Optional EBT click attributes, rendered on the tab so core click tracking can collect them. */
+  'data-ebt-action'?: string;
+  'data-ebt-element'?: string;
+  'data-ebt-detail'?: string;
   disabled?: boolean;
   toolTipContent?: string;
   /**

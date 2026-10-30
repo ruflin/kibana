@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { AppHeaderBack, AppHeaderTab } from '@kbn/app-header';
+import type { NightshiftAppHeaderProps } from '../components/app_header';
 import { createMemoryHistory } from 'history';
 import { I18nProvider } from '@kbn/i18n-react';
 import { Route, Router } from '@kbn/shared-ux-router';
@@ -18,23 +18,13 @@ import { SettingsPage } from './page';
 jest.mock('../hooks/use_kibana');
 jest.mock('./hooks/use_apps_enabled');
 jest.mock('../components/app_header', () => ({
-  NightshiftAppHeader: ({ back, tabs }: { back: AppHeaderBack; tabs: AppHeaderTab[] }) => (
-    <div>
-      <a href={back.href} data-test-subj="nightshiftSettingsBackLink">
-        {back.label}
-      </a>
-      {tabs.map((tab) => (
-        <a
-          key={tab.id}
-          href={tab.href}
-          onClick={tab.onClick}
-          data-test-subj={tab['data-test-subj']}
-          data-selected={tab.isSelected}
-        >
-          {tab.label}
-        </a>
-      ))}
-    </div>
+  NightshiftAppHeader: ({ back, page, settingsHref }: NightshiftAppHeaderProps) => (
+    <div
+      data-test-subj="nightshiftAppHeaderStub"
+      data-page={page}
+      data-has-back={back !== undefined}
+      data-settings-href={settingsHref}
+    />
   ),
 }));
 jest.mock('./general_settings_tab', () => ({
@@ -50,7 +40,7 @@ jest.mock('./detections_settings_tab', () => ({
 const mockUseAppsEnabled = useAppsEnabled as jest.MockedFunction<typeof useAppsEnabled>;
 const mockUseKibana = useKibana as jest.MockedFunction<typeof useKibana>;
 
-const headerProps = {};
+const headerProps = { settingsHref: '/app/nightshift/settings' };
 
 const renderPage = (path: string) => {
   const history = createMemoryHistory({ initialEntries: [path] });
@@ -91,9 +81,27 @@ describe('SettingsPage', () => {
 
     expect(screen.getByTestId(testSubject)).toBeInTheDocument();
     expect(screen.getByTestId(`nightshiftSettingsTab-${tab}`)).toHaveAttribute(
-      'data-selected',
+      'aria-selected',
       'true'
     );
+  });
+
+  it('renders the Settings tabs in the page body below the header', () => {
+    renderPage('/settings/general');
+
+    expect(screen.getByTestId('nightshiftAppHeaderStub')).toBeInTheDocument();
+    expect(screen.getByTestId('nightshiftSettingsTab-general')).toBeInTheDocument();
+    expect(screen.getByTestId('nightshiftSettingsTab-investigations')).toBeInTheDocument();
+    expect(screen.getByTestId('nightshiftSettingsTab-detections')).toBeInTheDocument();
+  });
+
+  it('renders Settings in the header without a Back link, whatever the origin', () => {
+    renderPage('/settings/detections?origin=detections');
+
+    const header = screen.getByTestId('nightshiftAppHeaderStub');
+    expect(header).toHaveAttribute('data-page', 'settings');
+    expect(header).toHaveAttribute('data-has-back', 'false');
+    expect(header).toHaveAttribute('data-settings-href', '/app/nightshift/settings');
   });
 
   it('redirects the base route to General when Apps is enabled', async () => {
@@ -134,28 +142,4 @@ describe('SettingsPage', () => {
 
     expect(history.location.pathname).toBe('/settings/investigations');
   });
-
-  it.each([
-    {
-      path: '/settings/detections?origin=detections',
-      expectedHref: '/app/nightshift/detections/events',
-      expectedLabel: 'Detections',
-    },
-    {
-      path: '/settings/detections',
-      expectedHref: '/app/nightshift/',
-      expectedLabel: 'Nightshift',
-    },
-  ])(
-    'links back to $expectedLabel from Detections settings for the matching origin',
-    ({ path, expectedHref, expectedLabel }) => {
-      renderPage(path);
-
-      expect(screen.getByTestId('nightshiftSettingsBackLink')).toHaveAttribute(
-        'href',
-        expectedHref
-      );
-      expect(screen.getByTestId('nightshiftSettingsBackLink')).toHaveTextContent(expectedLabel);
-    }
-  );
 });

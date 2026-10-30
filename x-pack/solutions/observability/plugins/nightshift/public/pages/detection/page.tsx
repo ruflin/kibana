@@ -17,9 +17,7 @@ import {
   useEuiTheme,
 } from '@elastic/eui';
 import { css } from '@emotion/react';
-import { NIGHTSHIFT_APP_ID } from '@kbn/deeplinks-observability';
 import { getEbtProps } from '@kbn/ebt-click';
-import { i18n } from '@kbn/i18n';
 import { reactRouterNavigate } from '@kbn/kibana-react-plugin/public';
 import React, {
   lazy,
@@ -32,7 +30,7 @@ import React, {
 } from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { NightshiftAppHeader } from '../../components/app_header';
-import type { NightshiftAppHeaderProps } from '../../components/app_header';
+import type { NightshiftHeaderNavigation } from '../../components/app_header';
 import { NIGHTSHIFT_EBT_ACTIONS, NIGHTSHIFT_EBT_ELEMENTS } from '../../common/ebt_constants';
 import {
   NIGHTSHIFT_EVENT_ID_QUERY_PARAM,
@@ -41,7 +39,6 @@ import {
 } from '../../common/url_params';
 import { useDetectionOverview } from '../../data/detection_overview/use_detection_overview';
 import { useMaintenanceStatus } from '../../data/maintenance/use_significant_events_maintenance';
-import { useKibana } from '../../hooks/use_kibana';
 import { useDeveloperMode } from '../../hooks/use_developer_mode';
 import type { DetectionTabId } from './detection_tabs';
 import { DETECTION_TAB_LABELS, getVisibleDetectionTabs } from './detection_tabs';
@@ -68,15 +65,11 @@ const SignalsTab = lazy(() =>
   import('./signals/signals_tab').then(({ SignalsTab: Tab }) => ({ default: Tab }))
 );
 
-export type DetectionPageHeaderProps = Pick<
-  NightshiftAppHeaderProps,
-  | 'onSourcesClick'
-  | 'sourcesHref'
-  | 'onKnowledgeClick'
-  | 'knowledgeHref'
-  | 'onSettingsClick'
-  | 'settingsHref'
->;
+export type DetectionPageHeaderProps = NightshiftHeaderNavigation & {
+  /** Knowledge is also linked from the entities panel, so the page keeps its link props. */
+  onKnowledgeClick?: () => void | Promise<void>;
+  knowledgeHref?: string;
+};
 
 export const DetectionPage = ({
   headerProps,
@@ -85,7 +78,6 @@ export const DetectionPage = ({
   headerProps: DetectionPageHeaderProps;
   tab: DetectionTabId;
 }): React.ReactElement => {
-  const { application } = useKibana().services;
   const history = useHistory();
   const location = useLocation();
   const { euiTheme } = useEuiTheme();
@@ -164,14 +156,10 @@ export const DetectionPage = ({
       data-test-subj="nightshiftDetectionPage"
     >
       <NightshiftAppHeader
-        {...headerProps}
         page="detection"
-        back={{
-          href: application.getUrlForApp(NIGHTSHIFT_APP_ID, { path: '/' }),
-          label: i18n.translate('xpack.nightshift.detectionPage.backToNightshiftLabel', {
-            defaultMessage: 'Nightshift',
-          }),
-        }}
+        topLevelTabs={headerProps.topLevelTabs}
+        onSettingsClick={headerProps.onSettingsClick}
+        settingsHref={headerProps.settingsHref}
       />
       <EuiPageTemplate.Section
         component="div"
