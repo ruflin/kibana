@@ -11,7 +11,7 @@
  * No AI connector or inference call is needed. Run from the repo root against a local
  * serverless Observability Complete stack (or a stateful one):
  *
- *   node -r @kbn/setup-node-env x-pack/solutions/observability/plugins/nightshift/scripts/seed_nightshift_demo.ts
+ *   node x-pack/solutions/observability/plugins/nightshift/scripts/seed_nightshift_demo.js
  *
  * Add --help to list the flags.
  */

@@ -47,7 +47,7 @@ The conversation ids are derived from the scenarios, so a re-run replaces the ea
 
 ## Seeding the demo for local development
 
-`scripts/seed_nightshift_demo.ts` fills the knowledge, detection and sources pages with one story:
+`scripts/seed_nightshift_demo_impl.ts` fills the knowledge, detection and sources pages with one story:
 the claims pipeline (`claim-intake`, `policy-lookup`, `fraud-check`, `payment-processor`,
 `notification-dispatch`, `postgres`) during a fraud-check timeout, with a Redis and Kafka red herring.
 It writes the claims logs, a source over them, 15 knowledge indicators, two rules, two detections and
@@ -57,8 +57,11 @@ Run it from the repo root against a local serverless Observability Complete stac
 enabled there through `serverless.oblt.complete.yml`):
 
 ```sh
-node -r @kbn/setup-node-env x-pack/solutions/observability/plugins/nightshift/scripts/seed_nightshift_demo.ts
+node x-pack/solutions/observability/plugins/nightshift/scripts/seed_nightshift_demo.js
 ```
+
+The `.js` launcher loads `@kbn/setup-node-env` and then the TypeScript script, the same way
+`scripts/sync_logs.js` does. `node -r @kbn/setup-node-env <file>.ts` works too.
 
 The script finds Elasticsearch on `localhost:9200` and Kibana on `localhost:5601`, trying HTTPS before
 HTTP and the `elastic_serverless` user before `elastic`, the same way `scripts/kibana_api_common.sh`
