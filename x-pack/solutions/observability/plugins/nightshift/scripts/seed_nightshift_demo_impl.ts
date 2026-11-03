@@ -20,6 +20,14 @@ import { Client } from '@elastic/elasticsearch';
 import { run } from '@kbn/dev-cli-runner';
 import { DEMO_EVENTS } from './demo/dataset';
 import { resolveConnection } from './demo/connection';
+import { seedAutomations } from './demo/automations';
+import {
+  cleanInvestigations,
+  investigationConversationId,
+  seedInvestigations,
+} from './demo/investigations';
+import { cleanAutomationsAndOnboarding, seedOnboarding } from './demo/onboarding';
+import { cleanKnowledge, seedKnowledge } from './demo/knowledge';
 import { runLiveMode } from './demo/live';
 import {
   assertNightshiftAvailable,
@@ -64,15 +72,27 @@ run(
     await assertNightshiftAvailable(ctx);
     await resumeIfPaused(ctx);
     if (flags.clean === true) {
-      await cleanDemoData(ctx);
+      await cleanDemoData(ctx, (source) => cleanInvestigations(ctx, source));
+      await cleanAutomationsAndOnboarding(ctx);
+      await cleanKnowledge(ctx);
     }
 
     const { manifest, streamName } = await seedLogs(ctx);
     const source = await ensureSource(ctx, streamName);
     const features = await seedKnowledgeIndicators(ctx, source, manifest);
     const rules = await seedRules(ctx, source);
+    // Investigations and automations are written before the pause, because manual triggers are
+    // blocked while Significant Events is paused. Onboarding reads an investigation, so it comes after.
+    await seedInvestigations(ctx, source, rules, features, DEMO_EVENTS);
+    await seedAutomations(ctx);
+    await seedOnboarding(ctx);
+    await seedKnowledge(ctx);
     await pauseSignificantEvents(ctx);
-    await seedDetectionsAndEvents(ctx, source, rules, features, DEMO_EVENTS);
+    // An active event is still under investigation; a dismissed one has a finished investigation.
+    await seedDetectionsAndEvents(ctx, source, rules, features, DEMO_EVENTS, (event) => ({
+      conversationId: investigationConversationId(source, event),
+      completed: event.status !== 'active',
+    }));
 
     if (flags.live === true) {
       await runLiveMode(ctx, source, rules, features);

@@ -50,8 +50,11 @@ The conversation ids are derived from the scenarios, so a re-run replaces the ea
 `scripts/seed_nightshift_demo_impl.ts` fills the knowledge, detection and sources pages with one story:
 the claims pipeline (`claim-intake`, `policy-lookup`, `fraud-check`, `payment-processor`,
 `notification-dispatch`, `postgres`) during a fraud-check timeout, with a Redis and Kafka red herring.
-It writes the claims logs, a source over them, 15 knowledge indicators, two rules, two detections and
-two events. No AI connector or inference call is needed.
+It writes the claims logs, a source over them, 15 knowledge indicators, two rules, two detections,
+two events and their investigations (`scripts/demo/investigations.ts`), automations and their run
+history, the onboarding suggestions, three Cortex pages, two memories and one decision tree. No AI
+connector or inference call is needed. The seed writes the investigations before it pauses, because
+manual triggers are blocked while Significant Events is paused.
 
 Run it from the repo root against a local serverless Observability Complete stack (Nightshift is
 enabled there through `serverless.oblt.complete.yml`):
@@ -79,8 +82,7 @@ target, the script stops before writing anything.
 - Elasticsearch must run with security enabled: the detection overview calls
   `_security/user/_has_privileges`, which does not exist without it.
 
-Not covered yet: investigations, automations, onboarding suggestions, Cortex, Memory and decision trees.
-Those pages stay empty after the seed.
+The decision tree is only visible in developer mode, because the Decision trees tab is developer-only.
 
 ## Turning `nightshift.enabled` off and on
 

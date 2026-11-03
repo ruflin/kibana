@@ -379,10 +379,23 @@ export const buildEventDocument = (
   event: DemoEvent,
   eventId: string,
   space: string,
-  raisedAtMs: number
+  raisedAtMs: number,
+  investigation?: DemoInvestigationLink
 ): Record<string, unknown> => {
   const rule = rules[event.queryIndex];
   const timestamp = iso(raisedAtMs);
+  // The events list reads the investigation from `investigations`: its id is the conversation id.
+  const investigations = investigation
+    ? [
+        {
+          workflow_execution_id: investigation.conversationId,
+          started_at: iso(raisedAtMs + 60_000),
+          ...(investigation.completed
+            ? { completed_at: iso(raisedAtMs + 10 * 60_000), outcome: 'completed' }
+            : {}),
+        },
+      ]
+    : undefined;
   const data = {
     event_id: eventId,
     rule_name: event.title,
@@ -392,6 +405,7 @@ export const buildEventDocument = (
     source_ids: [source.id],
     symptom_hypothesis: event.symptomHypothesis,
     assessment_note: event.assessmentNote,
+    ...(investigations ? { conversation_id: investigation?.conversationId, investigations } : {}),
     signals: [{ metadata: { rule_uuid: rule.ruleId }, rule_name: rule.title }],
     causal_features: event.causalServices.map((service) => ({
       feature_id: features.featureIdFor(service),
@@ -433,13 +447,24 @@ const deleteDemoEventsAndDetections = async (ctx: DemoContext): Promise<void> =>
   );
 };
 
+/** The investigation an event is linked to: its conversation id, and whether it has finished. */
+export interface DemoInvestigationLink {
+  conversationId: string;
+  completed: boolean;
+}
+
+/** Stable id of a demo event for a source, so other seeded data (investigations) can link to it. */
+export const demoEventId = (source: DemoSource, event: DemoEvent): string =>
+  `${DEMO_EVENT_ID_PREFIX}${deterministicId(source.id, 'event', event.title).slice(0, 12)}`;
+
 /** Writes the detections and events present when the demo starts. */
 export const seedDetectionsAndEvents = async (
   ctx: DemoContext,
   source: DemoSource,
   rules: DemoRule[],
   features: DemoFeatures,
-  events: DemoEvent[]
+  events: DemoEvent[],
+  investigationFor: (event: DemoEvent) => DemoInvestigationLink | undefined
 ): Promise<void> => {
   const space = ctx.connection.space;
   const now = Date.now();
@@ -448,14 +473,21 @@ export const seedDetectionsAndEvents = async (
   const documents: Array<Record<string, unknown>> = [];
 
   events.forEach((event) => {
-    const eventId = `${DEMO_EVENT_ID_PREFIX}${deterministicId(
-      source.id,
-      'event',
-      event.title
-    ).slice(0, 12)}`;
+    const eventId = demoEventId(source, event);
     const raisedAtMs = now - event.raisedMinutesAgo * 60_000;
     detections.push(buildDetection(source, rules, event, eventId, space, raisedAtMs));
-    documents.push(buildEventDocument(source, rules, features, event, eventId, space, raisedAtMs));
+    documents.push(
+      buildEventDocument(
+        source,
+        rules,
+        features,
+        event,
+        eventId,
+        space,
+        raisedAtMs,
+        investigationFor(event)
+      )
+    );
   });
 
   await bulkCreate(ctx.connection, DETECTIONS_INDEX, detections);
@@ -478,9 +510,13 @@ export const pauseSignificantEvents = async (ctx: DemoContext): Promise<void> =>
 };
 
 /** Removes the demo source and the demo detections and events. Logs stay; they are time-bounded. */
-export const cleanDemoData = async (ctx: DemoContext): Promise<void> => {
+export const cleanDemoData = async (
+  ctx: DemoContext,
+  cleanSource: (source: DemoSource) => Promise<void>
+): Promise<void> => {
   const sources = (await listDemoSources(ctx)).filter(({ title }) => title === DEMO_SOURCE_TITLE);
   for (const source of sources) {
+    await cleanSource({ id: source.id, viewName: source.view_name, streamName: '' });
     const queryIds = DEMO_QUERIES.map((query) => deterministicId(source.id, query.title, 'query'));
     await kibanaRequest(ctx.connection, 'POST', '/internal/streams/queries/_bulk_delete', {
       queryIds,
