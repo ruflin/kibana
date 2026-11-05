@@ -20,6 +20,9 @@ jest.mock('./visualize_vega', () => ({
 jest.mock('./visualize_custom_content', () => ({
   VisualizeCustomContent: () => <span data-test-subj="custom-content-renderer" />,
 }));
+jest.mock('./visualize_svg', () => ({
+  VisualizeSvg: () => <span data-test-subj="svg-renderer" />,
+}));
 
 const services = {} as VisualizationServices;
 
@@ -32,6 +35,7 @@ const cases: Array<[string, VisualizationRenderer | undefined, string]> = [
   ['lens', 'lens', 'lens-renderer'],
   ['vega', 'vega', 'vega-renderer'],
   ['custom content', 'custom_content', 'custom-content-renderer'],
+  ['svg', 'svg', 'svg-renderer'],
   ['no renderer (legacy attachment)', undefined, 'lens-renderer'],
 ];
 

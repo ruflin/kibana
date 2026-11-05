@@ -17,3 +17,9 @@ export const DEFAULT_TIME_RANGE = { from: 'now-24h', to: 'now' } as const;
  * unbounded-string DoS vector.
  */
 export const MAX_VEGA_SPEC_LENGTH = 100_000;
+
+/**
+ * Upper bound for a serialized SVG document, for the same reason as {@link MAX_VEGA_SPEC_LENGTH}:
+ * the markup is stored in the attachment and parsed on every validation.
+ */
+export const MAX_SVG_LENGTH = 100_000;

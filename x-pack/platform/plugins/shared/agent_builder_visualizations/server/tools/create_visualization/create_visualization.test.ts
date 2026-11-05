@@ -1165,3 +1165,117 @@ describe('createVisualizationTool handler', () => {
     });
   });
 });
+
+describe('createVisualizationTool svg handler', () => {
+  const DRAWING = '<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="#0061a6"/></svg>';
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSelectDefaultTimeRange.mockResolvedValue(undefined);
+  });
+
+  it('persists a static svg without generating or running any query', async () => {
+    const { result, attachments } = await runHandler({
+      query: 'architecture diagram',
+      target: { type: 'svg', svg: DRAWING },
+    });
+
+    expect(mockBuildLens).not.toHaveBeenCalled();
+    expect(mockBuildVega).not.toHaveBeenCalled();
+    expect(mockGenerateEsql).not.toHaveBeenCalled();
+    expect(attachments.add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: VISUALIZATION_ATTACHMENT_TYPE,
+        data: {
+          renderer: 'svg',
+          query: 'architecture diagram',
+          visualization: { svg: expect.stringContaining('<rect') },
+        },
+      })
+    );
+
+    const [{ type, data }] = result.results;
+    expect(type).toBe(ToolResultType.visualization);
+    expect(data.renderer).toBe('svg');
+    expect(data.attachment_id).toBe('att-new');
+    // The markup stays in the attachment, not the tool result.
+    expect(data.visualization).toEqual({ prompt: 'architecture diagram' });
+    expect(data.svg).toBeUndefined();
+  });
+
+  it('rejects markup containing a script and persists nothing', async () => {
+    const { result, attachments } = await runHandler({
+      query: 'architecture diagram',
+      target: { type: 'svg', svg: '<svg><script>alert(1)</script></svg>' },
+    });
+
+    expect(attachments.add).not.toHaveBeenCalled();
+    const [{ type, data }] = result.results;
+    expect(type).toBe(ToolResultType.error);
+    expect(data.message).toContain('The SVG was rejected: <script> is not allowed');
+  });
+
+  it('keeps the stored drawing when an svg attachment is edited without new markup', async () => {
+    const attachments = createAttachments();
+    attachments.getAttachmentRecord.mockReturnValue({
+      id: 'existing',
+      type: VISUALIZATION_ATTACHMENT_TYPE,
+      current_version: 1,
+      versions: [
+        {
+          version: 1,
+          data: { renderer: 'svg', query: 'old diagram', visualization: { svg: DRAWING } },
+        },
+      ],
+    });
+
+    const { result } = await runHandler(
+      { query: 'architecture diagram', target: attachmentTarget('existing') },
+      { attachments }
+    );
+
+    expect(attachments.update).toHaveBeenCalledWith(
+      'existing',
+      expect.objectContaining({
+        data: expect.objectContaining({
+          renderer: 'svg',
+          visualization: { svg: expect.stringContaining('<rect') },
+        }),
+      })
+    );
+    expect(result.results[0].data.renderer).toBe('svg');
+  });
+
+  it('rejects svg markup on an attachment that does not render as svg', async () => {
+    const attachments = createAttachments();
+    attachments.getAttachmentRecord.mockReturnValue({
+      id: 'existing',
+      type: VISUALIZATION_ATTACHMENT_TYPE,
+      current_version: 1,
+      versions: [
+        {
+          version: 1,
+          data: {
+            renderer: 'vega',
+            query: 'old query',
+            visualization: { spec: '{"old":true}' },
+            esql: 'FROM old',
+          },
+        },
+      ],
+    });
+
+    const { result } = await runHandler(
+      {
+        query: 'flows',
+        target: { type: 'attachment', attachment_id: 'existing', svg: DRAWING },
+      },
+      { attachments }
+    );
+
+    expect(attachments.update).not.toHaveBeenCalled();
+    const [{ type, data }] = result.results;
+    expect(type).toBe(ToolResultType.error);
+    expect(data.message).toContain('"svg" is only valid for an SVG visualization');
+  });
+});

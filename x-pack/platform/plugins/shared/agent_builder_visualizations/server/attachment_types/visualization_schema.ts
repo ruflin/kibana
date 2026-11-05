@@ -5,8 +5,8 @@
  * 2.0.
  */
 
-import { z } from '@kbn/zod/v4';
-import { MAX_VEGA_SPEC_LENGTH } from '@kbn/agent-builder-visualizations-common';
+import { z, lazySchema } from '@kbn/zod/v4';
+import { MAX_SVG_LENGTH, MAX_VEGA_SPEC_LENGTH } from '@kbn/agent-builder-visualizations-common';
 import {
   CUSTOM_CONTENT_MAX_TEMPLATE_SCHEMA_LENGTH,
   CUSTOM_CONTENT_MAX_TEMPLATE_BYTES,
@@ -14,6 +14,7 @@ import {
   CUSTOM_CONTENT_MAX_HEIGHT,
   CUSTOM_CONTENT_SCRIPT_PATTERN,
 } from '@kbn/custom-content-common';
+import { validateSvgMarkup } from '../svg/validate_svg';
 
 export { MAX_VEGA_SPEC_LENGTH };
 
@@ -93,11 +94,33 @@ const customContentVisualizationSchema = z.object({
 });
 
 /**
+ * A static SVG payload. The markup is checked with the same validator the tool runs, so a stored
+ * attachment can never hold a script, a foreignObject or an external reference, whichever path
+ * wrote it.
+ */
+const svgVisualizationSchema = lazySchema(() =>
+  z.object({
+    renderer: z.literal('svg'),
+    query: z.string().max(2048),
+    visualization: z
+      .object({
+        svg: z.string().min(1).max(MAX_SVG_LENGTH),
+      })
+      .check((ctx) => {
+        const result = validateSvgMarkup(ctx.value.svg);
+        if (!result.valid) {
+          ctx.issues.push({ code: 'custom', message: result.reason, input: ctx.value });
+        }
+      }),
+    time_range: timeRangeSchema.optional(),
+  })
+);
+
+/**
  * Runtime validation for visualization attachment data; the matching type contract is
  * `VisualizationAttachmentData`. A union rather than conditional refinements, so the parser
  * enforces the same per-renderer guarantees the type expresses.
  */
-export const visualizationAttachmentDataSchema = z.union([
-  customContentVisualizationSchema,
-  chartVisualizationSchema,
-]);
+export const visualizationAttachmentDataSchema = lazySchema(() =>
+  z.union([customContentVisualizationSchema, chartVisualizationSchema, svgVisualizationSchema])
+);

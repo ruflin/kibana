@@ -184,4 +184,50 @@ describe('visualizationAttachmentDataSchema', () => {
       expect(result.success).toBe(false);
     });
   });
+
+  describe('svg', () => {
+    const DRAWING = '<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="#0061a6"/></svg>';
+
+    it('accepts a static svg attachment with no esql', () => {
+      const result = visualizationAttachmentDataSchema.safeParse({
+        renderer: 'svg',
+        query: 'architecture diagram',
+        visualization: { svg: DRAWING },
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects an svg attachment whose markup contains a script', () => {
+      const result = visualizationAttachmentDataSchema.safeParse({
+        renderer: 'svg',
+        query: 'architecture diagram',
+        visualization: { svg: '<svg><script>alert(1)</script></svg>' },
+      });
+
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects an svg attachment whose markup references an external resource', () => {
+      const result = visualizationAttachmentDataSchema.safeParse({
+        renderer: 'svg',
+        query: 'architecture diagram',
+        visualization: {
+          svg: '<svg><rect width="1" height="1" fill="url(https://evil.example/a.svg#x)"/></svg>',
+        },
+      });
+
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects an svg attachment with no svg string', () => {
+      const result = visualizationAttachmentDataSchema.safeParse({
+        renderer: 'svg',
+        query: 'architecture diagram',
+        visualization: {},
+      });
+
+      expect(result.success).toBe(false);
+    });
+  });
 });

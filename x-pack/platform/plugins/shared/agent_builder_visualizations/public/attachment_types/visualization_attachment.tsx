@@ -39,7 +39,9 @@ export const createVisualizationAttachmentDefinition = (
 ): AttachmentUIDefinition<VisualizationAttachment> => {
   return {
     getLabel: (attachment: VisualizationAttachment): string => {
-      const { title } = attachment.data.visualization ?? {};
+      // Typed as a record: only some renderers carry a title, and the payload union reflects that.
+      const visualization: Record<string, unknown> = attachment.data.visualization ?? {};
+      const { title } = visualization;
       return typeof title === 'string' && title.length > 0 ? title : defaultVisualizationLabel;
     },
     getIcon: () => 'productLens',
