@@ -16,7 +16,7 @@ import { searchParamNames } from '../../../search_param_names';
 
 const labels = {
   chatInfo: i18n.translate('xpack.agentBuilder.chatInfoButton.label', {
-    defaultMessage: 'Conversation info',
+    defaultMessage: 'Conversation summary',
   }),
 };
 

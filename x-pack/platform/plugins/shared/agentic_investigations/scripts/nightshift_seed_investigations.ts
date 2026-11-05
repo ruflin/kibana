@@ -1359,7 +1359,7 @@ run(
       Each one is an Agent Builder conversation on the investigation template with its subject,
       impact, and hypotheses documents attached by reference, and its proposed actions created
       through the proposals gate workflow. No AI connector or agent run is needed. Open the
-      printed links and use "Conversation info" to see the investigation overview. Re-running replaces
+      printed links and use "Conversation summary" to see the investigation overview. Re-running replaces
       the earlier seeds; --clean only removes them.`,
     flags: {
       string: ['es-url', 'kibana-url', 'auth', 'kibana-system-auth'],
