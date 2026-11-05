@@ -32,7 +32,7 @@ const copyLinkLabel = i18n.translate('xpack.nightshift.investigations.cardCopyLi
 });
 
 const openInChatLabel = i18n.translate('xpack.nightshift.investigations.cardOpenInChatLabel', {
-  defaultMessage: 'Open in chat',
+  defaultMessage: 'Open in conversation',
 });
 
 const openMenuLabel = i18n.translate('xpack.nightshift.investigations.cardOpenMenuLabel', {

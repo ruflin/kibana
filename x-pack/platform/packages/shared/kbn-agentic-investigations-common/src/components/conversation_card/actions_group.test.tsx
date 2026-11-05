@@ -63,7 +63,7 @@ describe('ConversationsActionsGroup', () => {
     it('offers opening the chat, which is navigation rather than a decision', () => {
       const { onOpenChat } = renderGroup(makeInvestigation());
 
-      fireEvent.click(screen.getByRole('button', { name: 'Open in chat' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Open in conversation' }));
 
       expect(onOpenChat).toHaveBeenCalled();
     });
@@ -82,7 +82,7 @@ describe('ConversationsActionsGroup', () => {
       const { onOpenChat } = renderGroup(makeInvestigation(), {
         canOpenInvestigationDetails: false,
       });
-      const chatButton = screen.getByRole('button', { name: 'Open in chat' });
+      const chatButton = screen.getByRole('button', { name: 'Open in conversation' });
 
       fireEvent.click(chatButton);
       fireEvent.mouseOver(chatButton);
@@ -102,7 +102,7 @@ describe('ConversationsActionsGroup', () => {
     it('keeps opening the chat available on a decided investigation', () => {
       const { onOpenChat } = renderGroup(makeInvestigation({ recommendedAction: 'closed' }));
 
-      fireEvent.click(screen.getByRole('button', { name: 'Open in chat' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Open in conversation' }));
 
       expect(onOpenChat).toHaveBeenCalled();
     });
@@ -121,7 +121,7 @@ describe('ConversationsActionsGroup', () => {
       renderGroup(makeInvestigation());
       openMenu();
 
-      expect(screen.queryByText('Open in chat')).not.toBeInTheDocument();
+      expect(screen.queryByText('Open in conversation')).not.toBeInTheDocument();
     });
 
     it('drops close on a decided investigation', () => {

@@ -226,7 +226,7 @@ describe('resolveServices', () => {
     const { deps } = createDeps();
 
     await expect(resolveServices(deps)).rejects.toThrow(
-      'No connector available for chat execution'
+      'No connector available for conversation execution'
     );
   });
 

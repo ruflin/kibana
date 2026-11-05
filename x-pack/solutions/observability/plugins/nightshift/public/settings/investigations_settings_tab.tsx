@@ -85,7 +85,7 @@ export const InvestigationsSettingsTab = ({
                 <p>
                   {i18n.translate('xpack.nightshift.settings.customContextDescription', {
                     defaultMessage:
-                      'Notes that Nightshift adds to its system prompt for every investigation and chat in this space',
+                      'Notes that Nightshift adds to its system prompt for every investigation and conversation in this space',
                   })}
                 </p>
               }

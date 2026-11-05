@@ -36,7 +36,7 @@ const ACTIONS_LABEL = i18n.translate('xpack.nightshift.detectionDetailsFlyout.ac
 });
 const OPEN_IN_CHAT_LABEL = i18n.translate(
   'xpack.nightshift.detectionDetailsFlyout.openInChatLabel',
-  { defaultMessage: 'Open in chat' }
+  { defaultMessage: 'Open in conversation' }
 );
 const DETAILS_TITLE = i18n.translate('xpack.nightshift.detectionDetailsFlyout.detailsTitle', {
   defaultMessage: 'Details',

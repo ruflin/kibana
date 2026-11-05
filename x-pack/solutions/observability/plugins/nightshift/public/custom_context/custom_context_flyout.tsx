@@ -318,7 +318,7 @@ export function CustomContextSnippets({
           <p>
             {i18n.translate('xpack.nightshift.customContext.emptyBody', {
               defaultMessage:
-                'Share investigation conventions, service ownership, or known quirks of your environment. Nightshift takes them into account in every investigation and chat in this space.',
+                'Share investigation conventions, service ownership, or known quirks of your environment. Nightshift takes them into account in every investigation and conversation in this space.',
             })}
           </p>
         }
@@ -418,7 +418,7 @@ export function CustomContextFlyout({
           <p>
             {i18n.translate('xpack.nightshift.customContext.description', {
               defaultMessage:
-                'Notes that Nightshift adds to its system prompt for every investigation and chat in this space.',
+                'Notes that Nightshift adds to its system prompt for every investigation and conversation in this space.',
             })}
           </p>
         </EuiText>

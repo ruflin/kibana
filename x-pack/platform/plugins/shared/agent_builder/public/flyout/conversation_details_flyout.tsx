@@ -37,7 +37,7 @@ import { flyoutMenuRowStyles } from './flyout_menu_row_styles';
 import { getConversationDetailsFlyoutWidthProps } from './conversation_details_flyout_width';
 
 export const FLYOUT_TITLE = i18n.translate('xpack.agentBuilder.conversationDetailsFlyout.title', {
-  defaultMessage: 'Chat info',
+  defaultMessage: 'Conversation info',
 });
 
 const ERROR_BODY = i18n.translate('xpack.agentBuilder.conversationDetailsFlyout.errorBody', {

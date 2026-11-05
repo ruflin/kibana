@@ -73,13 +73,13 @@ export const EventSentence: React.FC<EventSentenceProps> = ({
       return templateName ? (
         <FormattedMessage
           id="xpack.agentBuilder.activityLog.conversationCreatedFromTemplate"
-          defaultMessage="{actor} created this chat from {template}"
+          defaultMessage="{actor} created this conversation from {template}"
           values={{ actor: actorNode, template: <Highlight>{templateName}</Highlight> }}
         />
       ) : (
         <FormattedMessage
           id="xpack.agentBuilder.activityLog.conversationCreated"
-          defaultMessage="{actor} created this chat"
+          defaultMessage="{actor} created this conversation"
           values={{ actor: actorNode }}
         />
       );
@@ -87,7 +87,7 @@ export const EventSentence: React.FC<EventSentenceProps> = ({
       return (
         <FormattedMessage
           id="xpack.agentBuilder.activityLog.titleUpdated"
-          defaultMessage="{actor} changed the title of the chat to {title}"
+          defaultMessage="{actor} changed the title of the conversation to {title}"
           values={{ actor: actorNode, title: <Highlight>{event.data.title}</Highlight> }}
         />
       );

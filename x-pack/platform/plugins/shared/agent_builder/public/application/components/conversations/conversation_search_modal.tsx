@@ -33,11 +33,11 @@ import { NoConversationsPrompt } from './embeddable_conversation_header/no_conve
 
 const labels = {
   title: i18n.translate('xpack.agentBuilder.conversationSearchModal.title', {
-    defaultMessage: 'Search chats',
+    defaultMessage: 'Search conversations',
   }),
   searchPlaceholder: i18n.translate(
     'xpack.agentBuilder.conversationSearchModal.searchPlaceholder',
-    { defaultMessage: 'Search chats' }
+    { defaultMessage: 'Search conversations' }
   ),
 };
 

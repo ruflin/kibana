@@ -462,7 +462,7 @@ export const AgentForm: React.FC<AgentFormProps> = ({ editingAgentId, onDelete }
           })}
         >
           {i18n.translate('xpack.agentBuilder.agents.form.chatButton', {
-            defaultMessage: 'Chat',
+            defaultMessage: 'Start conversation',
           })}
         </EuiButton>
       ) : (
@@ -477,7 +477,7 @@ export const AgentForm: React.FC<AgentFormProps> = ({ editingAgentId, onDelete }
           })}
         >
           {i18n.translate('xpack.agentBuilder.agents.form.saveAndChatButton', {
-            defaultMessage: 'Save and chat',
+            defaultMessage: 'Save and start conversation',
           })}
         </EuiButton>
       );
@@ -685,7 +685,7 @@ export const AgentForm: React.FC<AgentFormProps> = ({ editingAgentId, onDelete }
                           })}
                         >
                           {i18n.translate('xpack.agentBuilder.agents.form.saveAndChatButton', {
-                            defaultMessage: 'Save and chat',
+                            defaultMessage: 'Save and start conversation',
                           })}
                         </EuiContextMenuItem>,
                       ]}

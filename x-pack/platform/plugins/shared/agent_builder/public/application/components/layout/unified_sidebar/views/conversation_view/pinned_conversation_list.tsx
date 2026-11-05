@@ -25,7 +25,7 @@ import { DROPPABLE_IDS } from './droppable_ids';
 import { DraggableConversationItem } from './draggable_conversation_item';
 
 const dragToPinLabel = i18n.translate('xpack.agentBuilder.sidebar.pinned.dragToPin', {
-  defaultMessage: 'Drag a chat here to pin it',
+  defaultMessage: 'Drag a conversation here to pin it',
 });
 
 const scrollContainerStyle = css`

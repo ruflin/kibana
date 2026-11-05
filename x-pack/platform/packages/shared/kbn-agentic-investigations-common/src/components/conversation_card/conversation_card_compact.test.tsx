@@ -102,7 +102,7 @@ describe('ConversationCardCompact', () => {
 
     expect(onClickCard).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Rotate the Stripe key' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open in chat' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open in conversation' })).toBeDisabled();
     expect(
       screen.getByRole('button', {
         name: ACTIONS_TRANSLATIONS.tooltips.proposalsAgentBuilderPrivilegeRequired,
@@ -113,7 +113,9 @@ describe('ConversationCardCompact', () => {
   it('leaves the keyboard to the nested controls, which the row would otherwise swallow', () => {
     const { onClickCard } = renderRow();
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Open in chat' }), { key: 'Enter' });
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Open in conversation' }), {
+      key: 'Enter',
+    });
 
     expect(onClickCard).not.toHaveBeenCalled();
   });

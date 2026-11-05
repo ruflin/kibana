@@ -84,26 +84,26 @@ const ACTIONS_LABEL = i18n.translate('xpack.nightshift.flyout.actionsButtonLabel
 const OPEN_INVESTIGATION_CHAT_LABEL = i18n.translate(
   'xpack.nightshift.flyout.openInvestigationChatButtonLabel',
   {
-    defaultMessage: 'Open investigation in chat',
+    defaultMessage: 'Open investigation in conversation',
   }
 );
 const NEW_CHAT_ITEM_LABEL = i18n.translate(
   'xpack.nightshift.flyout.openInChatNewConversationItem',
   {
-    defaultMessage: 'New chat about this event',
+    defaultMessage: 'New conversation about this event',
   }
 );
 const INVESTIGATION_CHAT_UNAVAILABLE_LABEL = i18n.translate(
   'xpack.nightshift.flyout.openInChatInvestigationUnavailable',
   {
-    defaultMessage: 'Investigation chat is still loading',
+    defaultMessage: 'Investigation conversation is still loading',
   }
 );
 const IN_PROGRESS_CHAT_TOOLTIP = i18n.translate(
   'xpack.nightshift.flyout.openInChatInProgressTooltip',
   {
     defaultMessage:
-      'An investigation is still running. You can start a new chat about this significant event.',
+      'An investigation is still running. You can start a new conversation about this significant event.',
   }
 );
 const RUN_INVESTIGATION_LABEL = i18n.translate(

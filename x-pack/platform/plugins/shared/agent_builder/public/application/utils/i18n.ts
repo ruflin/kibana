@@ -32,7 +32,7 @@ export const labels = {
   },
   conversations: {
     title: i18n.translate('xpack.agentBuilder.conversations.title', {
-      defaultMessage: 'Agent Chat',
+      defaultMessage: 'Agent Conversations',
     }),
     staleCheckPartialFailureTitle: i18n.translate(
       'xpack.agentBuilder.conversations.staleCheckPartialFailureTitle',
@@ -1221,7 +1221,7 @@ export const labels = {
       defaultMessage: 'Create a skill',
     }),
     createFromChatButton: i18n.translate('xpack.agentBuilder.agentSkills.createFromChatButton', {
-      defaultMessage: 'Create from chat',
+      defaultMessage: 'Create from conversation',
     }),
     searchActiveSkillsPlaceholder: i18n.translate(
       'xpack.agentBuilder.agentSkills.searchActiveSkillsPlaceholder',
@@ -3048,20 +3048,20 @@ export const labels = {
         values: { serviceAccountId },
       }),
     chatForbiddenTitle: i18n.translate('xpack.agentBuilder.executionIdentity.chatForbiddenTitle', {
-      defaultMessage: 'You cannot chat with this agent',
+      defaultMessage: 'You cannot start a conversation with this agent',
     }),
     chatForbiddenDescription: i18n.translate(
       'xpack.agentBuilder.executionIdentity.chatForbiddenDescription',
       {
         defaultMessage:
-          'This agent runs as a service account. Chatting with it requires the Agent Builder privilege "Chat with agents that run as a service account".',
+          'This agent runs as a service account. Starting a conversation with it requires the Agent Builder privilege "Chat with agents that run as a service account".',
       }
     ),
     chatForbiddenPlaceholder: i18n.translate(
       'xpack.agentBuilder.executionIdentity.chatForbiddenPlaceholder',
       {
         defaultMessage:
-          "You don't have permission to chat with agents that run as a service account.",
+          "You don't have permission to start conversations with agents that run as a service account.",
       }
     ),
   },

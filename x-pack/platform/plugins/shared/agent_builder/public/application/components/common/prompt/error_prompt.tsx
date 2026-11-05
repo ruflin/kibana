@@ -70,7 +70,7 @@ const ERROR_DETAILS_MAPPINGS: Record<ErrorPromptType, ErrorDetails> = {
     }),
     description: i18n.translate('xpack.agentBuilder.access.prompt.addLlm.description', {
       defaultMessage:
-        'Select a model to integrate with your chat experience. You can also set up your connection.',
+        'Select a model to integrate with your conversation experience. You can also set up your connection.',
     }),
   },
 };

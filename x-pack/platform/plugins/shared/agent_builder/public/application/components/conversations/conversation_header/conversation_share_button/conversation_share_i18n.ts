@@ -14,7 +14,7 @@ export const shareLabel = i18n.translate('xpack.agentBuilder.conversationSharing
 export const shareThisChatLabel = i18n.translate(
   'xpack.agentBuilder.conversationSharing.shareThisChat',
   {
-    defaultMessage: 'Share this chat',
+    defaultMessage: 'Share this conversation',
   }
 );
 
@@ -47,12 +47,12 @@ export const publicLabel = i18n.translate('xpack.agentBuilder.conversationSharin
 export const restrictedHelpLabel = i18n.translate(
   'xpack.agentBuilder.conversationSharing.restrictedHelp',
   {
-    defaultMessage: 'Only manually added members can see this chat',
+    defaultMessage: 'Only manually added members can see this conversation',
   }
 );
 
 export const publicHelpLabel = i18n.translate('xpack.agentBuilder.conversationSharing.publicHelp', {
-  defaultMessage: 'Any user can see and join this chat',
+  defaultMessage: 'Any user can see and join this conversation',
 });
 
 export const inviteUsersLabel = i18n.translate(
@@ -68,14 +68,14 @@ export const addUsersLabel = i18n.translate('xpack.agentBuilder.conversationShar
 
 export const usersSectionTitle = (count: number) =>
   i18n.translate('xpack.agentBuilder.conversationSharing.usersSectionTitle', {
-    defaultMessage: 'In this chat ({count})',
+    defaultMessage: 'In this conversation ({count})',
     values: { count },
   });
 
 export const agentAccessHelpLabel = (agentName: string) =>
   i18n.translate('xpack.agentBuilder.conversationSharing.agentAccessHelp', {
     defaultMessage:
-      'Search results display all users, but only users with access to {agentName} can see this chat.',
+      'Search results display all users, but only users with access to {agentName} can see this conversation.',
     values: { agentName },
   });
 

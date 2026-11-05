@@ -297,7 +297,7 @@ export function EntityFlyout({
                   })}
                 >
                   {i18n.translate('xpack.nightshift.entityFlyout.openInChatButtonLabel', {
-                    defaultMessage: 'Open in chat',
+                    defaultMessage: 'Open in conversation',
                   })}
                 </AiButton>
               </EuiFlexItem>
@@ -310,7 +310,7 @@ export function EntityFlyout({
             >
               {i18n.translate('xpack.nightshift.entityFlyout.chatUnavailableDescription', {
                 defaultMessage:
-                  'Open in chat is unavailable for stream-level entities without Knowledge Indicator features.',
+                  'Open in conversation is unavailable for stream-level entities without Knowledge Indicator features.',
               })}
             </EuiText>
           )}
