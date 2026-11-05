@@ -163,7 +163,7 @@ export const resolveServices = async ({
   }
 
   if (!selectedConnectorId) {
-    throw new Error('No connector available for chat execution');
+    throw new Error('No connector available for conversation execution');
   }
 
   const resolvedReasoningLevel =

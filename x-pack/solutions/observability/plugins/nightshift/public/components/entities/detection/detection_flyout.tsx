@@ -342,7 +342,7 @@ export function DetectionFlyout({
                   })}
                 >
                   {i18n.translate('xpack.nightshift.detectionFlyout.openInChatButtonLabel', {
-                    defaultMessage: 'Open in chat',
+                    defaultMessage: 'Open in conversation',
                   })}
                 </AiButton>
               </EuiFlexItem>

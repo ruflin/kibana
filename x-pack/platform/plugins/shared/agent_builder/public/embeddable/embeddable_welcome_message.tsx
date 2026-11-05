@@ -93,7 +93,7 @@ export const EmbeddableWelcomeMessage = () => {
         {hasAccessToGenAiSettings ? (
           <FormattedMessage
             id="xpack.agentBuilder.welcomeMessage.contentAdvanced"
-            defaultMessage="Based on the new <strong>Agent Builder</strong> platform, <strong>AI Agent</strong> is the new agentic chat experience for this space. Learn more in our {documentationLink} or switch back to the default experience in the {genAiSettingsLink}."
+            defaultMessage="Based on the new <strong>Agent Builder</strong> platform, <strong>AI Agent</strong> is the new agentic conversation experience for this space. Learn more in our {documentationLink} or switch back to the default experience in the {genAiSettingsLink}."
             values={{
               strong: (chunks: React.ReactNode) => <strong>{chunks}</strong>,
               documentationLink,
@@ -103,7 +103,7 @@ export const EmbeddableWelcomeMessage = () => {
         ) : (
           <FormattedMessage
             id="xpack.agentBuilder.welcomeMessage.content"
-            defaultMessage="Based on the new <strong>Agent Builder</strong> platform, <strong>AI Agent</strong> is the new agentic chat experience for this space. Learn more in our {documentationLink}."
+            defaultMessage="Based on the new <strong>Agent Builder</strong> platform, <strong>AI Agent</strong> is the new agentic conversation experience for this space. Learn more in our {documentationLink}."
             values={{
               strong: (chunks: React.ReactNode) => <strong>{chunks}</strong>,
               documentationLink,

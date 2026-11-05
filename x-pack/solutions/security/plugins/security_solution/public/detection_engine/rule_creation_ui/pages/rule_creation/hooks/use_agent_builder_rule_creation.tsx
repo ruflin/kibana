@@ -320,13 +320,13 @@ export const useAgentBuilderRuleCreation = ({
           addWarning({
             title: i18n.translate(
               'xpack.securitySolution.detectionEngine.createRule.aiRuleCreationSyncFailedTitle',
-              { defaultMessage: 'Rule edits are not syncing to the chat' }
+              { defaultMessage: 'Rule edits are not syncing to the conversation' }
             ),
             text: i18n.translate(
               'xpack.securitySolution.detectionEngine.createRule.aiRuleCreationSyncFailedText',
               {
                 defaultMessage:
-                  'The rule form could not be shared with the AI chat. Your rule is unaffected, but the chat may show an outdated version.',
+                  'The rule form could not be shared with the AI conversation. Your rule is unaffected, but the conversation may show an outdated version.',
               }
             ),
           });

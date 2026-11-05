@@ -9,19 +9,19 @@ import { i18n } from '@kbn/i18n';
 
 export const labels = {
   flyoutTitle: i18n.translate('xpack.agentBuilder.conversationMetadataFlyout.title', {
-    defaultMessage: 'Chat details',
+    defaultMessage: 'Conversation details',
   }),
   close: i18n.translate('xpack.agentBuilder.conversationMetadataFlyout.close', {
-    defaultMessage: 'Close chat details',
+    defaultMessage: 'Close conversation details',
   }),
   title: i18n.translate('xpack.agentBuilder.conversationMetadataFlyout.chatTitle', {
     defaultMessage: 'Title',
   }),
   titleInput: i18n.translate('xpack.agentBuilder.conversationMetadataFlyout.chatTitleInput', {
-    defaultMessage: 'Chat title',
+    defaultMessage: 'Conversation title',
   }),
   renameError: i18n.translate('xpack.agentBuilder.conversationMetadataFlyout.renameError', {
-    defaultMessage: 'Failed to rename chat',
+    defaultMessage: 'Failed to rename conversation',
   }),
   author: i18n.translate('xpack.agentBuilder.conversationMetadataFlyout.author', {
     defaultMessage: 'Author',

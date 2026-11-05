@@ -36,9 +36,21 @@ import { useAgentBuilderServices } from '../application/hooks/use_agent_builder_
 import { flyoutMenuRowStyles } from './flyout_menu_row_styles';
 import { getConversationDetailsFlyoutWidthProps } from './conversation_details_flyout_width';
 
-export const FLYOUT_TITLE = i18n.translate('xpack.agentBuilder.conversationDetailsFlyout.title', {
-  defaultMessage: 'Chat info',
-});
+/** Title of the template-backed flyout opened from the Chat info button. */
+export const FLYOUT_TITLE = i18n.translate(
+  'xpack.agentBuilder.conversationDetailsFlyout.summaryTitle',
+  {
+    defaultMessage: 'Conversation summary',
+  }
+);
+
+/** Title of the snapshot flyout opened through openConversationDetailsFlyout. */
+export const SNAPSHOT_FLYOUT_TITLE = i18n.translate(
+  'xpack.agentBuilder.conversationDetailsFlyout.title',
+  {
+    defaultMessage: 'Conversation info',
+  }
+);
 
 const ERROR_BODY = i18n.translate('xpack.agentBuilder.conversationDetailsFlyout.errorBody', {
   defaultMessage: 'Something went wrong while loading this conversation.',

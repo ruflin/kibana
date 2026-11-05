@@ -119,9 +119,11 @@ const columnNames = {
 };
 
 const actionLabels = {
-  chat: i18n.translate('xpack.agentBuilder.agents.actions.chat', { defaultMessage: 'Chat' }),
+  chat: i18n.translate('xpack.agentBuilder.agents.actions.chat', {
+    defaultMessage: 'Start conversation',
+  }),
   chatDescription: i18n.translate('xpack.agentBuilder.agents.actions.chatDescription', {
-    defaultMessage: 'Chat with agent',
+    defaultMessage: 'Start conversation with agent',
   }),
   edit: i18n.translate('xpack.agentBuilder.agents.actions.edit', { defaultMessage: 'Edit' }),
   editDescription: i18n.translate('xpack.agentBuilder.agents.actions.editDescription', {

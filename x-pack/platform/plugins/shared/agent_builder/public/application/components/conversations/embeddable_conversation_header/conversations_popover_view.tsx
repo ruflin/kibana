@@ -28,11 +28,11 @@ import { EmbeddableConversationList } from './embeddable_conversation_list';
 
 const labels = {
   newChat: i18n.translate('xpack.agentBuilder.embeddableConversationsView.newChat', {
-    defaultMessage: 'New chat',
+    defaultMessage: 'New conversation',
   }),
   searchPlaceholder: i18n.translate(
     'xpack.agentBuilder.embeddableConversationsView.searchPlaceholder',
-    { defaultMessage: 'Search chats' }
+    { defaultMessage: 'Search conversations' }
   ),
   availableAgents: i18n.translate(
     'xpack.agentBuilder.embeddableConversationsView.availableAgents',

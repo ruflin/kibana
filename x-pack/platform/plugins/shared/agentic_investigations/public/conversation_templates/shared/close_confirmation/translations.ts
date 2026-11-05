@@ -85,7 +85,7 @@ export const CLOSE_ESCALATION_NO_PROPOSALS_WARNING = i18n.translate(
   'xpack.agenticInvestigations.closeConfirmation.escalation.noProposalsWarning',
   {
     defaultMessage:
-      'Closing the escalation will also close its linked investigations and their chats.',
+      'Closing the escalation will also close its linked investigations and their conversations.',
   }
 );
 

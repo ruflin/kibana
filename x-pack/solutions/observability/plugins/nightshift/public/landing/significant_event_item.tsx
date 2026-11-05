@@ -149,14 +149,14 @@ export function SignificantEventItem({
                 <EuiFlexItem grow={false}>
                   <EuiToolTip
                     content={i18n.translate('xpack.nightshift.event.openInChatTooltip', {
-                      defaultMessage: 'Open in chat',
+                      defaultMessage: 'Open in conversation',
                     })}
                   >
                     <AiButtonIcon
                       aria-label={i18n.translate(
                         'xpack.nightshift.event.openInChatButtonAriaLabel',
                         {
-                          defaultMessage: 'Open {eventTitle} in chat',
+                          defaultMessage: 'Open {eventTitle} in conversation',
                           values: { eventTitle: event.title },
                         }
                       )}

@@ -192,7 +192,7 @@ describe('ConversationShareButton', () => {
     await openFlyout();
 
     expect(screen.getByTestId('agentBuilderConversationSharingFlyout')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'In this chat (2)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'In this conversation (2)' })).toBeInTheDocument();
     expect(
       screen.queryByTestId('agentBuilderConversationSharingInviteSection')
     ).not.toBeInTheDocument();
@@ -229,18 +229,22 @@ describe('ConversationShareButton', () => {
 
     await openFlyout();
     expect(screen.getByTestId('agentBuilderConversationSharingFlyout')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 3, name: 'Share this chat' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 3, name: 'Share this conversation' })
+    ).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'General access' })).toBeInTheDocument();
     expect(
       screen.getByTestId('agentBuilderConversationSharingAccessModeSelect')
     ).toHaveAccessibleName(expect.stringContaining('General access'));
     expect(screen.getByRole('heading', { name: 'Invite users' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'In this chat (2)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'In this conversation (2)' })).toBeInTheDocument();
     expect(screen.getByText('Ethan Smith')).toBeInTheDocument();
     expect(screen.getByText('Alex Kim')).toBeInTheDocument();
     expect(screen.getByText('Author')).toBeInTheDocument();
     expect(screen.queryByText('Member')).not.toBeInTheDocument();
-    expect(screen.getByText('Only manually added members can see this chat')).toBeInTheDocument();
+    expect(
+      screen.getByText('Only manually added members can see this conversation')
+    ).toBeInTheDocument();
   });
 
   it('orders current members alphabetically by display name', async () => {
@@ -321,7 +325,7 @@ describe('ConversationShareButton', () => {
     expect(memberRows).toHaveLength(1);
     expect(memberRows[0]).toHaveTextContent('Ethan Smith');
     expect(memberRows[0]).toHaveTextContent('Author');
-    expect(screen.getByRole('heading', { name: 'In this chat (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'In this conversation (1)' })).toBeInTheDocument();
   });
 
   it('saves public access with no ACL entries', async () => {
@@ -348,7 +352,7 @@ describe('ConversationShareButton', () => {
       fireEvent.click(screen.getByTestId('agentBuilderConversationSharingAccessModeSelect'));
     });
 
-    expect(screen.getByText('Any user can see and join this chat')).toBeInTheDocument();
+    expect(screen.getByText('Any user can see and join this conversation')).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(screen.getByText('Public'));
@@ -460,7 +464,7 @@ describe('ConversationShareButton', () => {
         { type: 'user', id: 'member-2', role: ConversationAccessControlRole.Member },
       ],
     });
-    expect(screen.getByRole('heading', { name: 'In this chat (3)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'In this conversation (3)' })).toBeInTheDocument();
     expect(addButton).toBeDisabled();
   });
 
@@ -505,7 +509,7 @@ describe('ConversationShareButton', () => {
         'agentBuilderConversationSharingAgentAccessWarning'
       )
     ).toHaveTextContent(
-      'Search results display all users, but only users with access to Support agent can see this chat.'
+      'Search results display all users, but only users with access to Support agent can see this conversation.'
     );
   });
 });

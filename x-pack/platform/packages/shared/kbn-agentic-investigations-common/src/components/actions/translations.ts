@@ -17,7 +17,7 @@ export const ACTIONS_TRANSLATIONS = Object.freeze({
       defaultMessage: 'Actions',
     }),
     openInChat: i18n.translate('xpack.agenticInvestigations.baseActions.openInChat', {
-      defaultMessage: 'Open in chat',
+      defaultMessage: 'Open in conversation',
     }),
     openEscalation: i18n.translate('xpack.agenticInvestigations.baseActions.openEscalation', {
       defaultMessage: 'Open an escalation',
@@ -46,13 +46,13 @@ export const ACTIONS_TRANSLATIONS = Object.freeze({
       defaultMessage: 'Open actions menu',
     }),
     openInChat: i18n.translate('xpack.agenticInvestigations.baseActions.tooltips.openInChat', {
-      defaultMessage: 'Open in chat',
+      defaultMessage: 'Open in conversation',
     }),
     proposalsAgentBuilderPrivilegeRequired: i18n.translate(
       'xpack.agenticInvestigations.baseActions.tooltips.proposalsAgentBuilderPrivilegeRequired',
       {
         defaultMessage:
-          'You need the Agent Builder Kibana privilege to execute actions and view investigations or chats.',
+          'You need the Agent Builder Kibana privilege to execute actions and view investigations or conversations.',
       }
     ),
     escalationsAgentBuilderPrivilegeRequired: i18n.translate(

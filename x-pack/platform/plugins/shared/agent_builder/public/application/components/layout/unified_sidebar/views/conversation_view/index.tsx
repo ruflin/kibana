@@ -66,11 +66,11 @@ const searchLabel = i18n.translate('xpack.agentBuilder.sidebar.conversation.sear
 });
 
 const searchChatsAriaLabel = i18n.translate('xpack.agentBuilder.sidebar.conversation.searchChats', {
-  defaultMessage: 'Search chats',
+  defaultMessage: 'Search conversations',
 });
 
 const chatsLabel = i18n.translate('xpack.agentBuilder.sidebar.conversation.chats', {
-  defaultMessage: 'Chats',
+  defaultMessage: 'Conversations',
 });
 
 const pinnedLabel = i18n.translate('xpack.agentBuilder.sidebar.conversation.pinned', {

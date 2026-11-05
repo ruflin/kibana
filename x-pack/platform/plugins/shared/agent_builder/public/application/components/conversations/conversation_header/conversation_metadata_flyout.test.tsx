@@ -114,7 +114,9 @@ describe('ConversationMetadataFlyout', () => {
   it('lists the chat details for a private chat', () => {
     renderFlyout();
 
-    expect(screen.getByRole('heading', { level: 3, name: 'Chat details' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 3, name: 'Conversation details' })
+    ).toBeInTheDocument();
     expect(screen.getByTestId('agentBuilderConversationMetadataTitle')).toHaveTextContent(
       'Debugging high CPU usage'
     );
@@ -274,7 +276,7 @@ describe('ConversationMetadataFlyout', () => {
     await editTitle(user, 'CPU spike on prod');
 
     expect(addErrorToast).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Failed to rename chat' })
+      expect.objectContaining({ title: 'Failed to rename conversation' })
     );
     expect(screen.getByTestId('agentBuilderConversationMetadataTitleInput')).toBeInTheDocument();
   });

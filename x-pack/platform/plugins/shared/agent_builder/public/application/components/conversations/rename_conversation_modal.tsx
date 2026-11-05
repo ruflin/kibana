@@ -88,7 +88,7 @@ export const BaseRenameConversationModal: React.FC<BaseRenameConversationModalPr
         <EuiModalHeaderTitle id={modalTitleId}>
           <FormattedMessage
             id="xpack.agentBuilder.renameConversationModal.title"
-            defaultMessage="Rename chat"
+            defaultMessage="Rename conversation"
           />
         </EuiModalHeaderTitle>
       </EuiModalHeader>
