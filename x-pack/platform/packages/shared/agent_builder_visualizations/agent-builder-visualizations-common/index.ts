@@ -8,15 +8,21 @@
 export {
   VISUALIZATION_ATTACHMENT_TYPE,
   MAX_VEGA_SPEC_LENGTH,
+  MAX_SVG_LENGTH,
   DEFAULT_TIME_RANGE,
 } from './constants';
 
 export type {
   VisualizationAttachmentData,
   ChartVisualizationAttachmentData,
+  SvgVisualizationAttachmentData,
   VisualizationRenderer,
 } from './visualization_types';
-export { getEffectiveRenderer, isCustomContentVisualization } from './visualization_types';
+export {
+  getEffectiveRenderer,
+  isCustomContentVisualization,
+  isSvgVisualization,
+} from './visualization_types';
 
 export {
   buildVegaSavedVis,

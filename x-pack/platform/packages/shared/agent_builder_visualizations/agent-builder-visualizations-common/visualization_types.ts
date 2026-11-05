@@ -8,9 +8,10 @@
 /**
  * Which engine renders a generated visualization. Lens is the default for
  * standard charts; Vega is used for requests Lens cannot express; custom content
- * is an HTML/Liquid template for layouts neither chart grammar can express.
+ * is an HTML/Liquid template for layouts neither chart grammar can express; SVG is
+ * a static, sanitized SVG document for diagrams and illustrations.
  */
-export type VisualizationRenderer = 'lens' | 'vega' | 'custom_content';
+export type VisualizationRenderer = 'lens' | 'vega' | 'custom_content' | 'svg';
 
 interface VisualizationAttachmentDataBase {
   /** The display query */
@@ -46,9 +47,26 @@ interface CustomContentVisualizationAttachmentData extends VisualizationAttachme
   esql?: string;
 }
 
+/**
+ * A static SVG payload: a complete SVG document the model wrote, sanitized on the server
+ * before it is stored. It has no query, so it never reads from a data source. Render it as an
+ * image (never inline into the page): an SVG loaded as an image cannot run scripts or load
+ * external resources.
+ */
+export interface SvgVisualizationAttachmentData {
+  renderer: 'svg';
+  /** The request the SVG was generated from. */
+  query: string;
+  time_range?: { from: string; to: string };
+  /** Never set: an SVG reads no data. Declared so shared code can read `esql` on any payload. */
+  esql?: undefined;
+  visualization: { svg: string };
+}
+
 export type VisualizationAttachmentData =
   | ChartVisualizationAttachmentData
-  | CustomContentVisualizationAttachmentData;
+  | CustomContentVisualizationAttachmentData
+  | SvgVisualizationAttachmentData;
 
 /**
  * The renderer an attachment renders with. Attachments predating the field have none and are
@@ -62,3 +80,8 @@ export const getEffectiveRenderer = (data: VisualizationAttachmentData): Visuali
 export const isCustomContentVisualization = (
   data: VisualizationAttachmentData
 ): data is CustomContentVisualizationAttachmentData => data.renderer === 'custom_content';
+
+/** Narrows an attachment payload to the SVG member. */
+export const isSvgVisualization = (
+  data: VisualizationAttachmentData
+): data is SvgVisualizationAttachmentData => data.renderer === 'svg';

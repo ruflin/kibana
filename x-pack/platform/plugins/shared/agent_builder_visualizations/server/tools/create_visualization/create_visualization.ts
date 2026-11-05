@@ -13,9 +13,11 @@ import { getToolResultId } from '@kbn/agent-builder-server';
 import { getLatestVersion } from '@kbn/agent-builder-common/attachments';
 import {
   DEFAULT_TIME_RANGE,
+  MAX_SVG_LENGTH,
   VISUALIZATION_ATTACHMENT_TYPE,
   getEffectiveRenderer,
   isCustomContentVisualization,
+  isSvgVisualization,
   type VisualizationAttachmentData,
   type VisualizationRenderer,
 } from '@kbn/agent-builder-visualizations-common';
@@ -33,6 +35,7 @@ import {
   selectDefaultTimeRange,
   type VisualizationConfig,
 } from '@kbn/agent-builder-visualizations-server';
+import { validateSvgMarkup } from '../../svg/validate_svg';
 
 /**
  * Pull the prior Lens config out of an existing attachment, when it is a Lens
@@ -62,6 +65,13 @@ const getExistingTemplate = (data: VisualizationAttachmentData | undefined): str
     return undefined;
   }
   return data.visualization.template || undefined;
+};
+
+const getExistingSvg = (data: VisualizationAttachmentData | undefined): string | undefined => {
+  if (!data || !isSvgVisualization(data)) {
+    return undefined;
+  }
+  return data.visualization.svg || undefined;
 };
 
 const ESQL_SOURCE_RULE =
@@ -139,38 +149,69 @@ const customContentTargetSchema = z.object({
   has_data: customContentHasDataField,
 });
 
-const attachmentTargetSchema = z.object({
-  type: z
-    .literal('attachment')
-    .describe(
-      'Update an existing visualization attachment in place. The attachment must exist; edits keep its renderer.'
-    ),
-  attachment_id: z
+const svgMarkupField = lazySchema(() =>
+  z
     .string()
     .min(1)
-    .max(256)
-    .describe('ID of the visualization attachment to update.'),
-  chartType: z
-    .nativeEnum(SupportedChartType)
-    .optional()
+    .max(MAX_SVG_LENGTH)
     .describe(
-      '(optional) For Lens: pass a new chart type when the request changes the chart family (e.g. xy to pie); omit it to keep the current one. For Vega it is only a styling hint. Ignored for custom content.'
-    ),
-  esql: optionalEsqlField,
-  has_data: attachmentHasDataField,
-  regenerate_esql: attachmentRegenerateEsqlField,
-});
+      `The complete SVG document, starting with <svg> and carrying a viewBox. Use only shapes, paths, text, gradients and presentation attributes (fill, stroke, font-size). Forbidden, and rejected: <script>, <style>, <foreignObject>, <use>, <image>, <a>, animation elements, on* event attributes, href/src/data, javascript:, DOCTYPE/ENTITY, and url() references other than url(#id) to an element in the same SVG. Maximum ${MAX_SVG_LENGTH} characters.`
+    )
+);
 
-const targetSchema = z
-  .discriminatedUnion('type', [
-    lensTargetSchema,
-    vegaTargetSchema,
-    customContentTargetSchema,
-    attachmentTargetSchema,
-  ])
-  .describe(
-    'What to build, discriminated by "type": a new "lens", "vega" or "custom_content" visualization, or an "attachment" update of an existing one. Each type accepts only the fields that apply to it.'
-  );
+const svgTargetSchema = lazySchema(() =>
+  z.object({
+    type: z
+      .literal('svg')
+      .describe(
+        'A new static SVG drawing for a diagram, flow or illustration that no chart can express. It reads no data: use it only when the request needs no query. Write the SVG yourself in "svg".'
+      ),
+    svg: svgMarkupField,
+  })
+);
+
+const attachmentTargetSchema = lazySchema(() =>
+  z.object({
+    type: z
+      .literal('attachment')
+      .describe(
+        'Update an existing visualization attachment in place. The attachment must exist; edits keep its renderer.'
+      ),
+    attachment_id: z
+      .string()
+      .min(1)
+      .max(256)
+      .describe('ID of the visualization attachment to update.'),
+    svg: svgMarkupField
+      .optional()
+      .describe(
+        '(optional) For an SVG attachment only: the replacement SVG document. Omit it to keep the current drawing. Rejected for other renderers.'
+      ),
+    chartType: z
+      .nativeEnum(SupportedChartType)
+      .optional()
+      .describe(
+        '(optional) For Lens: pass a new chart type when the request changes the chart family (e.g. xy to pie); omit it to keep the current one. For Vega it is only a styling hint. Ignored for custom content.'
+      ),
+    esql: optionalEsqlField,
+    has_data: attachmentHasDataField,
+    regenerate_esql: attachmentRegenerateEsqlField,
+  })
+);
+
+const targetSchema = lazySchema(() =>
+  z
+    .discriminatedUnion('type', [
+      lensTargetSchema,
+      vegaTargetSchema,
+      customContentTargetSchema,
+      svgTargetSchema,
+      attachmentTargetSchema,
+    ])
+    .describe(
+      'What to build, discriminated by "type": a new "lens", "vega", "custom_content" or "svg" visualization, or an "attachment" update of an existing one. Each type accepts only the fields that apply to it.'
+    )
+);
 
 const createVisualizationSchema = z.object({
   query: z.string().max(2048).describe('A natural language query describing the visualization.'),
@@ -244,8 +285,10 @@ type CreateVisualizationTarget = z.output<typeof targetSchema>;
 const readTarget = (target: CreateVisualizationTarget) => ({
   attachmentId: target.type === 'attachment' ? target.attachment_id : undefined,
   requestedRenderer: target.type === 'attachment' ? undefined : target.type,
-  chartType: target.type === 'custom_content' ? undefined : target.chartType,
-  esql: target.esql || undefined,
+  svg: target.type === 'svg' || target.type === 'attachment' ? target.svg : undefined,
+  chartType:
+    target.type === 'custom_content' || target.type === 'svg' ? undefined : target.chartType,
+  esql: target.type === 'svg' ? undefined : target.esql || undefined,
   hasData:
     target.type === 'custom_content' || target.type === 'attachment'
       ? target.has_data ?? undefined
@@ -270,7 +313,8 @@ You say what to build via "target", discriminated by "target.type":
     )}).
 - "vega" for a custom Vega-Lite specification when no Lens chart type can express the request, e.g. small multiples / faceting, layered or combination charts (bars plus an overlaid line), scatter / bubble plots with an encoded size dimension, or custom tooltips/encodings. "chartType" is optional for Vega and acts only as a styling hint.
 - "custom_content" for an HTML/CSS layout neither chart grammar can express — a KPI scorecard with status badges, a health or status board, a panel mixing narrative text with live values. The HTML is generated server-side from your natural-language "query"; never author markup yourself. Always set "has_data": true (a query is generated unless you pass "esql") or false when the panel genuinely has no data (a banner, a legend, a note).
-- "attachment" with "attachment_id" to update an existing visualization; edits keep its renderer. "chartType" is optional on updates. Omit "esql" and "has_data" to keep the current data state; pass "has_data": false to drop a stored query, or "has_data": true to ensure the panel has one (a stored query is kept, one is generated only when the panel has none). For a custom content edit that needs different data (a new measure, grouping, filter or time window, for example "also show the average bytes"), pass "regenerate_esql": true: without it the stored query is kept and the new data can never appear; with it the stored query is regenerated from "query", keeping the parts the request does not change. Layout, copy and style edits (colors, sizes, wording) keep the stored query.
+- "svg" for a static diagram, flow or illustration that no chart can express. It reads no data, so use it only when the request needs no query. Write the complete SVG document in "svg" yourself: start with <svg> and a viewBox; use shapes, paths, text and presentation attributes only. Scripts, <style>, <foreignObject>, <use>, <image>, links, animation, on* attributes, href/src and external url() references are rejected.
+- "attachment" with "attachment_id" to update an existing visualization; edits keep its renderer. For an SVG attachment, pass "svg" with the replacement document, or omit it to keep the current drawing. "chartType" is optional on updates. Omit "esql" and "has_data" to keep the current data state; pass "has_data": false to drop a stored query, or "has_data": true to ensure the panel has one (a stored query is kept, one is generated only when the panel has none). For a custom content edit that needs different data (a new measure, grouping, filter or time window, for example "also show the average bytes"), pass "regenerate_esql": true: without it the stored query is kept and the new data can never appear; with it the stored query is regenerated from "query", keeping the parts the request does not change. Layout, copy and style edits (colors, sizes, wording) keep the stored query.
 
 Only pass "time_range" when the user explicitly named a time window (e.g. "last 7 days", "May 20–24"). Do not set it otherwise: create applies a data-aware default, and edits keep the existing range.
 
@@ -295,7 +339,7 @@ Ground first: make sure the target index exists and every field you reference is
       { query: nlQuery, index, target, time_range: requestedTimeRange },
       { esClient, modelProvider, logger, events, attachments }
     ) => {
-      const { attachmentId, requestedRenderer, chartType, esql, hasData, regenerateEsql } =
+      const { attachmentId, requestedRenderer, svg, chartType, esql, hasData, regenerateEsql } =
         readTarget(target);
       try {
         // Step 1: Read any existing attachment so edits reuse its renderer + config.
@@ -327,6 +371,12 @@ Ground first: make sure the target index exists and every field you reference is
         // unified attachment data.
         let visualizationData: VisualizationAttachmentData;
         let selectedChartTypeForResult: SupportedChartType | undefined;
+
+        if (svg !== undefined && renderer !== 'svg') {
+          throw new Error(
+            `"svg" is only valid for an SVG visualization, but this visualization renders as ${renderer}.`
+          );
+        }
 
         if (renderer === 'custom_content') {
           if (regenerateEsql && hasData === false) {
@@ -398,6 +448,24 @@ Ground first: make sure the target index exists and every field you reference is
             query: nlQuery,
             visualization: { spec, ...(title ? { title } : {}) },
             esql: esqlQuery,
+          };
+        } else if (renderer === 'svg') {
+          // The model writes the markup; it is checked here and never trusted as-is. A rejection
+          // is an error result, so the model sees the reason and can fix the drawing.
+          const markup = svg ?? getExistingSvg(existingData);
+          if (!markup) {
+            throw new Error('An SVG visualization needs "svg" with the complete SVG document.');
+          }
+          const validation = validateSvgMarkup(markup);
+          if (!validation.valid) {
+            throw new Error(
+              `The SVG was rejected: ${validation.reason}. Remove that content and call the tool again.`
+            );
+          }
+          visualizationData = {
+            renderer: 'svg',
+            query: nlQuery,
+            visualization: { svg: validation.svg },
           };
         } else {
           const parsedExistingConfig = getExistingLensConfig(existingData);
@@ -504,6 +572,13 @@ Ground first: make sure the target index exists and every field you reference is
               renderer: 'custom_content',
               visualization: { prompt: nlQuery },
               ...(visualizationData.esql ? { esql: visualizationData.esql } : {}),
+              ...(visualizationData.time_range && { time_range: visualizationData.time_range }),
+              ...attachmentRef,
+            }
+          : isSvgVisualization(visualizationData)
+          ? {
+              renderer: 'svg',
+              visualization: { prompt: nlQuery },
               ...(visualizationData.time_range && { time_range: visualizationData.time_range }),
               ...attachmentRef,
             }

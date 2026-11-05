@@ -26,7 +26,8 @@
     "@kbn/embeddable-plugin",
     "@kbn/timerange",
     "@kbn/zod",
-    "@kbn/core-logging-server-mocks"
+    "@kbn/core-logging-server-mocks",
+    "@kbn/fs"
   ],
   "exclude": ["target/**/*"]
 }

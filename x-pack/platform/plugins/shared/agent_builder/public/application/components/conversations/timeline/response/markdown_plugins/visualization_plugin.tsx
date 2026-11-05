@@ -112,13 +112,14 @@ export function createVisualizationRenderer({
     if (toolResult.type === 'visualization') {
       const { data } = toolResult;
 
-      // A custom content result carries no template on purpose — the markup lives in the
-      // attachment. Rendering it here would show the panel's own "create your panel"
-      // empty state inside the answer, so point at the supported path instead.
-      if (data.renderer === 'custom_content') {
+      // Custom content and SVG results carry no markup on purpose — it lives in the
+      // attachment. Rendering them here would show an empty panel inside the answer, so point
+      // at the supported path instead.
+      if (data.renderer === 'custom_content' || data.renderer === 'svg') {
         return (
           <EuiText>
-            Custom content cannot be rendered with the {visualizationElement.tagName} element. Use{' '}
+            {data.renderer === 'svg' ? 'SVG' : 'Custom content'} cannot be rendered with the{' '}
+            {visualizationElement.tagName} element. Use{' '}
             <EuiCode>{`<render_attachment id="…" version="…" />`}</EuiCode> instead.
           </EuiText>
         );

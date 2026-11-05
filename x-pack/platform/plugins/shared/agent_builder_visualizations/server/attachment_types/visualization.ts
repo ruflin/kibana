@@ -8,6 +8,7 @@
 import {
   VISUALIZATION_ATTACHMENT_TYPE,
   isCustomContentVisualization,
+  isSvgVisualization,
   type ChartVisualizationAttachmentData,
   type VisualizationAttachmentData,
 } from '@kbn/agent-builder-visualizations-common';
@@ -32,6 +33,9 @@ import { visualizationAttachmentDataSchema } from './visualization_schema';
 const describeKind = (data: VisualizationAttachmentData): string => {
   if (isCustomContentVisualization(data)) {
     return 'Renderer: Custom content (HTML template)';
+  }
+  if (isSvgVisualization(data)) {
+    return 'Renderer: SVG (static)';
   }
   if (data.renderer === 'vega') {
     return 'Renderer: Vega';
@@ -117,7 +121,7 @@ export const createVisualizationAttachmentType = (): AttachmentTypeDefinition<
     isReadonly: false,
 
     getAgentDescription: () => {
-      return 'A visualization attachment contains a shared visualization payload and a renderer discriminator (lens, vega, or custom_content). Vega specs live at visualization.spec; custom content HTML templates live at visualization.template. Time range can be controlled by configuring a time_range property directly on the attachment.data with from and to fields. Rendering it inline displays the visualization as a dynamic, interactive chart component in the conversation UI. Visualization attachments can also be added to dashboard compositions through dashboard panel-ingestion operations.';
+      return 'A visualization attachment contains a shared visualization payload and a renderer discriminator (lens, vega, custom_content, or svg). Vega specs live at visualization.spec; custom content HTML templates live at visualization.template; SVG documents live at visualization.svg and are static (no query-backed data). Time range can be controlled by configuring a time_range property directly on the attachment.data with from and to fields. Rendering it inline displays the visualization as a dynamic, interactive chart component in the conversation UI. Visualization attachments can also be added to dashboard compositions through dashboard panel-ingestion operations.';
     },
 
     getTools: () => [],

@@ -24,6 +24,10 @@ const LazyVisualizeCustomContent = React.lazy(() =>
   import('./visualize_custom_content').then((m) => ({ default: m.VisualizeCustomContent }))
 );
 
+const LazyVisualizeSvg = React.lazy(() =>
+  import('./visualize_svg').then((m) => ({ default: m.VisualizeSvg }))
+);
+
 export interface InlineVisualizationProps {
   services: VisualizationServices;
   /** Absent on attachments predating the discriminator, which are Lens. */
@@ -51,6 +55,8 @@ export const InlineVisualization = ({
 }: InlineVisualizationProps) => {
   const renderVisualization = () => {
     switch (renderer) {
+      case 'svg':
+        return <LazyVisualizeSvg visualization={visualization} />;
       case 'vega':
         return (
           <LazyVisualizeVega

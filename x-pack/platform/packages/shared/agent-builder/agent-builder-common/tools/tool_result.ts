@@ -159,9 +159,20 @@ export interface CustomContentVisualizationResultData extends VisualizationResul
   visualization: { prompt: string };
 }
 
+/**
+ * A static SVG result. The markup is deliberately absent, as with custom content: it lives in the
+ * attachment and is rendered with `<render_attachment>`.
+ */
+export interface SvgVisualizationResultData extends VisualizationResultDataBase {
+  renderer: 'svg';
+  /** The prompt the SVG was generated from. */
+  visualization: { prompt: string };
+}
+
 export type VisualizationResultData =
   | ChartVisualizationResultData
-  | CustomContentVisualizationResultData;
+  | CustomContentVisualizationResultData
+  | SvgVisualizationResultData;
 
 export type VisualizationResult = ToolResultMixin<ToolResultType.visualization>;
 

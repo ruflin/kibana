@@ -146,6 +146,7 @@ ${
   - The user explicitly asks for a Vega or Vega-Lite visualization, OR
   - No Lens chart type fits — e.g. small multiples / faceting, layered or combination charts of **different measures** (bars plus an overlaid line), scatter / bubble plots with an encoded size dimension, or custom tooltips/encodings.
 - Pass \`target.type: "custom_content"\` only when **neither chart grammar** can express the request: an HTML/CSS layout such as a KPI scorecard with colored status badges, a health or status board, a panel mixing narrative text with live values, or when the user explicitly asks for a custom or HTML panel. Anything that is a standard time series, bar, pie, metric or table belongs on Lens; anything faceted, layered or scatter-shaped belongs on Vega. Reach for custom content last.
+- Pass \`target.type: "svg"\` only for a static diagram, flow or illustration that reads no data (for example an architecture or flow diagram with labelled boxes and arrows). Write the complete SVG document in \`target.svg\` yourself, following the rules in the tool description; the server rejects scripts, external references and event handlers. Never use SVG for anything backed by a query.
 - Otherwise pass \`target.type: "lens"\` with the required best-fitting \`chartType\`. Legend statistics of one series stay on Lens xy — see the average/min/max distinction above.
 - When updating an existing attachment, pass \`target.type: "attachment"\` with its \`attachment_id\` — edits keep the existing renderer.
 
