@@ -24,12 +24,15 @@ settings:
             | default: 'Investigation failed' | truncate: 10000 }}
         on-failure:
           continue: true
-  # One run per investigation at a time, in arrival order, so a follow-up builds on the run
-  # before it.
+  # At most three investigations run at once in a space. Runs over the limit wait in arrival order
+  # and are skipped after two hours in the queue. This queue does not order the rounds of one
+  # investigation: the space entry point does that for its starts, and each caller that starts
+  # rounds directly orders its own.
   concurrency:
-    key: 'investigation:{{ inputs.investigation_id | default: execution.id }}'
+    key: 'nightshift-investigation'
     strategy: queue
-    max: 1
+    max: 3
+    queue-ttl: 2h
 tags:
   - observability
   - investigation
@@ -210,7 +213,9 @@ steps:
     aggregate-by: 'nightshift'
     product-solution: 'observability'
     product-feature: 'nightshift'
-    timeout: 1800s
+    # The caller's timeout, capped at 30 minutes. It starts when this step starts, after the queue
+    # above, so queue wait does not count against it.
+    timeout: '{{ inputs.timeout_seconds | default: 1800 | at_most: 1800 }}s'
     with:
       # The agent records its findings on the investigation with its tools, so the step has no
       # output schema.

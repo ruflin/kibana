@@ -49,8 +49,9 @@ export const renderBoundInvestigationYaml = ({
 export const NIGHTSHIFT_BOUND_INVESTIGATION_WORKFLOW = {
   id: NIGHTSHIFT_BOUND_INVESTIGATION_WORKFLOW_ID,
   pluginId: 'nightshiftInvestigations',
-  // 2: the caller's timeout caps the investigation step (`timeout_seconds`, at most an hour).
-  version: 2,
+  // 3: the caller's timeout moves to the shared investigation's agent step, so queue wait does not
+  // count against it, and the entry point waits in the shared queue for up to 2h.
+  version: 3,
   billable: false,
   yamlTemplate: renderBoundInvestigationYaml,
   management: {

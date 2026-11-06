@@ -73,7 +73,7 @@ const workflow = parse(NIGHTSHIFT_INVESTIGATION_WORKFLOW.yaml) as {
 describe('Nightshift investigation workflow', () => {
   it('records the investigation through the agent tools rather than persist steps', () => {
     expect(NIGHTSHIFT_INVESTIGATION_WORKFLOW.id).toBe('system-nightshift-investigation');
-    expect(NIGHTSHIFT_INVESTIGATION_WORKFLOW.version).toBe(6);
+    expect(NIGHTSHIFT_INVESTIGATION_WORKFLOW.version).toBe(7);
     expect(investigation.name).toBe('Nightshift Investigation');
     expect(investigation.steps.map((step) => step.name)).toEqual([
       'resolve_model',
@@ -111,12 +111,19 @@ describe('Nightshift investigation workflow', () => {
     expect(requireStep('investigate')['connector-id-by-feature']).toBeUndefined();
   });
 
-  it('runs one execution per investigation at a time, in arrival order', () => {
+  it('runs at most three investigations at once in a space, in arrival order', () => {
     expect(workflow.settings.concurrency).toEqual({
-      key: 'investigation:{{ inputs.investigation_id | default: execution.id }}',
+      key: 'nightshift-investigation',
       strategy: 'queue',
-      max: 1,
+      max: 3,
+      'queue-ttl': '2h',
     });
+  });
+
+  it('caps the agent step at 30 minutes and honours a shorter caller timeout', () => {
+    expect((requireStep('investigate') as WorkflowStep & Record<string, unknown>).timeout).toBe(
+      '{{ inputs.timeout_seconds | default: 1800 | at_most: 1800 }}s'
+    );
   });
 
   it('takes the investigation and its subjects as inputs, and no concurrency key', () => {

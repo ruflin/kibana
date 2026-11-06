@@ -38,9 +38,6 @@ describe('Nightshift bound investigation workflow', () => {
       {
         name: 'investigate',
         type: 'workflow.execute',
-        // A bound workflow only runs its saved definition, so a caller's timeout arrives as an
-        // input and caps this step instead of the run's `settings.timeout`.
-        timeout: '{{ inputs.timeout_seconds }}s',
         with: {
           'workflow-id': NIGHTSHIFT_INVESTIGATION_WORKFLOW_ID,
           'run-as-mode': 'inherit',
@@ -80,13 +77,18 @@ describe('Nightshift bound investigation workflow', () => {
     expect(trigger.inputs.additionalProperties).toBe(true);
   });
 
-  it('outlives the investigation it waits for', () => {
-    const toMinutes = (timeout: string) => Number(timeout.replace(/m$/, ''));
+  it('outlives the shared queue wait and the investigation it waits for', () => {
+    const toMinutes = (timeout: string): number => {
+      const match = /^(\d+)([hm])$/.exec(timeout);
+      if (!match) throw new Error(`Unexpected timeout format: ${timeout}`);
+      return Number(match[1]) * (match[2] === 'h' ? 60 : 1);
+    };
     const wrapper = parse(render('kibana/nightshift_agent'));
     const investigation = parse(NIGHTSHIFT_INVESTIGATION_WORKFLOW.yaml);
+    const queueTtlMinutes = toMinutes(investigation.settings.concurrency['queue-ttl']);
 
     expect(toMinutes(wrapper.settings.timeout)).toBeGreaterThan(
-      toMinutes(investigation.settings.timeout)
+      queueTtlMinutes + toMinutes(investigation.settings.timeout)
     );
   });
 
