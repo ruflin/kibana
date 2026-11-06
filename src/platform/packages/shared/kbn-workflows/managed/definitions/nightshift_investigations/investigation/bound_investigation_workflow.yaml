@@ -7,12 +7,12 @@ enabled: true
 settings:
   # Replaced with the bound service account when the workflow is installed in a space.
   run_as: __SERVICE_ACCOUNT_ID__
-  # Longer than the investigation's own timeout, since this run waits for it.
-  timeout: '65m'
-  # A follow-up waits here until the investigation's previous round has finished, since a wait in
-  # the shared workflow's queue would count against the timeout above and could cancel the
-  # follow-up before it starts. The timeout only starts once a run leaves this queue. The key
-  # differs from the shared workflow's, which this run would otherwise block.
+  # This run is running while it waits for a slot in the shared workflow's queue (up to its
+  # queue-ttl of 2h) and then for the investigation (up to 60m), so the timeout covers both.
+  timeout: '4h'
+  # A follow-up waits here until the investigation's previous round has finished, so the rounds of
+  # one investigation run in order. The space-wide limit of concurrent investigations is applied
+  # by the shared workflow's queue, which this run waits in.
   concurrency:
     key: 'bound-investigation:{{ inputs.investigation_id | default: execution.id }}'
     strategy: queue
@@ -32,10 +32,10 @@ triggers:
           type: string
           default: '{{ execution.id }}'
           description: Investigation to run. Defaults to one named after this execution.
-        # How long the investigation may run. It caps the step below rather than this run's
-        # `settings.timeout`, because a workflow bound to a service account only runs its saved
-        # definition: a run that rewrote its own timeout would be refused. Capped at the shared
-        # investigation's own 60m timeout, so the step timeout always fires before this run's.
+        # How long the investigation may run. The shared investigation applies it to its agent
+        # step, after it leaves the shared queue, so queue wait does not count against it. A
+        # workflow bound to a service account only runs its saved definition, so the caller's
+        # timeout travels as this input rather than as this run's `settings.timeout`.
         timeout_seconds:
           type: number
           default: 3600
@@ -60,11 +60,11 @@ steps:
             investigations from Nightshift instead. This run was started by
             {{ execution.triggeredBy }}.
 
+  # No step timeout here: a timeout on this step would start while the shared workflow waits in its
+  # queue, and could cancel an investigation before it starts. The shared workflow applies
+  # `timeout_seconds` to its own agent step instead.
   - name: investigate
     type: workflow.execute
-    # Rendered per run from the input above, so a caller's timeout applies without changing the
-    # stored definition. Shorter than this workflow's own timeout, which has to outlast it.
-    timeout: '{{ inputs.timeout_seconds }}s'
     with:
       workflow-id: system-nightshift-investigation
       run-as-mode: inherit

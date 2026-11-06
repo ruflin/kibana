@@ -32,7 +32,8 @@ export const NIGHTSHIFT_BOUND_SLACK_THREAD_WORKFLOW = {
   pluginId: 'nightshiftInvestigations',
   // 2: the investigation call inherits the space's agent account (`run-as-mode: inherit`).
   // 3: the investigation call records `context.entry_point: slack`.
-  version: 3,
+  // 4: the timeout covers the investigation workflow's queue wait (queue-ttl 2h) plus the run.
+  version: 4,
   billable: false,
   yamlTemplate: renderBoundSlackThreadYaml,
   management: {

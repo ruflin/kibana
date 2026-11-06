@@ -218,7 +218,7 @@ Agent Builder titles the investigation. `_ensure` creates the conversation witho
 
 The `title` of the start route, the `nightshift.triggerInvestigation` step, and the investigation workflow is still accepted for compatibility, but it is not stored as the title. The start passes it on as the workflow's `title` input only. The `_slack_thread` route's `title` is the generated title, or until then a headline from the thread's question.
 
-The workflow's concurrency key is `investigation:<id>` with a `queue` strategy, so runs of one investigation never overlap. The investigation reads as in progress while its agent runs.
+The shared investigation workflow's concurrency key is the constant `nightshift-investigation` with a `queue` strategy and `max: 3`, so at most three investigation runs execute at once in a space. Runs over the limit wait up to `queue-ttl` (2h) and are then skipped. The space entry point keeps the rounds of one investigation in order with the key `bound-investigation:<id>`, and the Slack thread workflow keeps one run per thread. The investigation reads as in progress while its agent runs.
 
 ### Reading investigations
 

@@ -9,12 +9,13 @@ enabled: true
 settings:
   # The per-space copy runs as the bound service account; the global copy drops this line.
   run_as: __SERVICE_ACCOUNT_ID__
-  # Longer than the investigation's own timeout, since this run waits for it.
-  timeout: '65m'
+  # This run is running while it waits for a slot in the investigation workflow's queue (up to its
+  # queue-ttl of 2h) and then for the investigation (up to 60m), so the timeout covers both.
+  timeout: '4h'
   # One run per thread at a time, in arrival order, so replies build on each other and a
   # redelivered event is recognised against the events the thread recorded. The investigation
-  # workflow also runs one execution per investigation at a time, so a run started some other way
-  # waits its turn there.
+  # workflow runs at most three executions at a time in the space, so this run may wait its turn
+  # there.
   concurrency:
     key: 'nightshift-slack-thread-{{ event.connectorId }}-{{ event.channel }}-{{ event.threadId | default: event.messageId }}'
     strategy: queue
