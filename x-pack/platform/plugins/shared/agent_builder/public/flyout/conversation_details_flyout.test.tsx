@@ -35,7 +35,7 @@ jest.mock('@elastic/eui', () => {
   return { ...actual, EuiFlyout: jest.fn((props) => createElement(actual.EuiFlyout, props)) };
 });
 
-const ERROR_BODY = 'Something went wrong while loading this conversation.';
+const ERROR_BODY = 'Something went wrong while loading this chat.';
 
 const createConversation = (overrides: Partial<Conversation> = {}): Conversation => ({
   id: 'conversation',

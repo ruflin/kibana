@@ -75,13 +75,13 @@ describe('EmbeddableConversationList', () => {
       conversations: [
         {
           id: 'conv-1',
-          title: 'Active conversation',
+          title: 'Active chat',
           agent_id: 'agent-1',
           updated_at: '2026-01-02T00:00:00Z',
         },
         {
           id: 'conv-2',
-          title: 'Other conversation',
+          title: 'Other chat',
           agent_id: 'agent-1',
           updated_at: '2026-01-01T00:00:00Z',
         },

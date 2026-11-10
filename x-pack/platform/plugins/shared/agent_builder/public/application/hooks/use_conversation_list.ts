@@ -20,7 +20,7 @@ const DEFAULT_CONVERSATIONS_PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 250;
 
 const searchErrorToastTitle = i18n.translate('xpack.agentBuilder.conversationSearch.errorTitle', {
-  defaultMessage: 'Unable to search conversations',
+  defaultMessage: 'Unable to search chats',
 });
 
 export const useConversationList = ({

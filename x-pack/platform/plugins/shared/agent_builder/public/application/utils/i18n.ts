@@ -2645,7 +2645,7 @@ export const labels = {
       'xpack.agentBuilder.overview.capabilities.connectorsOnboardingDescription',
       {
         defaultMessage:
-          'Bring your data into the conversation. Connectors let your agent reach into external systems like Slack, Jira, and PagerDuty, so responses are grounded in real data from your environment.',
+          'Bring your data into the chat. Connectors let your agent reach into external systems like Slack, Jira, and PagerDuty, so responses are grounded in real data from your environment.',
       }
     ),
     addConnector: i18n.translate('xpack.agentBuilder.overview.capabilities.addConnector', {

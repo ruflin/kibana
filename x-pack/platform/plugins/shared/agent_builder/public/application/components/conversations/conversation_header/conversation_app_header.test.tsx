@@ -190,7 +190,7 @@ describe('ConversationAppHeader', () => {
   });
 
   it('shows "New chat" for a saved chat that still has the default title', () => {
-    setUp({ conversation: { ...baseConversation, title: 'New conversation' } as Conversation });
+    setUp({ conversation: { ...baseConversation, title: 'New chat' } as Conversation });
     renderHeader();
 
     expect(screen.getByTestId(APP_HEADER_TEST_SUBJECTS.title)).toHaveTextContent('New chat');
@@ -272,7 +272,9 @@ describe('ConversationAppHeader', () => {
     expect(screen.getByTestId('agentBuilderConversationTemplateBadge')).toHaveTextContent(
       'Investigation'
     );
-    expect(screen.getByTestId('agentBuilderChatInfoButton')).toHaveTextContent('Summary');
+    expect(screen.getByTestId('agentBuilderChatInfoButton')).toHaveTextContent(
+      'Chat summary'
+    );
   });
 
   it('hides Summary while the summary flyout is open', () => {

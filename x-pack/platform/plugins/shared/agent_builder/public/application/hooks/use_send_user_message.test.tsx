@@ -89,7 +89,7 @@ describe('useSendUserMessage', () => {
     useConversationId.mockReturnValue(undefined);
     const { result } = renderHook(() => useSendUserMessage(), { wrapper });
 
-    await expect(result.current.mutateAsync('hello')).rejects.toThrow('conversation id');
+    await expect(result.current.mutateAsync('hello')).rejects.toThrow('chat id');
 
     expect(sendUserMessage).not.toHaveBeenCalled();
     expect(resetAttachments).not.toHaveBeenCalled();

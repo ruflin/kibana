@@ -31,7 +31,7 @@ export class ConversationEventsService {
     definition: ConversationEventUIDefinition<TType, TData>
   ): void {
     if (this.registry.has(definition.type)) {
-      throw new Error(`Conversation event type "${definition.type}" is already registered.`);
+      throw new Error(`Chat event type "${definition.type}" is already registered.`);
     }
     assertValidConversationEventType(definition.type);
     this.registry.set(definition.type, definition as unknown as ConversationEventUIDefinition);

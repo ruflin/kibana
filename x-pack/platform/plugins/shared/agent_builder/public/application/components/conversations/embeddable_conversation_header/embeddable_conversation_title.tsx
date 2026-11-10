@@ -38,10 +38,10 @@ const labels = {
     defaultMessage: 'Delete',
   }),
   newConversation: i18n.translate('xpack.agentBuilder.conversationTitle.newConversation', {
-    defaultMessage: 'New conversation',
+    defaultMessage: 'New chat',
   }),
   openTitleMenu: i18n.translate('xpack.agentBuilder.conversationTitle.openTitleMenu', {
-    defaultMessage: 'Open conversation menu',
+    defaultMessage: 'Open chat menu',
   }),
   readOnly: i18n.translate('xpack.agentBuilder.embeddableConversationTitle.readOnly', {
     defaultMessage: 'Read-Only',

@@ -16,10 +16,10 @@ interface NoConversationsPromptProps {
 export const NoConversationsPrompt: React.FC<NoConversationsPromptProps> = ({ isFiltered }) => {
   const message = isFiltered
     ? i18n.translate('xpack.agentBuilder.embeddableConversationList.noResults', {
-        defaultMessage: 'No conversations match your search.',
+        defaultMessage: 'No chats match your search.',
       })
     : i18n.translate('xpack.agentBuilder.embeddableConversationList.noConversations', {
-        defaultMessage: "You haven't started any conversations yet.",
+        defaultMessage: "You haven't started any chats yet.",
       });
 
   return (

@@ -57,7 +57,7 @@ const renderErrorContent = (error: unknown): React.ReactNode => {
     return (
       <WorkflowError
         title={i18n.translate('xpack.agentBuilder.executionError.workflowAborted.title', {
-          defaultMessage: 'Conversation Aborted',
+          defaultMessage: 'Chat Aborted',
         })}
         description={{
           id: 'xpack.agentBuilder.executionError.workflowAborted.description',

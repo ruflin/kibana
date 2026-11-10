@@ -16,7 +16,7 @@ export const TEMPLATE_UI_LABELS = Object.freeze({
     defaultMessage: 'Unable to load this investigation',
   }),
   notFoundTitle: i18n.translate('xpack.agenticInvestigations.templateUi.notFoundTitle', {
-    defaultMessage: 'No investigation for this conversation',
+    defaultMessage: 'No investigation for this chat',
   }),
   status: i18n.translate('xpack.agenticInvestigations.templateUi.status', {
     defaultMessage: 'Status',

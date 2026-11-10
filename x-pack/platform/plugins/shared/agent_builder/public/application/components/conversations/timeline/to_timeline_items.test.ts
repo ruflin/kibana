@@ -809,7 +809,7 @@ describe('groupTimelineEvents with events outside the built-in set', () => {
       created_at: '2026-09-03T11:20:00.000Z',
       actor,
       execution_id: 'exec-1',
-      data: { previous_title: 'New conversation', title: 'Renamed' },
+      data: { previous_title: 'New chat', title: 'Renamed' },
     };
 
     const items = buildItems([created, user, started, terminated, renamed]);

@@ -35,12 +35,23 @@ import { useConversation } from '../application/hooks/use_conversation';
 import { useAgentBuilderServices } from '../application/hooks/use_agent_builder_service';
 import { useConversationFlyoutWidthProps } from './conversation_details_flyout_width';
 
-export const FLYOUT_TITLE = i18n.translate('xpack.agentBuilder.conversationDetailsFlyout.title', {
-  defaultMessage: 'Summary',
-});
+/** Title of the template-backed flyout opened from the summary button. */
+export const FLYOUT_TITLE = i18n.translate(
+  'xpack.agentBuilder.conversationDetailsFlyout.summaryTitle',
+  {
+    defaultMessage: 'Chat summary',
+  }
+);
+/** Title of the snapshot flyout opened through openConversationDetailsFlyout. */
+export const SNAPSHOT_FLYOUT_TITLE = i18n.translate(
+  'xpack.agentBuilder.conversationDetailsFlyout.title',
+  {
+    defaultMessage: 'Chat info',
+  }
+);
 
 const ERROR_BODY = i18n.translate('xpack.agentBuilder.conversationDetailsFlyout.errorBody', {
-  defaultMessage: 'Something went wrong while loading this conversation.',
+  defaultMessage: 'Something went wrong while loading this chat.',
 });
 
 const POLL_INTERVAL_MS = 5_000;

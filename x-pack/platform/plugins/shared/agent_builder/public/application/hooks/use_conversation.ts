@@ -41,7 +41,7 @@ export const useConversation = () => {
     enabled: Boolean(conversationId) && !isThisConversationStreaming,
     queryFn: () => {
       if (!conversationId) {
-        return Promise.reject(new Error('Invalid conversation id'));
+        return Promise.reject(new Error('Invalid chat id'));
       }
       return conversationsService.get({ conversationId });
     },

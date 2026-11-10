@@ -31,7 +31,7 @@ export const ContextExceededExecutionError: React.FC = () => {
           <p>
             <FormattedMessage
               id="xpack.agentBuilder.executionError.contextExceeded.description"
-              defaultMessage="This conversation exceeded the maximum context length. This typically occurs when tools return a very large response. Try again with a different request or start a new conversation. {docsLink}."
+              defaultMessage="This chat exceeded the maximum context length. This typically occurs when tools return a very large response. Try again with a different request or start a new chat. {docsLink}."
               values={{
                 docsLink: (
                   <EuiLink

@@ -30,7 +30,7 @@ const conversation = {
   updated_at: '2026-07-28T14:00:00.000Z',
   rounds: [],
   template_id: 'investigation',
-  metadata: { status: 'open', summary: 'From the conversation' },
+  metadata: { status: 'open', summary: 'From the chat' },
 } as Conversation;
 
 const groupedAttachments = createFlyoutGroupedAttachmentsRegistry();
@@ -109,7 +109,7 @@ describe('InvestigationOverview', () => {
 
     renderOverview();
 
-    expect(screen.getByText('From the conversation')).toBeInTheDocument();
+    expect(screen.getByText('From the chat')).toBeInTheDocument();
     expect(screen.queryByText('Impact')).not.toBeInTheDocument();
     expect(screen.queryByTestId('investigationHypothesisTreeButton')).not.toBeInTheDocument();
   });

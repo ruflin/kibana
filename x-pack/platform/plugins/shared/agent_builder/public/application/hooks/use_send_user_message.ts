@@ -28,7 +28,7 @@ export const useSendUserMessage = () => {
     mutationKey: mutationKeys.sendUserMessage(conversationId),
     mutationFn: (message: string) => {
       if (!conversationId) {
-        return Promise.reject(new Error('Cannot send a user message without a conversation id'));
+        return Promise.reject(new Error('Cannot send a user message without a chat id'));
       }
       return chatService.sendUserMessage({
         conversationId,

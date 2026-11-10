@@ -30,19 +30,19 @@ const ERROR_DETAILS_MAPPINGS: Record<ErrorPromptType, ErrorDetails> = {
     }),
     description: i18n.translate('xpack.agentBuilder.errorPrompt.genericErrorDescription', {
       defaultMessage:
-        'We ran into an issue while running this request. Try again or start a new conversation.',
+        'We ran into an issue while running this request. Try again or start a new chat.',
     }),
     icon: 'warning',
   },
   CONVERSATION_NOT_FOUND: {
     title: i18n.translate('xpack.agentBuilder.errorPrompt.conversationNotFoundErrorTitle', {
-      defaultMessage: 'Conversation not found',
+      defaultMessage: 'Chat not found',
     }),
     description: i18n.translate(
       'xpack.agentBuilder.errorPrompt.conversationNotFoundErrorDescription',
       {
         defaultMessage:
-          "The conversation ID in the URL doesn't exist. Browse your previous conversations or start a new one.",
+          "The chat ID in the URL doesn't exist. Browse your previous chats or start a new one.",
       }
     ),
     icon: 'magnify',

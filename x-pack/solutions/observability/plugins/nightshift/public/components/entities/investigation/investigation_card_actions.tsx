@@ -265,7 +265,7 @@ export const InvestigationCardActions = ({
                 <p>
                   {i18n.translate('xpack.nightshift.investigations.cardDeleteConfirmBody', {
                     defaultMessage:
-                      '"{title}" and its conversation will be permanently deleted. This cannot be undone.',
+                      '"{title}" and its chat will be permanently deleted. This cannot be undone.',
                     values: { title: investigation.title },
                   })}
                 </p>

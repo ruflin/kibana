@@ -95,7 +95,7 @@ export const useConversationStream = () => {
       promptRequestedEventId: string;
     }) => {
       if (!conversationId) {
-        throw new Error('Cannot resume without a conversation id');
+        throw new Error('Cannot resume without a chat id');
       }
       if (!agentId) {
         throw new Error('agentId is required to resume');

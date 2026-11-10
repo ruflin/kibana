@@ -80,14 +80,14 @@ const pinnedLabel = i18n.translate('xpack.agentBuilder.sidebar.conversation.pinn
 const pinnedListScrollRegionLabel = i18n.translate(
   'xpack.agentBuilder.sidebar.conversation.pinnedListScrollRegion',
   {
-    defaultMessage: 'Pinned conversation list',
+    defaultMessage: 'Pinned chat list',
   }
 );
 
 const conversationListScrollRegionLabel = i18n.translate(
   'xpack.agentBuilder.sidebar.conversation.conversationListScrollRegion',
   {
-    defaultMessage: 'Conversation list',
+    defaultMessage: 'Chat list',
   }
 );
 
