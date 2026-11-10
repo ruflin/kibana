@@ -49,7 +49,7 @@ export const LINKED_INVESTIGATIONS_LABELS = Object.freeze({
 
 export const DETAILS_FLYOUT_LABELS = Object.freeze({
   ariaLabel: i18n.translate('xpack.agenticInvestigations.detailsFlyout.ariaLabel', {
-    defaultMessage: 'Conversation details',
+    defaultMessage: 'Chat details',
   }),
   tabs: {
     overview: i18n.translate('xpack.agenticInvestigations.detailsFlyout.tabs.overview', {

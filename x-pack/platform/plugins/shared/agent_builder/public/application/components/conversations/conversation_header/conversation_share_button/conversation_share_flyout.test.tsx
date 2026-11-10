@@ -88,7 +88,7 @@ const baseConversation = {
   id: 'conversation-1',
   agent_id: 'agent-1',
   user: { id: 'owner-1', username: 'ethan' },
-  title: 'My conversation',
+  title: 'My chat',
   created_at: '2026-01-01T00:00:00.000Z',
   updated_at: '2026-01-01T00:00:00.000Z',
   rounds: [],

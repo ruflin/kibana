@@ -24,7 +24,7 @@ export const labels = {
     defaultMessage: 'Share',
   }),
   summary: i18n.translate('xpack.agentBuilder.conversationAppHeader.summary', {
-    defaultMessage: 'Summary',
+    defaultMessage: 'Chat summary',
   }),
   chatDetails: i18n.translate('xpack.agentBuilder.conversationAppHeader.chatDetails', {
     defaultMessage: 'Chat details',

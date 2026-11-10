@@ -70,7 +70,7 @@ test.describe(
       );
 
       await expect(page.testSubj.locator('errorPrompt')).toBeVisible();
-      await expect(page.testSubj.locator('errorPromptTitle')).toHaveText('Conversation not found');
+      await expect(page.testSubj.locator('errorPromptTitle')).toHaveText('Chat not found');
 
       await expect(page.testSubj.locator('startNewConversationButton')).toBeVisible();
       await page.testSubj.click('startNewConversationButton');

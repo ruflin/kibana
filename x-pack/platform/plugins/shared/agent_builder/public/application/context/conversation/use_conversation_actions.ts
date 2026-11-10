@@ -39,7 +39,7 @@ export const createConversationActions = ({
   // and resolves with the response, which the completion release needs.
   const fetchConversation = () => {
     if (!conversationId) {
-      return Promise.reject(new Error('Invalid conversation id'));
+      return Promise.reject(new Error('Invalid chat id'));
     }
     return queryClient.fetchQuery({
       queryKey,

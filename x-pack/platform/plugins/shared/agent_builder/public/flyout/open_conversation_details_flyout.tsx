@@ -14,7 +14,10 @@ import { QueryClient, QueryClientProvider } from '@kbn/react-query';
 import { CONVERSATION_DETAILS_FLYOUT_HISTORY_KEY } from '@kbn/agent-builder-browser';
 import type { ConversationsService } from '../services/conversations/conversations_service';
 import type { ConversationTemplatesService } from '../services/conversation_templates';
-import { ConversationDetailsFlyoutSnapshot, FLYOUT_TITLE } from './conversation_details_flyout';
+import {
+  ConversationDetailsFlyoutSnapshot,
+  SNAPSHOT_FLYOUT_TITLE,
+} from './conversation_details_flyout';
 import {
   CONVERSATION_DETAILS_FLYOUT_DEFAULT_WIDTH,
   getConversationDetailsFlyoutWidthProps,
@@ -22,8 +25,7 @@ import {
 
 const notFoundMessage = (conversationId: string) =>
   i18n.translate('xpack.agentBuilder.conversationDetailsFlyout.notFoundToast', {
-    defaultMessage:
-      'Conversation with id {conversationId} does not exist. Try with an existing conversation id.',
+    defaultMessage: 'Chat with id {conversationId} does not exist. Try with an existing chat id.',
     values: { conversationId },
   });
 
@@ -67,7 +69,7 @@ export const openConversationDetailsFlyout = async ({
     {
       session: 'start',
       historyKey: CONVERSATION_DETAILS_FLYOUT_HISTORY_KEY,
-      title: FLYOUT_TITLE,
+      title: SNAPSHOT_FLYOUT_TITLE,
       ...getConversationDetailsFlyoutWidthProps(),
       // Lets the flyout menu's reset action return to the default, not to the remembered width.
       defaultSize: CONVERSATION_DETAILS_FLYOUT_DEFAULT_WIDTH,

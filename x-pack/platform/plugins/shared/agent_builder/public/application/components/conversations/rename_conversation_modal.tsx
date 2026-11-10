@@ -29,10 +29,10 @@ import { useToasts } from '../../hooks/use_toasts';
 
 const labels = {
   inputPlaceholder: i18n.translate('xpack.agentBuilder.renameConversationModal.inputPlaceholder', {
-    defaultMessage: 'Enter conversation name',
+    defaultMessage: 'Enter chat name',
   }),
   renameErrorToast: i18n.translate('xpack.agentBuilder.renameConversationModal.renameErrorToast', {
-    defaultMessage: 'Failed to rename conversation',
+    defaultMessage: 'Failed to rename chat',
   }),
 };
 

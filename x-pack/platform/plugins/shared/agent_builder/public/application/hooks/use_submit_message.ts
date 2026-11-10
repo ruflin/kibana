@@ -52,7 +52,7 @@ export const useSubmitMessage = () => {
         return;
       }
       if (!agentId) {
-        throw new Error('agentId is required to start a conversation');
+        throw new Error('agentId is required to start a chat');
       }
 
       let created;

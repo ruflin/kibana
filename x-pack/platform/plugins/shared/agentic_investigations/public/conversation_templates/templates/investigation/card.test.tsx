@@ -100,13 +100,13 @@ describe('InvestigationCard', () => {
   it.each([
     [
       'the first subject',
-      investigation({ title: 'New conversation', title_pending: true }),
+      investigation({ title: 'New chat', title_pending: true }),
       'Latency rule',
     ],
     [
       "a Slack thread's question rather than its channel",
       investigation({
-        title: 'New conversation',
+        title: 'New chat',
         title_pending: true,
         subjects: [
           {
@@ -122,7 +122,7 @@ describe('InvestigationCard', () => {
     ],
     [
       'a generic title without a subject',
-      investigation({ title: 'New conversation', title_pending: true, subjects: [] }),
+      investigation({ title: 'New chat', title_pending: true, subjects: [] }),
       'New investigation',
     ],
   ])('names an investigation Agent Builder has not titled yet after %s', (_, item, expected) => {

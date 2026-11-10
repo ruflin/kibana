@@ -16,7 +16,7 @@ export class ConversationTemplatesService {
 
   registerTab(tabId: string, definition: ConversationTemplateTabDefinition): void {
     if (this.tabs.has(tabId)) {
-      throw new Error(`Conversation template tab "${tabId}" is already registered.`);
+      throw new Error(`Chat template tab "${tabId}" is already registered.`);
     }
     this.tabs.set(tabId, definition);
   }
@@ -30,7 +30,7 @@ export class ConversationTemplatesService {
     definition: ConversationTemplateUIDefinition
   ): void {
     if (this.templates.has(templateId)) {
-      throw new Error(`Conversation template "${templateId}" already has a UI definition.`);
+      throw new Error(`Chat template "${templateId}" already has a UI definition.`);
     }
     this.templates.set(templateId, definition);
   }

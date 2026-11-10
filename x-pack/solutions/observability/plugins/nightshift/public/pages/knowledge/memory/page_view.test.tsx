@@ -415,7 +415,7 @@ describe('MemoryPageView', () => {
     renderView();
 
     expect(screen.getByTestId('nightshiftMemorySourceTaskLink')).toHaveTextContent(
-      'Agent Builder conversation'
+      'Agent Builder chat'
     );
   });
 

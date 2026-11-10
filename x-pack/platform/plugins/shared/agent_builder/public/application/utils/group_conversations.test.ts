@@ -30,7 +30,7 @@ describe('groupConversationsByTime', () => {
     id,
     agent_id: 'test-agent',
     user: { id: 'test-user', username: 'Test User' },
-    title: `Conversation ${id}`,
+    title: `Chat ${id}`,
     created_at: updatedAt,
     updated_at: updatedAt,
     rounds: [],

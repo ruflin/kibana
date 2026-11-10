@@ -1219,7 +1219,7 @@ Menu actions are icon buttons rendered in the flyout menu bar before the close b
 is an `EuiFlyoutMenuAction` (`iconType`, `aria-label`, and `onClick` or `href`, plus optional
 `toolTipContent`, `isDisabled` and `isLoading`). Each flyout takes them from a different place:
 
-- The in-chat flyout (opened from the chat's "Chat info" button) uses the template's
+- The in-chat flyout (opened from the chat's "Chat summary" button) uses the template's
   `detailsFlyout.trailingActions`, re-evaluated when the conversation updates.
 - Flyouts opened with `openConversationDetails` use only its `trailingActions` option, fixed when
   the flyout opens. They don't read the template's `trailingActions`, because the template isn't

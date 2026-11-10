@@ -32,7 +32,7 @@ const renderRow = (permissions: Partial<ConversationPermissions>) => {
         <ConversationListItemRow
           agentId="agent-1"
           conversationId={conversationId}
-          title="My conversation"
+          title="My chat"
           icon="comment"
           isActive={false}
           routeConversationId={conversationId}

@@ -18,7 +18,7 @@ import { appPaths } from '../../../utils/app_paths';
 const NEW_CONVERSATION_BUTTON_LABEL = i18n.translate(
   'xpack.agentBuilder.appError.startNewConversationButtonLabel',
   {
-    defaultMessage: 'Start new conversation',
+    defaultMessage: 'Start new chat',
   }
 );
 

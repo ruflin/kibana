@@ -37,7 +37,7 @@ const labels = {
     defaultMessage: 'Toggle sidebar',
   }),
   newConversation: i18n.translate('xpack.agentBuilder.sidebar.header.newConversation', {
-    defaultMessage: 'New conversation',
+    defaultMessage: 'New chat',
   }),
 };
 

@@ -44,7 +44,7 @@ const renderTitle = ({
   permissions: Partial<ConversationPermissions>;
   isReadOnly?: boolean;
 }) => {
-  mockUseConversationTitle.mockReturnValue({ title: 'My conversation', isLoading: false });
+  mockUseConversationTitle.mockReturnValue({ title: 'My chat', isLoading: false });
   mockUseHasPersistedConversation.mockReturnValue(true);
   mockUseConversationPermissions.mockReturnValue({
     rename: false,
@@ -90,9 +90,7 @@ describe('EmbeddableConversationTitle', () => {
     renderTitle({ permissions: { rename: false, delete: false } });
 
     expect(screen.queryByTestId('agentBuilderConversationTitleButton')).not.toBeInTheDocument();
-    expect(screen.getByTestId('agentBuilderConversationTitle')).toHaveTextContent(
-      'My conversation'
-    );
+    expect(screen.getByTestId('agentBuilderConversationTitle')).toHaveTextContent('My chat');
   });
 
   it('renders an icon-only read-only badge for read-only conversations', () => {

@@ -77,7 +77,7 @@ export const registerApp = ({
     euiIconType: 'logoElasticsearch',
     order: 2060,
     visibleIn: ['classicSideNav', 'projectSideNav', 'globalSearch'],
-    keywords: ['agent builder', 'ai agent', 'chat agent'],
+    keywords: ['agent builder', 'ai agent', 'chat agent', 'conversation agent'],
     updater$: appUpdater$,
     deepLinks: buildAgentBuilderDeepLinks(false),
     defaultPath: '/agents',

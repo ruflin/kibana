@@ -96,7 +96,7 @@ export const BaseDeleteConversationModal: React.FC<BaseDeleteConversationModalPr
       <p>
         <FormattedMessage
           id="xpack.agentBuilder.conversationTitle.deleteConversationModal.description"
-          defaultMessage="Are you sure you want to delete the conversation {title}? This action cannot be undone."
+          defaultMessage="Are you sure you want to delete the chat {title}? This action cannot be undone."
           values={{
             title: <strong>{title || ''}</strong>,
           }}

@@ -115,7 +115,7 @@ export function MemoryPageView({
       ? page.context
       : conversationId
       ? i18n.translate('xpack.nightshift.knowledge.memory.metadata.conversationLabel', {
-          defaultMessage: 'Agent Builder conversation',
+          defaultMessage: 'Agent Builder chat',
         })
       : undefined;
   const archiveReason = page.archived ? page.archive_reason : undefined;

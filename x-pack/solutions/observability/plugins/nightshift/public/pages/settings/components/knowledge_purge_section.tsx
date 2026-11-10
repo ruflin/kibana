@@ -297,7 +297,7 @@ export const KnowledgePurgeSection = ({ canManage }: { canManage: boolean }) => 
                 <li>
                   <FormattedMessage
                     id="xpack.nightshift.settings.purge.confirmInvestigations"
-                    defaultMessage="Investigation conversations and their rounds"
+                    defaultMessage="Investigation chats and their rounds"
                   />
                 </li>
               </ul>

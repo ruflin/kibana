@@ -15,7 +15,7 @@ import { MoreActionsButton } from './more_actions_button';
 
 const labels = {
   container: i18n.translate('xpack.agentBuilder.conversationActions.container', {
-    defaultMessage: 'Conversation actions',
+    defaultMessage: 'Chat actions',
   }),
   close: i18n.translate('xpack.agentBuilder.conversationActions.close', {
     defaultMessage: 'Close',

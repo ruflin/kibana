@@ -45,13 +45,13 @@ const labels = {
   fullScreenDisabledTooltip: i18n.translate(
     'xpack.agentBuilder.conversationActions.fullScreenDisabledTooltip',
     {
-      defaultMessage: 'Full-screen mode is available once this conversation has been created.',
+      defaultMessage: 'Full-screen mode is available once this chat has been created.',
     }
   ),
   downloadConversation: i18n.translate(
     'xpack.agentBuilder.conversationActions.downloadConversation',
     {
-      defaultMessage: 'Download conversation',
+      defaultMessage: 'Download chat',
     }
   ),
   activityLog: i18n.translate('xpack.agentBuilder.conversationActions.activityLog', {
@@ -60,7 +60,7 @@ const labels = {
   activityLogNoActivityTooltip: i18n.translate(
     'xpack.agentBuilder.conversationActions.activityLogNoActivityTooltip',
     {
-      defaultMessage: 'No activity has been recorded for this conversation.',
+      defaultMessage: 'No activity has been recorded for this chat.',
     }
   ),
 };

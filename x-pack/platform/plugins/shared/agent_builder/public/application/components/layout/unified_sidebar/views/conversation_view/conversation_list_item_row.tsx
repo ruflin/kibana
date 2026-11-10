@@ -64,13 +64,13 @@ const labels = {
     defaultMessage: 'Unpin',
   }),
   openMenu: i18n.translate('xpack.agentBuilder.sidebar.conversationList.openMenu', {
-    defaultMessage: 'Open conversation menu',
+    defaultMessage: 'Open chat menu',
   }),
   actionsMenu: i18n.translate('xpack.agentBuilder.sidebar.conversationList.actionsMenu', {
-    defaultMessage: 'Conversation actions',
+    defaultMessage: 'Chat actions',
   }),
   deleteError: i18n.translate('xpack.agentBuilder.sidebar.conversationList.deleteError', {
-    defaultMessage: 'Failed to delete conversation',
+    defaultMessage: 'Failed to delete chat',
   }),
 };
 

@@ -207,7 +207,7 @@ describe('useConversationList', () => {
 
       const [errorArg, optionsArg] = mockAddError.mock.calls[0];
       expect(errorArg).toBe(networkError);
-      expect(optionsArg).toEqual({ title: 'Unable to search conversations' });
+      expect(optionsArg).toEqual({ title: 'Unable to search chats' });
     });
   });
 });

@@ -34,7 +34,7 @@ describe('ConversationTemplatesService', () => {
     service.registerTab('overview', overviewTab);
 
     expect(() => service.registerTab('overview', overviewTab)).toThrowError(
-      'Conversation template tab "overview" is already registered.'
+      'Chat template tab "overview" is already registered.'
     );
   });
 
@@ -50,7 +50,7 @@ describe('ConversationTemplatesService', () => {
     service.registerTemplateUIDefinition('phishing', phishingDefinition);
 
     expect(() => service.registerTemplateUIDefinition('phishing', phishingDefinition)).toThrowError(
-      'Conversation template "phishing" already has a UI definition.'
+      'Chat template "phishing" already has a UI definition.'
     );
   });
 

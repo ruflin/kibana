@@ -19,7 +19,7 @@ import { useConversationTemplateDisplay } from '../../../hooks/use_conversation_
 const newConversationTitleLabel = i18n.translate(
   'xpack.agentBuilder.embeddableHeader.newConversation',
   {
-    defaultMessage: 'New Conversation',
+    defaultMessage: 'New Chat',
   }
 );
 

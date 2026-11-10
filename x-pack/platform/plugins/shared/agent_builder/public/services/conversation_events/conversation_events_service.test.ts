@@ -54,7 +54,7 @@ describe('ConversationEventsService', () => {
     service.register(noteDefinition);
 
     expect(() => service.register(noteDefinition)).toThrow(
-      'Conversation event type "scratch.note" is already registered.'
+      'Chat event type "scratch.note" is already registered.'
     );
   });
 

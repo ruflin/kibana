@@ -192,7 +192,7 @@ interface ConversationInputProps {
 
 const disabledPlaceholder = (agentId?: string) =>
   i18n.translate('xpack.agentBuilder.conversationInput.textArea.disabledPlaceholder', {
-    defaultMessage: 'Agent "{agentId}" has been deleted. Please start a new conversation.',
+    defaultMessage: 'Agent "{agentId}" has been deleted. Please start a new chat.',
     values: {
       agentId,
     },
@@ -214,11 +214,11 @@ const getMessageEditorAriaLabel = ({
   if (isNewConversation) {
     return i18n.translate(
       'xpack.agentBuilder.conversationInput.messageEditor.newConversationLabel',
-      { defaultMessage: 'New conversation, Message input' }
+      { defaultMessage: 'New chat, Message input' }
     );
   }
   return i18n.translate('xpack.agentBuilder.conversationInput.messageEditor.conversationLabel', {
-    defaultMessage: '{title} conversation, Message input',
+    defaultMessage: '{title} chat, Message input',
     values: { title: conversationTitle },
   });
 };

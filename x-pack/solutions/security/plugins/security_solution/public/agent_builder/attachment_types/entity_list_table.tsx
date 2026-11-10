@@ -338,7 +338,7 @@ export const EntityListTable: React.FC<{
         tableCaption={i18n.translate(
           'xpack.securitySolution.agentBuilder.entityListAttachment.tableCaption',
           {
-            defaultMessage: 'Security entities referenced in this conversation',
+            defaultMessage: 'Security entities referenced in this chat',
           }
         )}
         items={entities}
