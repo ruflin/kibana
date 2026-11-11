@@ -54,7 +54,11 @@ const makeDeps = ({ spaceId = 'default' }: { spaceId?: string } = {}) => {
 
   const asInternalUser = {
     // The visibility pre-check; by default the report is reachable from the request's space.
-    search: jest.fn().mockResolvedValue({ hits: { hits: [{ _id: 'report-1' }] } }),
+    esql: {
+      query: jest
+        .fn()
+        .mockResolvedValue({ columns: [{ name: '_id', type: 'keyword' }], values: [['report-1']] }),
+    },
   };
   const context = {
     alertzero: Promise.resolve({
@@ -109,7 +113,7 @@ describe('registerFindOrCreateInvestigationRoute', () => {
     const gatedContext = {
       ...context,
       core: Promise.resolve({
-        elasticsearch: { client: { asInternalUser: { search: jest.fn() } } },
+        elasticsearch: { client: { asInternalUser: { esql: { query: jest.fn() } } } },
         uiSettings: { client: { get: jest.fn().mockResolvedValue(false) } },
       }),
     };
@@ -182,7 +186,10 @@ describe('registerFindOrCreateInvestigationRoute', () => {
   // space's reports. Without this check any id would mint a public Investigation.
   it('404s without creating an Investigation when the report is not visible in the request space', async () => {
     const { handler, context, asInternalUser, getScopedClient } = makeDeps({ spaceId: 'space-a' });
-    asInternalUser.search.mockResolvedValue({ hits: { hits: [] } });
+    asInternalUser.esql.query.mockResolvedValue({
+      columns: [{ name: '_id', type: 'keyword' }],
+      values: [],
+    });
     const response = httpServerMock.createResponseFactory();
 
     await handler(context, requestFor({ reportId: 'other-space-report' }), response);
@@ -199,21 +206,17 @@ describe('registerFindOrCreateInvestigationRoute', () => {
 
     await handler(context, requestFor(), httpServerMock.createResponseFactory());
 
-    expect(asInternalUser.search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        index: '.kibana-threat-reports',
-        query: {
-          bool: {
-            filter: [{ terms: { space_id: ['space-a', '*'] } }, { ids: { values: ['report-1'] } }],
-          },
-        },
-      })
-    );
+    expect(asInternalUser.esql.query).toHaveBeenCalledWith({
+      query:
+        'FROM .kibana-threat-reports METADATA _id | WHERE _id == ?reportId | KEEP _id | LIMIT 1',
+      params: [{ reportId: 'report-1' }],
+      filter: { terms: { space_id: ['space-a', '*'] } },
+    });
   });
 
   it('logs and returns a generic 500, creating nothing, when the visibility check fails', async () => {
     const { handler, context, asInternalUser, getScopedClient, logger } = makeDeps();
-    asInternalUser.search.mockRejectedValue(new Error('reports index unavailable'));
+    asInternalUser.esql.query.mockRejectedValue(new Error('reports index unavailable'));
     const response = httpServerMock.createResponseFactory();
 
     await handler(context, requestFor(), response);

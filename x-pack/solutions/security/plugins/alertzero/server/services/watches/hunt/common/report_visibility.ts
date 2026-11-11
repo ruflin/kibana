@@ -5,7 +5,9 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
+import { runEsqlRead } from '../../../../lib/esql_read';
 import { HUNT_REPORTS_INDEX } from '../../../../../common/constants';
 import { buildHuntSpaceFilterTerms } from './space_filter';
 
@@ -23,18 +25,15 @@ export const isReportVisibleToSpace = async (
   esClient: ElasticsearchClient,
   { spaceId, reportId }: { spaceId: string; reportId: string }
 ): Promise<boolean> => {
-  const response = await esClient.search({
-    index: HUNT_REPORTS_INDEX,
-    size: 1,
-    ignore_unavailable: true,
-    _source: false,
-    track_total_hits: false,
-    query: {
-      bool: {
-        filter: [buildHuntSpaceFilterTerms(spaceId), { ids: { values: [reportId] } }],
-      },
-    },
+  // A missing reports index has no reports. The space terms stay a Query DSL request filter: this
+  // plugin does not own the reports index mapping, and `terms` is exact whatever the field type.
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([HUNT_REPORTS_INDEX], ['_id']).pipe`WHERE _id == ${{ reportId }}`
+      .keep('_id')
+      .limit(1),
+    filter: buildHuntSpaceFilterTerms(spaceId),
   });
 
-  return response.hits.hits.length > 0;
+  return (response?.values.length ?? 0) > 0;
 };

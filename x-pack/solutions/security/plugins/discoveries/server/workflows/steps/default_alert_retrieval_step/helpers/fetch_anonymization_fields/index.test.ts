@@ -9,7 +9,7 @@ import type { ElasticsearchClient } from '@kbn/core/server';
 import { fetchAnonymizationFields } from '.';
 
 const mockEsClient = {
-  search: jest.fn(),
+  esql: { query: jest.fn() },
 } as unknown as ElasticsearchClient;
 
 describe('fetchAnonymizationFields', () => {
@@ -19,25 +19,27 @@ describe('fetchAnonymizationFields', () => {
 
   describe('when the index contains fields', () => {
     it('returns mapped anonymization fields', async () => {
-      (mockEsClient.search as jest.Mock).mockResolvedValue({
-        hits: {
-          hits: [
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValue({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: 'unsupported' },
+        ],
+        values: [
+          [
+            'field-1',
             {
-              _id: 'field-1',
-              _source: {
-                '@timestamp': '2024-01-01T00:00:00Z',
-                allowed: true,
-                anonymized: false,
-                created_at: '2024-01-01',
-                created_by: 'elastic',
-                field: 'host.name',
-                namespace: 'default',
-                updated_at: '2024-01-02',
-                updated_by: 'elastic',
-              },
+              '@timestamp': '2024-01-01T00:00:00Z',
+              allowed: true,
+              anonymized: false,
+              created_at: '2024-01-01',
+              created_by: 'elastic',
+              field: 'host.name',
+              namespace: 'default',
+              updated_at: '2024-01-02',
+              updated_by: 'elastic',
             },
           ],
-        },
+        ],
       });
 
       const result = await fetchAnonymizationFields({ esClient: mockEsClient, spaceId: 'default' });
@@ -59,28 +61,26 @@ describe('fetchAnonymizationFields', () => {
     });
 
     it('queries the correct space-scoped index', async () => {
-      (mockEsClient.search as jest.Mock).mockResolvedValue({ hits: { hits: [] } });
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValue({ columns: [], values: [] });
 
       await fetchAnonymizationFields({ esClient: mockEsClient, spaceId: 'my-space' });
 
-      expect(mockEsClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: '.kibana-elastic-ai-assistant-anonymization-fields-my-space',
-        })
-      );
+      expect(mockEsClient.esql.query).toHaveBeenCalledWith({
+        query:
+          'FROM .kibana-elastic-ai-assistant-anonymization-fields-my-space METADATA _id, _source | LIMIT 1000',
+      });
     });
 
     it('filters out hits without _source', async () => {
-      (mockEsClient.search as jest.Mock).mockResolvedValue({
-        hits: {
-          hits: [
-            { _id: 'no-source', _source: undefined },
-            {
-              _id: 'with-source',
-              _source: { allowed: true, anonymized: false, field: 'user.name' },
-            },
-          ],
-        },
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValue({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: 'unsupported' },
+        ],
+        values: [
+          ['no-source', null],
+          ['with-source', { allowed: true, anonymized: false, field: 'user.name' }],
+        ],
       });
 
       const result = await fetchAnonymizationFields({ esClient: mockEsClient, spaceId: 'default' });
@@ -90,15 +90,12 @@ describe('fetchAnonymizationFields', () => {
     });
 
     it('uses empty string for id when _id is undefined', async () => {
-      (mockEsClient.search as jest.Mock).mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _id: undefined,
-              _source: { allowed: true, anonymized: false, field: 'host.ip' },
-            },
-          ],
-        },
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValue({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: 'unsupported' },
+        ],
+        values: [[null, { allowed: true, anonymized: false, field: 'host.ip' }]],
       });
 
       const result = await fetchAnonymizationFields({ esClient: mockEsClient, spaceId: 'default' });
@@ -109,7 +106,9 @@ describe('fetchAnonymizationFields', () => {
 
   describe('when the index does not exist or query fails', () => {
     it('returns an empty array on error', async () => {
-      (mockEsClient.search as jest.Mock).mockRejectedValue(new Error('index_not_found_exception'));
+      (mockEsClient.esql.query as jest.Mock).mockRejectedValue(
+        new Error('index_not_found_exception')
+      );
 
       const result = await fetchAnonymizationFields({ esClient: mockEsClient, spaceId: 'default' });
 
@@ -117,7 +116,7 @@ describe('fetchAnonymizationFields', () => {
     });
 
     it('returns an empty array when hits are empty', async () => {
-      (mockEsClient.search as jest.Mock).mockResolvedValue({ hits: { hits: [] } });
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValue({ columns: [], values: [] });
 
       const result = await fetchAnonymizationFields({ esClient: mockEsClient, spaceId: 'default' });
 

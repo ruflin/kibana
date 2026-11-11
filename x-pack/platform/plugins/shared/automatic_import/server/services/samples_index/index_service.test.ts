@@ -21,28 +21,16 @@ jest.mock('./storage', () => {
     items: [],
   });
 
-  const mockSearch = jest.fn().mockResolvedValue({
-    hits: {
-      hits: [
-        {
-          _source: {
-            log_data: 'sample log 1',
-          },
-        },
-        {
-          _source: {
-            log_data: 'sample log 2',
-          },
-        },
-      ],
-    },
+  const mockEsql = jest.fn().mockResolvedValue({
+    columns: [{ name: '_source', type: 'unsupported' }],
+    values: [[{ log_data: 'sample log 1' }], [{ log_data: 'sample log 2' }]],
   });
 
   const mockDelete = jest.fn().mockResolvedValue({});
 
   const mockGetClient = jest.fn().mockReturnValue({
     bulk: mockBulk,
-    search: mockSearch,
+    esql: mockEsql,
     delete: mockDelete,
   });
 
@@ -236,18 +224,17 @@ describe('AutomaticImportSamplesIndexService', () => {
       const adapterInstance = createIndexAdapter.mock.results[0].value;
       const searchClient = adapterInstance.getClient();
 
-      expect(searchClient.search).toHaveBeenCalledTimes(1);
-      expect(searchClient.search).toHaveBeenCalledWith({
-        query: {
-          bool: {
-            must: [
-              { term: { integration_id: 'integration-123' } },
-              { term: { data_stream_id: 'data-stream-456' } },
-            ],
-          },
-        },
-        size: UPLOAD_SAMPLES_MAX_LINES,
-        track_total_hits: false,
+      expect(searchClient.esql).toHaveBeenCalledTimes(1);
+      const { metadata, pipeline } = searchClient.esql.mock.calls[0][0];
+      expect(metadata).toEqual(['_source']);
+      expect(pipeline.toRequest()).toEqual({
+        query:
+          'WHERE integration_id == ?integrationId AND data_stream_id == ?dataStreamId | KEEP _source | LIMIT ?limit',
+        params: [
+          { integrationId: 'integration-123' },
+          { dataStreamId: 'data-stream-456' },
+          { limit: UPLOAD_SAMPLES_MAX_LINES },
+        ],
       });
 
       expect(samples).toEqual(['sample log 1', 'sample log 2']);

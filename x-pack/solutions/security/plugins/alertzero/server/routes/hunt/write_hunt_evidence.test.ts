@@ -24,7 +24,11 @@ const makeDeps = ({ spaceId = 'default' }: { spaceId?: string } = {}) => {
   const asInternalUser = {
     update: jest.fn().mockResolvedValue({}),
     // The visibility pre-check; by default the report is reachable from the request's space.
-    search: jest.fn().mockResolvedValue({ hits: { hits: [{ _id: 'report-1' }] } }),
+    esql: {
+      query: jest
+        .fn()
+        .mockResolvedValue({ columns: [{ name: '_id', type: 'keyword' }], values: [['report-1']] }),
+    },
   };
   const context = {
     alertzero: Promise.resolve({
@@ -80,7 +84,9 @@ describe('registerWriteHuntEvidenceRoute', () => {
     const gatedContext = {
       ...context,
       core: Promise.resolve({
-        elasticsearch: { client: { asInternalUser: { update: jest.fn(), search: jest.fn() } } },
+        elasticsearch: {
+          client: { asInternalUser: { update: jest.fn(), esql: { query: jest.fn() } } },
+        },
         uiSettings: { client: { get: jest.fn().mockResolvedValue(false) } },
       }),
     };
@@ -116,7 +122,10 @@ describe('registerWriteHuntEvidenceRoute', () => {
   // privilege only says the caller may write in the space it called from.
   it('404s without writing when the report is not visible in the request space', async () => {
     const { handler, context, asInternalUser } = makeDeps({ spaceId: 'space-a' });
-    asInternalUser.search.mockResolvedValue({ hits: { hits: [] } });
+    asInternalUser.esql.query.mockResolvedValue({
+      columns: [{ name: '_id', type: 'keyword' }],
+      values: [],
+    });
     const response = httpServerMock.createResponseFactory();
 
     await handler(context, requestFor({ reportId: 'other-space-report' }), response);
@@ -130,16 +139,12 @@ describe('registerWriteHuntEvidenceRoute', () => {
 
     await handler(context, requestFor(), httpServerMock.createResponseFactory());
 
-    expect(asInternalUser.search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        index: '.kibana-threat-reports',
-        query: {
-          bool: {
-            filter: [{ terms: { space_id: ['space-a', '*'] } }, { ids: { values: ['report-1'] } }],
-          },
-        },
-      })
-    );
+    expect(asInternalUser.esql.query).toHaveBeenCalledWith({
+      query:
+        'FROM .kibana-threat-reports METADATA _id | WHERE _id == ?reportId | KEEP _id | LIMIT 1',
+      params: [{ reportId: 'report-1' }],
+      filter: { terms: { space_id: ['space-a', '*'] } },
+    });
   });
 
   it('returns acknowledged: true on success', async () => {

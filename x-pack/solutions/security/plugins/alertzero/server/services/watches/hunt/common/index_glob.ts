@@ -11,6 +11,21 @@ const escapeRegExpLiteral = (value: string): string => value.replace(/[.*+?^${}(
 export const compileGlob = (pattern: string): RegExp =>
   new RegExp(`^${pattern.split('*').map(escapeRegExpLiteral).join('.*')}$`);
 
+// A source name the ES|QL composer can print into `FROM` as it is: a (remote cluster prefixed)
+// index, alias, data stream or wildcard pattern, with no `|`, quote, space, newline or comma, and
+// no leading `_`, `-` or `+`.
+const PLAIN_ESQL_SOURCE = /^[A-Za-z0-9.*][A-Za-z0-9._*:+-]*$/;
+const MAX_ESQL_SOURCE_LENGTH = 255;
+
+/**
+ * Whether `pattern` is safe to use as a single ES|QL `FROM` source. The composer does not escape
+ * source names, so a model chosen pattern such as `logs-* | DROP message` would end the `FROM`
+ * command. The prefix check of the hunt universe does not catch it: the text before the first
+ * `*` is still inside the universe.
+ */
+export const isPlainEsqlSource = (pattern: string): boolean =>
+  pattern.length <= MAX_ESQL_SOURCE_LENGTH && PLAIN_ESQL_SOURCE.test(pattern);
+
 /** The literal text before a pattern's first `*`; the whole pattern when it has none. */
 export const literalPrefix = (pattern: string): string => pattern.split('*')[0];
 

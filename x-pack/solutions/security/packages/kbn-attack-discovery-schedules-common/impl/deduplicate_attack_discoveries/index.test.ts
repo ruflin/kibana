@@ -5,7 +5,6 @@
  * 2.0.
  */
 
-import type { estypes } from '@elastic/elasticsearch';
 import { elasticsearchServiceMock } from '@kbn/core/server/mocks';
 import { loggerMock } from '@kbn/logging-mocks';
 
@@ -20,6 +19,12 @@ jest.mock('../transforms/transform_to_alert_documents', () => ({
 
 const mockEsClient = elasticsearchServiceMock.createElasticsearchClient();
 const mockLogger = loggerMock.create();
+const mockEsqlQuery = mockEsClient.esql.query as unknown as jest.Mock;
+
+const esqlInstanceIds = (...ids: Array<string | null>) => ({
+  columns: [{ name: 'kibana.alert.instance.id', type: 'keyword' }],
+  values: ids.map((id) => [id]),
+});
 
 /**
  * An arbitrary producer identity. Not a real producer: the AD Worker passes `watch_floor_ad_worker`.
@@ -49,7 +54,7 @@ describe('deduplicateAttackDiscoveries', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockEsClient.search.mockResponse({ hits: { hits: [] } } as unknown as estypes.SearchResponse);
+    mockEsqlQuery.mockResolvedValue(esqlInstanceIds());
     (generateAttackDiscoveryAlertHash as jest.Mock).mockImplementation(({ attackDiscovery }) => {
       if (attackDiscovery === attack1) return uuid1;
       if (attackDiscovery === attack2) return uuid2;
@@ -69,24 +74,13 @@ describe('deduplicateAttackDiscoveries', () => {
   });
 
   it('should filter out all discoveries if all are duplicates', async () => {
-    mockEsClient.search.mockResponse({
-      hits: {
-        hits: [
-          { _source: { 'kibana.alert.instance.id': uuid1 } },
-          { _source: { 'kibana.alert.instance.id': uuid2 } },
-        ],
-      },
-    } as unknown as estypes.SearchResponse);
+    mockEsqlQuery.mockResolvedValue(esqlInstanceIds(uuid1, uuid2));
     const result = await deduplicateAttackDiscoveries(defaultProps);
     expect(result).toEqual([]);
   });
 
   it('should filter out only duplicates and keep new discoveries', async () => {
-    mockEsClient.search.mockResponse({
-      hits: {
-        hits: [{ _source: { 'kibana.alert.instance.id': uuid2 } }],
-      },
-    } as unknown as estypes.SearchResponse);
+    mockEsqlQuery.mockResolvedValue(esqlInstanceIds(uuid2));
     const result = await deduplicateAttackDiscoveries({
       ...defaultProps,
       attackDiscoveries: [attack1, attack2],
@@ -95,16 +89,37 @@ describe('deduplicateAttackDiscoveries', () => {
   });
 
   it('should handle ES hits with missing _source gracefully', async () => {
-    mockEsClient.search.mockResponse({
-      hits: {
-        hits: [{ _id: 'foo' }],
-      },
-    } as unknown as estypes.SearchResponse);
+    mockEsqlQuery.mockResolvedValue(esqlInstanceIds(null));
     const result = await deduplicateAttackDiscoveries({
       ...defaultProps,
       attackDiscoveries: [attack1],
     });
     expect(result).toEqual([attack1]);
+  });
+
+  it('queries the alert instance ids of every index pattern with an explicit limit', async () => {
+    await deduplicateAttackDiscoveries({ ...defaultProps, attackDiscoveries: [attack1, attack2] });
+
+    expect(mockEsqlQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: `FROM .test.alerts-*, .adhoc.alerts-* | WHERE \`kibana.alert.instance.id\` IN ("${uuid1}", "${uuid2}") | KEEP \`kibana.alert.instance.id\` | LIMIT 2`,
+      })
+    );
+  });
+
+  it('treats a missing alerts index as having no duplicates', async () => {
+    mockEsqlQuery.mockRejectedValue(
+      Object.assign(new Error('verification_exception'), {
+        statusCode: 400,
+        body: {
+          error: { type: 'verification_exception', reason: 'Unknown index [.test.alerts-*]' },
+        },
+      })
+    );
+
+    const result = await deduplicateAttackDiscoveries(defaultProps);
+
+    expect(result).toEqual(mockAttackDiscoveries);
   });
 
   it('should pass the injected computeSha256Hash to generateAttackDiscoveryAlertHash', async () => {
@@ -120,11 +135,7 @@ describe('deduplicateAttackDiscoveries', () => {
   });
 
   it('should log when duplicates are found for ad-hoc run', async () => {
-    mockEsClient.search.mockResponse({
-      hits: {
-        hits: [{ _source: { 'kibana.alert.instance.id': uuid1 } }],
-      },
-    } as unknown as estypes.SearchResponse);
+    mockEsqlQuery.mockResolvedValue(esqlInstanceIds(uuid1));
     await deduplicateAttackDiscoveries(defaultProps);
     expect(mockLogger.info).toHaveBeenCalledWith(
       'Ad-hoc Attack Discovery: Found 1 duplicate alert(s), skipping report for those.'
@@ -135,11 +146,7 @@ describe('deduplicateAttackDiscoveries', () => {
   });
 
   it('should log when duplicates are found for scheduled run', async () => {
-    mockEsClient.search.mockResponse({
-      hits: {
-        hits: [{ _source: { 'kibana.alert.instance.id': uuid1 } }],
-      },
-    } as unknown as estypes.SearchResponse);
+    mockEsqlQuery.mockResolvedValue(esqlInstanceIds(uuid1));
     await deduplicateAttackDiscoveries({
       ...defaultProps,
       ownerInfo: { ...ownerInfo, isSchedule: true },
@@ -186,11 +193,7 @@ describe('deduplicateAttackDiscoveries', () => {
         );
 
         // only producer-a's attack for `attack1` is already stored
-        mockEsClient.search.mockResponse({
-          hits: {
-            hits: [{ _source: { 'kibana.alert.instance.id': `${uuid1}-producer-a` } }],
-          },
-        } as unknown as estypes.SearchResponse);
+        mockEsqlQuery.mockResolvedValue(esqlInstanceIds(`${uuid1}-producer-a`));
       });
 
       it('still de-duplicates a re-run of the SAME producer', async () => {

@@ -5,7 +5,9 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import { runEsqlRead } from '../../../../lib/esql_read';
 import { splitRemoteCluster } from '../../../../../common/remote_cluster';
 import { STALE_PROCESS_AGE_MS } from './select_process_actions';
 import type { ProcessSelector } from './types';
@@ -90,10 +92,6 @@ interface Candidate {
   iocMatched: boolean;
 }
 
-interface ExitedAggregations {
-  exited: { buckets: Array<{ key: string; exited_at: { value_as_string: string } }> };
-}
-
 const asTypeList = (value: string | string[] | undefined): string[] =>
   value === undefined ? [] : Array.isArray(value) ? value : [value];
 
@@ -153,53 +151,48 @@ const findExitedAt = async (
   try {
     // An alert can be created after its process ended, so search from well before it.
     const earliestObservedAt = Math.min(...lookups.map(({ observedAt }) => observedAt));
-    const response = await esClient.search<unknown, ExitedAggregations>({
-      index: [
+    const since = new Date(earliestObservedAt - STALE_PROCESS_AGE_MS).toISOString();
+    // `event.category` and `event.type` are multi-valued keyword fields, so their exact terms stay
+    // a Query DSL request filter. One row per entity id at most, so the limit is the id count.
+    // A concrete index that is missing fails the whole query (ES|QL has no `ignore_unavailable`),
+    // which is handled like an unreadable index.
+    const response = await runEsqlRead({
+      esClient,
+      query: esql.from([
         DEFEND_PROCESS_EVENTS_INDEX,
         ...new Set(
           refIndices.filter((index) => index.startsWith(DEFEND_PLAIN_EVENTS_INDEX_PREFIX))
         ),
-      ],
-      // A missing plain index should not fail the whole lookup.
-      ignore_unavailable: true,
-      size: 0,
-      track_total_hits: false,
-      query: {
+      ]).pipe`WHERE process.entity_id IN (${entityIds.map((entityId) =>
+        esql.str(entityId)
+      )}) AND @timestamp >= TO_DATETIME(${{ since }})`
+        .pipe`STATS exited_at = MIN(@timestamp) BY process.entity_id`.limit(entityIds.length),
+      // Network disconnects are `end` events too.
+      filter: {
         bool: {
-          filter: [
-            { terms: { 'process.entity_id': entityIds } },
-            // Network disconnects are `end` events too.
-            { term: { 'event.category': 'process' } },
-            { term: { 'event.type': 'end' } },
-            {
-              range: {
-                '@timestamp': {
-                  gte: new Date(earliestObservedAt - STALE_PROCESS_AGE_MS).toISOString(),
-                },
-              },
-            },
-          ],
-        },
-      },
-      aggs: {
-        exited: {
-          terms: { field: 'process.entity_id', size: entityIds.length },
-          aggs: { exited_at: { min: { field: '@timestamp' } } },
+          filter: [{ term: { 'event.category': 'process' } }, { term: { 'event.type': 'end' } }],
         },
       },
     });
-    // Unreadable indices are skipped silently, so no shards means no answer.
-    if (response._shards.total === 0) {
+    // An unknown index is skipped silently, so no response means no answer.
+    if (!response) {
       logger?.warn(
         'rehydrateProcessSelectors: no readable Defend process events index, treating processes as live'
       );
       return new Map();
     }
+    const entityIdColumn = response.columns.findIndex(
+      (column) => column.name === 'process.entity_id'
+    );
+    const exitedAtColumn = response.columns.findIndex((column) => column.name === 'exited_at');
     return new Map(
-      (response.aggregations?.exited.buckets ?? []).map(({ key, exited_at: exitedAt }) => [
-        key,
-        exitedAt.value_as_string,
-      ])
+      response.values.flatMap((row) => {
+        const entityId = row[entityIdColumn];
+        const exitedAt = row[exitedAtColumn];
+        return typeof entityId === 'string' && typeof exitedAt === 'string'
+          ? [[entityId, exitedAt] as [string, string]]
+          : [];
+      })
     );
   } catch (err) {
     logger?.warn(

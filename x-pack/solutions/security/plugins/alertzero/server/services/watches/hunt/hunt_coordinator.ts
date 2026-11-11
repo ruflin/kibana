@@ -5,7 +5,9 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import dateMath from '@kbn/datemath';
 import type { MitreAttackDataClient } from '@kbn/mitre-attack-plugin/server';
 import type {
   HuntBehaviorArticleContext,
@@ -23,7 +25,9 @@ import {
   huntCompletenessOf,
   retryableReasonsOf,
 } from './common/completeness';
+import { runEsqlRead } from '../../../lib/esql_read';
 import { resolveHuntScope } from './common/resolve_index_scope';
+import { isPlainEsqlSource } from './common/index_glob';
 import { needsModelDatasetMatch, resolveTier2Targets } from './common/resolve_tier2_targets';
 import type { Tier2TargetSource } from './common/resolve_tier2_targets';
 import { generateRecommendations } from './common/build_recommendations';
@@ -34,7 +38,7 @@ import { isTier1SearchableIoc } from './tier1/attribute_hits';
 import { loadReportHuntContext, MAX_HUNT_REPORT_TEXT_CHARS } from './common/load_report_context';
 import type { ResolvedHuntScope } from './common/resolve_index_scope';
 import type { HuntScopeReportContext } from './common/match_hunt_datasets';
-import { SUMMARIZE_HIT_SOURCE_FIELDS, summarizeHit } from './common/summarize_hit';
+import { summarizeHit } from './common/summarize_hit';
 import { huntForThreat, emptyHuntForThreatResult } from './tier1/hunt_for_threat';
 import type { HuntBehaviorModels, HuntModels, HuntModelTier } from './types';
 import {
@@ -266,6 +270,12 @@ const clampHuntReportText = (value: string | undefined): string | undefined => {
     : value;
 };
 
+const toWindowDate = (value: string): string => {
+  const parsed = dateMath.parse(value);
+  if (!parsed?.isValid()) throw new Error(`Invalid hunt window bound: ${value}`);
+  return parsed.toISOString();
+};
+
 /**
  * When Tier 1 finds nothing, Tier 2 still needs index patterns and sample field
  * names so the LLM can emit grounded ES|QL (independent-hit path). Pull a small
@@ -284,41 +294,45 @@ const sampleTier2TargetEvents = async ({
   maxSamples: number;
   logger: Logger;
 }): Promise<string[]> => {
-  if (targets.length === 0 || maxSamples <= 0) return [];
+  // The composer prints source names as they are, so a model chosen target must be a plain name.
+  const sources = targets.filter(isPlainEsqlSource);
+  if (sources.length < targets.length) {
+    logger.warn(
+      `hunt_coordinator: skipped ${
+        targets.length - sources.length
+      } Behavior Hunt target(s) that are not plain index names`
+    );
+  }
+  if (sources.length === 0 || maxSamples <= 0) return [];
   try {
-    const response = await esClient.search({
-      index: targets,
-      size: maxSamples,
-      ignore_unavailable: true,
-      allow_no_indices: true,
-      query: {
-        bool: {
-          filter: [
-            {
-              range: {
-                '@timestamp': {
-                  gte: window.from,
-                  // Exclusive `to`, matching `IndexScopeWindow` and both tiers.
-                  lt: window.to,
-                },
-              },
-            },
-          ],
-        },
-      },
-      sort: [{ '@timestamp': { order: 'desc' as const } }],
-      // Only what the digest reads. These documents are never returned to the
-      // caller, so a full `_source` would move whole log events across the wire
-      // for `summarizeHit` to throw nearly all of away, once per sample.
-      _source: [...SUMMARIZE_HIT_SOURCE_FIELDS],
+    // The window bounds are date math (`now-30d`) or dates; ES|QL needs absolute dates. `to` is
+    // exclusive, matching `IndexScopeWindow` and both tiers.
+    const from = toWindowDate(window.from);
+    const to = toWindowDate(window.to);
+    // A missing index has no samples. `_source` is the whole document, which `summarizeHit` reads
+    // its few fields from; the cap on `maxSamples` bounds what moves over the wire.
+    const response = await runEsqlRead({
+      esClient,
+      query: esql.from(sources, ['_id', '_index', '_source'])
+        .pipe`WHERE @timestamp >= TO_DATETIME(${{ from }}) AND @timestamp < TO_DATETIME(${{ to }})`
+        .pipe`SORT @timestamp DESC NULLS LAST`
+        .limit(maxSamples)
+        .keep('_id', '_index', '_source'),
     });
+    const columnIndex = (name: string): number =>
+      response?.columns.findIndex((column) => column.name === name) ?? -1;
+    const [idColumn, indexColumn, sourceColumn] = [
+      columnIndex('_id'),
+      columnIndex('_index'),
+      columnIndex('_source'),
+    ];
     // Envelope keys last so a document with its own top-level `id`/`index`
     // field cannot clobber the hit's `_id`/`_index`.
-    return (response.hits.hits ?? []).map((hit) =>
+    return (response?.values ?? []).map((row) =>
       summarizeHit({
-        index: String(hit._index ?? ''),
-        id: String(hit._id ?? ''),
-        source: (hit._source ?? {}) as Record<string, unknown>,
+        index: String(row[indexColumn] ?? ''),
+        id: String(row[idColumn] ?? ''),
+        source: (row[sourceColumn] ?? {}) as Record<string, unknown>,
       })
     );
   } catch (err) {

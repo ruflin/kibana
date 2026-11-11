@@ -11,7 +11,6 @@ import type { ScopedModel } from '@kbn/agent-builder-server';
 import type { HuntModels } from './types';
 import { huntCoordinator } from './hunt_coordinator';
 import type { HuntCoordinatorParams } from './hunt_coordinator';
-import { SUMMARIZE_HIT_SOURCE_FIELDS } from './common/summarize_hit';
 
 /** The universe the routes hand the coordinator: the space's default data view. */
 const INDEX_PATTERNS = ['logs-*', 'filebeat-*', '-*elastic-cloud-logs-*'];
@@ -1860,26 +1859,29 @@ describe('huntCoordinator', () => {
       per_index: [],
     });
     const mockModels = allTiers({} as ScopedModel);
-    const search = jest.fn().mockResolvedValue({
-      hits: {
-        hits: [
+    const query = jest.fn().mockResolvedValue({
+      columns: [
+        { name: '_id', type: 'keyword' },
+        { name: '_index', type: 'keyword' },
+        { name: '_source', type: 'unsupported' },
+      ],
+      values: [
+        [
+          'evt-1',
+          'logs-aws.cloudtrail-default',
           {
-            _index: 'logs-aws.cloudtrail-default',
-            _id: 'evt-1',
-            _source: {
-              event: {
-                action: 'AssumeRole',
-                provider: 'sts.amazonaws.com',
-                dataset: 'aws.cloudtrail',
-              },
-              host: { name: 'WIN-ANALYST01' },
-              user: { name: 'dev-user' },
+            event: {
+              action: 'AssumeRole',
+              provider: 'sts.amazonaws.com',
+              dataset: 'aws.cloudtrail',
             },
+            host: { name: 'WIN-ANALYST01' },
+            user: { name: 'dev-user' },
           },
         ],
-      },
+      ],
     });
-    const esWithSearch = { search } as unknown as ElasticsearchClient;
+    const esWithSearch = { esql: { query } } as unknown as ElasticsearchClient;
 
     await huntCoordinator(
       { esClient: esWithSearch, reportsEsClient: esClient },
@@ -1895,10 +1897,15 @@ describe('huntCoordinator', () => {
       }
     );
 
-    expect(search).toHaveBeenCalled();
-    // These documents only ever become one-line digests, so a full `_source` would
-    // move whole log events across the wire to be thrown away.
-    expect(search.mock.calls[0][0]._source).toEqual([...SUMMARIZE_HIT_SOURCE_FIELDS]);
+    expect(query).toHaveBeenCalledTimes(1);
+    // Newest first with an explicit limit, over the exclusive-`to` window.
+    expect(query.mock.calls[0][0].query).toMatch(
+      /^FROM .+ METADATA _id, _index, _source \| WHERE @timestamp >= TO_DATETIME\(\?from\) AND @timestamp < TO_DATETIME\(\?to\) \| SORT @timestamp DESC NULLS LAST \| LIMIT \d+ \| KEEP _id, _index, _source$/
+    );
+    expect(query.mock.calls[0][0].params).toEqual([
+      { from: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) },
+      { to: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) },
+    ]);
     expect(mockT2).toHaveBeenCalledWith(
       { extraction: mockModels.frontier, esql: mockModels.frontier },
       logger,

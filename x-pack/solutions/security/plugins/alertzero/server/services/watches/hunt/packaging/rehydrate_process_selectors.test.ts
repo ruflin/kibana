@@ -11,15 +11,11 @@ import { makeRehydrateProcessSelectors } from './rehydrate_process_selectors';
 type MgetDoc = Record<string, unknown>;
 
 const exitSearchResponse = (exitedAtByEntityId: Record<string, string>) => ({
-  _shards: { total: 1 },
-  aggregations: {
-    exited: {
-      buckets: Object.entries(exitedAtByEntityId).map(([key, exitedAt]) => ({
-        key,
-        exited_at: { value_as_string: exitedAt },
-      })),
-    },
-  },
+  columns: [
+    { name: 'exited_at', type: 'date' },
+    { name: 'process.entity_id', type: 'keyword' },
+  ],
+  values: Object.entries(exitedAtByEntityId).map(([entityId, exitedAt]) => [exitedAt, entityId]),
 });
 
 const esClientWith = (
@@ -28,7 +24,7 @@ const esClientWith = (
 ): ElasticsearchClient =>
   ({
     mget: jest.fn().mockResolvedValue({ docs }),
-    search: jest.fn().mockResolvedValue(exitSearchResponse(exitedAtByEntityId)),
+    esql: { query: jest.fn().mockResolvedValue(exitSearchResponse(exitedAtByEntityId)) },
   } as unknown as ElasticsearchClient);
 
 const found = (index: string, id: string, source: Record<string, unknown>): MgetDoc => ({
@@ -546,22 +542,18 @@ describe('makeRehydrateProcessSelectors', () => {
         '2026-09-26T10:02:00.000Z'
       );
       expect(selectors.find((s) => s.entityId === 'ent-live')).not.toHaveProperty('exitedAt');
-      expect(esClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: ['logs-endpoint.events.process-*'],
-          query: {
-            bool: {
-              filter: [
-                { terms: { 'process.entity_id': ['ent-exited', 'ent-live'] } },
-                { term: { 'event.category': 'process' } },
-                { term: { 'event.type': 'end' } },
-                // Seven days before the earliest observation.
-                { range: { '@timestamp': { gte: '2026-09-19T10:00:00.000Z' } } },
-              ],
-            },
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query:
+          'FROM logs-endpoint.events.process-* | WHERE (process.entity_id IN ("ent-exited", "ent-live")) AND @timestamp >= TO_DATETIME(?since) | STATS exited_at = MIN(@timestamp) BY process.entity_id | LIMIT 2',
+        // Seven days before the earliest observation.
+        params: [{ since: '2026-09-19T10:00:00.000Z' }],
+        // `event.category` and `event.type` can be multi-valued, so they stay a DSL filter.
+        filter: {
+          bool: {
+            filter: [{ term: { 'event.category': 'process' } }, { term: { 'event.type': 'end' } }],
           },
-        })
-      );
+        },
+      });
     });
 
     it('also searches the plain Defend indices the hunt read, and no other index it read', async () => {
@@ -581,12 +573,11 @@ describe('makeRehydrateProcessSelectors', () => {
         ],
       });
 
-      expect(esClient.search).toHaveBeenCalledWith(
+      expect(esClient.esql.query).toHaveBeenCalledWith(
         expect.objectContaining({
-          index: ['logs-endpoint.events.process-*', packIndex],
-          ignore_unavailable: true,
-          size: 0,
-          track_total_hits: false,
+          query: expect.stringMatching(
+            /^FROM logs-endpoint\.events\.process-\*, logs-endpoint\.events\.00e5ea78\.2026\.10\.08 \| WHERE /
+          ),
         })
       );
     });
@@ -609,16 +600,10 @@ describe('makeRehydrateProcessSelectors', () => {
       });
 
       expect(selectors).toHaveLength(2);
-      expect(esClient.search).toHaveBeenCalledWith(
+      expect(esClient.esql.query).toHaveBeenCalledWith(
         expect.objectContaining({
-          query: {
-            bool: {
-              filter: expect.arrayContaining([
-                { terms: { 'process.entity_id': ['ent-dated'] } },
-                { range: { '@timestamp': { gte: '2026-09-19T10:00:00.000Z' } } },
-              ]),
-            },
-          },
+          query: expect.stringContaining('WHERE (process.entity_id IN ("ent-dated")) AND'),
+          params: [{ since: '2026-09-19T10:00:00.000Z' }],
         })
       );
     });
@@ -671,7 +656,7 @@ describe('makeRehydrateProcessSelectors', () => {
       });
 
       expect(selectors).toHaveLength(1);
-      expect(esClient.search).not.toHaveBeenCalled();
+      expect(esClient.esql.query).not.toHaveBeenCalled();
     });
 
     it('keeps a live process inside the per-host cap ahead of newer exited ones', async () => {
@@ -698,7 +683,7 @@ describe('makeRehydrateProcessSelectors', () => {
         mget: jest
           .fn()
           .mockResolvedValue({ docs: [startDoc('ev-1', 'ent-1', '2026-09-26T10:00:00.000Z')] }),
-        search: jest.fn().mockRejectedValue(new Error('search_phase_execution_exception')),
+        esql: { query: jest.fn().mockRejectedValue(new Error('search_phase_execution_exception')) },
       } as unknown as ElasticsearchClient;
       const logger = { warn: jest.fn() } as unknown as Logger;
       const selectors = await makeRehydrateProcessSelectors(
@@ -716,7 +701,19 @@ describe('makeRehydrateProcessSelectors', () => {
         mget: jest
           .fn()
           .mockResolvedValue({ docs: [startDoc('ev-1', 'ent-1', '2026-09-26T10:00:00.000Z')] }),
-        search: jest.fn().mockResolvedValue({ _shards: { total: 0 } }),
+        esql: {
+          query: jest.fn().mockRejectedValue(
+            Object.assign(new Error('verification_exception'), {
+              statusCode: 400,
+              body: {
+                error: {
+                  type: 'verification_exception',
+                  reason: 'Unknown index [logs-endpoint.events.process-*]',
+                },
+              },
+            })
+          ),
+        },
       } as unknown as ElasticsearchClient;
       const logger = { warn: jest.fn() } as unknown as Logger;
       const selectors = await makeRehydrateProcessSelectors(
