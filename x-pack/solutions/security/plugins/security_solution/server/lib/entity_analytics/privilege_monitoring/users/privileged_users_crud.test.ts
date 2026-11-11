@@ -17,6 +17,11 @@ describe('createPrivilegedUsersCrudService', () => {
   let mockEsClient: ReturnType<typeof elasticsearchServiceMock.createScopedClusterClient>;
   const loggerMock = loggingSystemMock.createLogger();
   let crudService: ReturnType<typeof createPrivilegedUsersCrudService>;
+  let esqlExistingUser: { _id: string | null; _source: object } | undefined;
+  let esqlUserCount: number;
+
+  const esqlQueries = () =>
+    mockEsClient.asCurrentUser.esql.query.mock.calls.map(([request]) => request.query);
 
   const TEST_INDEX = '.entity_analytics.monitoring.users-default';
   const mockUserInput: CreatePrivMonUserRequestBody = {
@@ -48,6 +53,18 @@ describe('createPrivilegedUsersCrudService', () => {
     jest.clearAllMocks();
 
     mockEsClient = elasticsearchServiceMock.createScopedClusterClient();
+    esqlExistingUser = undefined;
+    esqlUserCount = 0;
+    mockEsClient.asCurrentUser.esql.query.mockImplementation((async (request: { query: string }) =>
+      request.query.includes('STATS')
+        ? { columns: [{ name: 'total', type: 'long' }], values: [[esqlUserCount]] }
+        : {
+            columns: [
+              { name: '_id', type: 'keyword' },
+              { name: '_source', type: '_source' },
+            ],
+            values: esqlExistingUser ? [[esqlExistingUser._id, esqlExistingUser._source]] : [],
+          }) as never);
     crudService = createPrivilegedUsersCrudService({
       esClient: mockEsClient.asCurrentUser,
       index: getPrivilegedMonitorUsersIndex('default'),
@@ -61,22 +78,10 @@ describe('createPrivilegedUsersCrudService', () => {
 
       // No search should be called since there's no username
       // But we can still mock it just to be safe
-      mockEsClient.asCurrentUser.search.mockResolvedValue({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        hits: {
-          total: { value: 0, relation: 'eq' as const },
-          max_score: null,
-          hits: [],
-        },
-      });
+      esqlExistingUser = undefined;
 
       // Mock count to return under limit
-      mockEsClient.asCurrentUser.count.mockResolvedValue({
-        count: 5,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-      });
+      esqlUserCount = 5;
 
       // Mock successful index
       mockEsClient.asCurrentUser.index.mockResolvedValue({
@@ -108,7 +113,9 @@ describe('createPrivilegedUsersCrudService', () => {
       const result = await crudService.create(invalidUserInput, mockSource, maxUsersAllowed);
 
       // Verify search was NOT called since there's no username
-      expect(mockEsClient.asCurrentUser.search).not.toHaveBeenCalled();
+      expect(esqlQueries()).not.toContainEqual(
+        expect.stringContaining('WHERE user.name == ?username')
+      );
 
       expect(result).toEqual(
         expect.objectContaining({
@@ -122,42 +129,31 @@ describe('createPrivilegedUsersCrudService', () => {
 
     it('should throw error when max users limit is reached', async () => {
       // Mock search for username uniqueness check - no existing user found
-      mockEsClient.asCurrentUser.search.mockResolvedValue({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        hits: {
-          total: { value: 0, relation: 'eq' as const },
-          max_score: null,
-          hits: [],
-        },
-      });
+      esqlExistingUser = undefined;
 
       // Mock count to return limit reached
-      mockEsClient.asCurrentUser.count.mockResolvedValue({
-        count: 100,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-      });
+      esqlUserCount = 100;
 
       await expect(crudService.create(mockUserInput, mockSource, maxUsersAllowed)).rejects.toThrow(
         'Cannot create user: Maximum user limit of 100 reached'
       );
 
       // Verify the username uniqueness check was called
-      expect(mockEsClient.asCurrentUser.search).toHaveBeenCalledWith({
-        index: TEST_INDEX,
-        query: { term: { 'user.name': 'test-user' } },
-        size: 1,
-      });
-
-      expect(mockEsClient.asCurrentUser.count).toHaveBeenCalledWith({
-        index: TEST_INDEX,
-        query: {
-          term: {
-            'user.is_privileged': true,
-          },
+      expect(mockEsClient.asCurrentUser.esql.query).toHaveBeenCalledWith(
+        {
+          query: `FROM ${TEST_INDEX} METADATA _id, _source | WHERE user.name == ?username | LIMIT 1`,
+          params: [{ username: 'test-user' }],
         },
-      });
+        { signal: undefined }
+      );
+
+      expect(mockEsClient.asCurrentUser.esql.query).toHaveBeenCalledWith(
+        {
+          query: `FROM ${TEST_INDEX} | WHERE user.is_privileged == TRUE | STATS total = COUNT(*)`,
+          params: [],
+        },
+        { signal: undefined }
+      );
     });
 
     it('should update existing user when username already exists', async () => {
@@ -173,23 +169,7 @@ describe('createPrivilegedUsersCrudService', () => {
       };
 
       // Mock search for username uniqueness check - existing user found
-      mockEsClient.asCurrentUser.search.mockResolvedValue({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        hits: {
-          total: { value: 1, relation: 'eq' as const },
-          max_score: 1.0,
-          hits: [
-            {
-              _index: TEST_INDEX,
-              _id: existingUserId,
-              _score: 1.0,
-              _source: existingUserDoc,
-            },
-          ],
-        },
-      });
+      esqlExistingUser = { _id: existingUserId, _source: existingUserDoc };
 
       // Mock successful update
       mockEsClient.asCurrentUser.update.mockResolvedValue({
@@ -221,11 +201,13 @@ describe('createPrivilegedUsersCrudService', () => {
 
       const result = await crudService.create(mockUserInput, mockSource, maxUsersAllowed);
 
-      expect(mockEsClient.asCurrentUser.search).toHaveBeenCalledWith({
-        index: TEST_INDEX,
-        query: { term: { 'user.name': 'test-user' } },
-        size: 1,
-      });
+      expect(mockEsClient.asCurrentUser.esql.query).toHaveBeenCalledWith(
+        {
+          query: `FROM ${TEST_INDEX} METADATA _id, _source | WHERE user.name == ?username | LIMIT 1`,
+          params: [{ username: 'test-user' }],
+        },
+        { signal: undefined }
+      );
 
       const updateCall = mockEsClient.asCurrentUser.update.mock.calls[0][0];
       expect(updateCall).toEqual(
@@ -257,7 +239,7 @@ describe('createPrivilegedUsersCrudService', () => {
       );
 
       // Should not call count since we're updating, not creating
-      expect(mockEsClient.asCurrentUser.count).not.toHaveBeenCalled();
+      expect(esqlQueries()).not.toContainEqual(expect.stringContaining('STATS'));
 
       expect(result).toEqual(
         expect.objectContaining({
@@ -276,22 +258,10 @@ describe('createPrivilegedUsersCrudService', () => {
 
     it('should create new user when under limit', async () => {
       // Mock search for username uniqueness check - no existing user found
-      mockEsClient.asCurrentUser.search.mockResolvedValue({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        hits: {
-          total: { value: 0, relation: 'eq' as const },
-          max_score: null,
-          hits: [],
-        },
-      });
+      esqlExistingUser = undefined;
 
       // Mock count to return under limit
-      mockEsClient.asCurrentUser.count.mockResolvedValue({
-        count: 5,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-      });
+      esqlUserCount = 5;
 
       // Mock successful index
       mockEsClient.asCurrentUser.index.mockResolvedValue({
@@ -313,12 +283,14 @@ describe('createPrivilegedUsersCrudService', () => {
 
       const result = await crudService.create(mockUserInput, mockSource, maxUsersAllowed);
 
-      expect(mockEsClient.asCurrentUser.search).toHaveBeenCalledWith({
-        index: TEST_INDEX,
-        query: { term: { 'user.name': 'test-user' } },
-        size: 1,
-      });
-      expect(mockEsClient.asCurrentUser.count).toHaveBeenCalled();
+      expect(mockEsClient.asCurrentUser.esql.query).toHaveBeenCalledWith(
+        {
+          query: `FROM ${TEST_INDEX} METADATA _id, _source | WHERE user.name == ?username | LIMIT 1`,
+          params: [{ username: 'test-user' }],
+        },
+        { signal: undefined }
+      );
+      expect(esqlQueries()).toContainEqual(expect.stringContaining('STATS total = COUNT(*)'));
       expect(mockEsClient.asCurrentUser.index).toHaveBeenCalledWith({
         index: TEST_INDEX,
         refresh: 'wait_for',
@@ -347,37 +319,21 @@ describe('createPrivilegedUsersCrudService', () => {
 
     it('should create new user when existing user has no ID', async () => {
       // Mock search for username uniqueness check - existing user found but no ID
-      mockEsClient.asCurrentUser.search.mockResolvedValue({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        hits: {
-          total: { value: 1, relation: 'eq' as const },
-          max_score: 1.0,
-          hits: [
-            {
-              _index: TEST_INDEX,
-              _id: undefined, // No ID - edge case
-              _score: 1.0,
-              _source: {
-                user: {
-                  name: 'test-user',
-                  is_privileged: true,
-                  entity: { attributes: { Privileged: true } },
-                },
-                labels: { sources: ['csv'] },
-                '@timestamp': '2025-08-24T00:00:00.000Z',
-              },
-            },
-          ],
+      esqlExistingUser = {
+        _id: null, // No ID - edge case
+        _source: {
+          user: {
+            name: 'test-user',
+            is_privileged: true,
+            entity: { attributes: { Privileged: true } },
+          },
+          labels: { sources: ['csv'] },
+          '@timestamp': '2025-08-24T00:00:00.000Z',
         },
-      });
+      };
 
       // Mock count to return under limit
-      mockEsClient.asCurrentUser.count.mockResolvedValue({
-        count: 5,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-      });
+      esqlUserCount = 5;
 
       // Mock successful index
       mockEsClient.asCurrentUser.index.mockResolvedValue({
@@ -400,8 +356,8 @@ describe('createPrivilegedUsersCrudService', () => {
       const result = await crudService.create(mockUserInput, mockSource, maxUsersAllowed);
 
       // Should create new user since existing user had no ID
-      expect(mockEsClient.asCurrentUser.search).toHaveBeenCalled();
-      expect(mockEsClient.asCurrentUser.count).toHaveBeenCalled();
+      expect(esqlQueries()).toContainEqual(expect.stringContaining('WHERE user.name == ?username'));
+      expect(esqlQueries()).toContainEqual(expect.stringContaining('STATS total = COUNT(*)'));
       expect(mockEsClient.asCurrentUser.index).toHaveBeenCalled();
       expect(mockEsClient.asCurrentUser.update).not.toHaveBeenCalled();
 
@@ -687,22 +643,10 @@ describe('createPrivilegedUsersCrudService', () => {
         };
 
         // Mock search for username uniqueness check - no existing user found
-        mockEsClient.asCurrentUser.search.mockResolvedValue({
-          took: 1,
-          timed_out: false,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-          hits: {
-            total: { value: 0, relation: 'eq' as const },
-            max_score: null,
-            hits: [],
-          },
-        });
+        esqlExistingUser = undefined;
 
         // Mock count to return under limit
-        mockEsClient.asCurrentUser.count.mockResolvedValue({
-          count: 5,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        });
+        esqlUserCount = 5;
 
         // Mock successful index
         mockEsClient.asCurrentUser.index.mockResolvedValue({
@@ -790,23 +734,7 @@ describe('createPrivilegedUsersCrudService', () => {
         };
 
         // Mock search for existing user
-        mockEsClient.asCurrentUser.search.mockResolvedValue({
-          took: 1,
-          timed_out: false,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-          hits: {
-            total: { value: 1, relation: 'eq' as const },
-            max_score: 1.0,
-            hits: [
-              {
-                _id: 'existing-user-id',
-                _index: TEST_INDEX,
-                _source: existingUser,
-                _score: 1.0,
-              },
-            ],
-          },
-        });
+        esqlExistingUser = { _id: 'existing-user-id', _source: existingUser };
 
         // Mock successful update
         mockEsClient.asCurrentUser.update.mockResolvedValue({
@@ -1083,22 +1011,10 @@ describe('createPrivilegedUsersCrudService', () => {
   describe('error handling', () => {
     it('should propagate elasticsearch errors on create', async () => {
       // Mock search for username uniqueness check - no existing user found
-      mockEsClient.asCurrentUser.search.mockResolvedValue({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        hits: {
-          total: { value: 0, relation: 'eq' as const },
-          max_score: null,
-          hits: [],
-        },
-      });
+      esqlExistingUser = undefined;
 
       // Mock count to pass the limit check
-      mockEsClient.asCurrentUser.count.mockResolvedValue({
-        count: 5,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-      });
+      esqlUserCount = 5;
 
       const esError = new Error('Elasticsearch connection failed');
       mockEsClient.asCurrentUser.index.mockRejectedValue(esError);
@@ -1110,7 +1026,7 @@ describe('createPrivilegedUsersCrudService', () => {
 
     it('should propagate elasticsearch errors on username search', async () => {
       const esError = new Error('Search failed');
-      mockEsClient.asCurrentUser.search.mockRejectedValue(esError);
+      mockEsClient.asCurrentUser.esql.query.mockRejectedValue(esError);
 
       await expect(crudService.create(mockUserInput, mockSource, maxUsersAllowed)).rejects.toThrow(
         'Search failed'

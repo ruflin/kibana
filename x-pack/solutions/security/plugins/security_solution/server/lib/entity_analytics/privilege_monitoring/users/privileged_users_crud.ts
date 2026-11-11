@@ -6,6 +6,7 @@
  */
 
 import { merge } from 'lodash';
+import { esql } from '@elastic/esql';
 import { fromKueryExpression, toElasticsearchQuery } from '@kbn/es-query';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import type {
@@ -16,6 +17,7 @@ import type {
 } from '../../../../../common/api/entity_analytics';
 
 import type { PrivMonUserSource } from '../types';
+import { esqlCount, esqlRows, runEsqlRead } from '../../utils/esql_read';
 
 // Helper function to upsert a single API label into the merged labels array
 const upsertApiLabel = (
@@ -84,16 +86,15 @@ export const createPrivilegedUsersCrudService = ({
     // Check if user already exists by username
     const username = user.user?.name;
     if (username) {
-      const existingUserResponse = await esClient.search({
-        index,
-        query: { term: { 'user.name': username } },
-        size: 1,
+      const existingUserResponse = await runEsqlRead({
+        esClient,
+        query: esql.from([index], ['_id', '_source']).where`user.name == ${{ username }}`.limit(1),
       });
+      const [existingUser] = esqlRows(existingUserResponse);
 
-      if (existingUserResponse.hits.hits.length > 0) {
+      if (existingUser) {
         // Update existing user
-        const existingUser = existingUserResponse.hits.hits[0];
-        const existingUserId = existingUser._id;
+        const existingUserId = existingUser._id as string | undefined;
 
         if (existingUserId) {
           const existingUserDoc = existingUser._source as MonitoredUserDoc;
@@ -144,16 +145,14 @@ export const createPrivilegedUsersCrudService = ({
 
     // Create new user if none exists
     // Check user count limit before creating new user
-    const currentUserCount = await esClient.count({
-      index,
-      query: {
-        term: {
-          'user.is_privileged': true,
-        },
-      },
-    });
+    const currentUserCount = esqlCount(
+      await runEsqlRead({
+        esClient,
+        query: esql.from([index]).where`user.is_privileged == true`.pipe`STATS total = COUNT(*)`,
+      })
+    );
 
-    if (currentUserCount.count >= maxUsersAllowed) {
+    if (currentUserCount >= maxUsersAllowed) {
       throw new Error(`Cannot create user: Maximum user limit of ${maxUsersAllowed} reached`);
     }
 

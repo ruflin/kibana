@@ -96,16 +96,17 @@ describe('WatchlistConfigClient', () => {
   describe('getEntityCounts', () => {
     it('should return a map of entity counts for given watchlist IDs', async () => {
       // Mock the ES search response
-      esClientMock.search.mockResolvedValue({
-        aggregations: {
-          watchlist_counts: {
-            buckets: [
-              { key: 'watchlist-1', doc_count: 5, manual_entities: { doc_count: 0 } },
-              { key: 'watchlist-3', doc_count: 12, manual_entities: { doc_count: 0 } },
-            ],
-          },
-        },
-      } as unknown as Awaited<ReturnType<typeof esClientMock.search>>);
+      esClientMock.esql.query.mockResolvedValue({
+        columns: [
+          { name: 'entityCount', type: 'long' },
+          { name: 'manualCount', type: 'long' },
+          { name: 'watchlist.id', type: 'keyword' },
+        ],
+        values: [
+          [5, 0, 'watchlist-1'],
+          [12, 0, 'watchlist-3'],
+        ],
+      } as never);
 
       const ids = ['watchlist-1', 'watchlist-2', 'watchlist-3'];
       const result = await client.getEntityCounts(ids);
@@ -117,44 +118,25 @@ describe('WatchlistConfigClient', () => {
         'watchlist-3': 12,
       });
 
-      expect(esClientMock.search).toHaveBeenCalledWith({
-        index: 'mock-watchlist-index',
-        size: 0,
-        query: {
-          terms: {
-            'watchlist.id': ids,
-          },
+      expect(esClientMock.esql.query).toHaveBeenCalledWith(
+        {
+          query: `FROM mock-watchlist-index | WHERE watchlist.id IN (?ids) | STATS entityCount = COUNT(*), manualCount = COUNT(*) WHERE MV_CONTAINS(labels.source_ids, ?manualSourceId) BY watchlist.id | LIMIT 3`,
+          params: [{ ids: ids }, { manualSourceId: 'manual' }],
         },
-        aggs: {
-          watchlist_counts: {
-            terms: {
-              field: 'watchlist.id',
-              size: ids.length,
-            },
-            aggs: {
-              manual_entities: {
-                filter: {
-                  term: {
-                    'labels.source_ids': 'manual',
-                  },
-                },
-              },
-            },
-          },
-        },
-        ignore_unavailable: true,
-      });
+        { signal: undefined }
+      );
       expect(getIndexForWatchlist).toHaveBeenCalled();
     });
 
     it('should return all zeros if no buckets are returned', async () => {
-      esClientMock.search.mockResolvedValue({
-        aggregations: {
-          watchlist_counts: {
-            buckets: [],
-          },
-        },
-      } as unknown as Awaited<ReturnType<typeof esClientMock.search>>);
+      esClientMock.esql.query.mockResolvedValue({
+        columns: [
+          { name: 'entityCount', type: 'long' },
+          { name: 'manualCount', type: 'long' },
+          { name: 'watchlist.id', type: 'keyword' },
+        ],
+        values: [],
+      } as never);
 
       const ids = ['watchlist-1', 'watchlist-2'];
       const result = await client.getEntityCounts(ids);
@@ -166,7 +148,7 @@ describe('WatchlistConfigClient', () => {
     });
 
     it('should catch errors, log them, and return a map of zeros', async () => {
-      esClientMock.search.mockRejectedValue(new Error('ES failure'));
+      esClientMock.esql.query.mockRejectedValue(new Error('ES failure'));
 
       const ids = ['watchlist-1', 'watchlist-2'];
       const result = await client.getEntityCounts(ids);
@@ -214,24 +196,17 @@ describe('WatchlistConfigClient', () => {
         per_page: 20,
       });
 
-      esClientMock.search.mockResolvedValue({
-        aggregations: {
-          watchlist_counts: {
-            buckets: [
-              {
-                key: 'wl-1',
-                doc_count: 42,
-                manual_entities: { doc_count: 2 },
-              },
-              {
-                key: 'wl-2',
-                doc_count: 7,
-                manual_entities: { doc_count: 0 },
-              },
-            ],
-          },
-        },
-      } as unknown as Awaited<ReturnType<typeof esClientMock.search>>);
+      esClientMock.esql.query.mockResolvedValue({
+        columns: [
+          { name: 'entityCount', type: 'long' },
+          { name: 'manualCount', type: 'long' },
+          { name: 'watchlist.id', type: 'keyword' },
+        ],
+        values: [
+          [42, 2, 'wl-1'],
+          [7, 0, 'wl-2'],
+        ],
+      } as never);
 
       const result = await client.list();
 
@@ -255,33 +230,13 @@ describe('WatchlistConfigClient', () => {
           entitySourceIds: [],
         },
       ]);
-      expect(esClientMock.search).toHaveBeenCalledWith({
-        index: 'mock-watchlist-index',
-        size: 0,
-        query: {
-          terms: {
-            'watchlist.id': ['wl-1', 'wl-2'],
-          },
+      expect(esClientMock.esql.query).toHaveBeenCalledWith(
+        {
+          query: `FROM mock-watchlist-index | WHERE watchlist.id IN (?ids) | STATS entityCount = COUNT(*), manualCount = COUNT(*) WHERE MV_CONTAINS(labels.source_ids, ?manualSourceId) BY watchlist.id | LIMIT 2`,
+          params: [{ ids: ['wl-1', 'wl-2'] }, { manualSourceId: 'manual' }],
         },
-        aggs: {
-          watchlist_counts: {
-            terms: {
-              field: 'watchlist.id',
-              size: 2,
-            },
-            aggs: {
-              manual_entities: {
-                filter: {
-                  term: {
-                    'labels.source_ids': 'manual',
-                  },
-                },
-              },
-            },
-          },
-        },
-        ignore_unavailable: true,
-      });
+        { signal: undefined }
+      );
     });
 
     it('should not call getEntityCounts if no watchlists are found', async () => {

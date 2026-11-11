@@ -11,6 +11,7 @@ import type {
   QueryDslQueryContainer,
   UpdateByQueryResponse,
 } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import { euid, getBuiltInEntityDefinition } from '@kbn/entity-store/common/euid_helpers';
 import { getEuidPainlessSourceUpdateScript } from '@kbn/entity-store/common/domain/euid/painless';
@@ -19,6 +20,7 @@ import { ALERT_ENTITY_ID } from '../../../../../common/field_maps/field_names';
 import { getEntityAnalyticsEntityTypes } from '../../../../../common/entity_analytics/utils';
 import type { Range } from '../../../../../common/entity_analytics/risk_engine';
 import { retryTransientEsErrors } from '../../utils/retry_transient_es_errors';
+import { esqlCount, runEsqlRead } from '../../utils/esql_read';
 
 export interface TargetIndices {
   /** Concrete indices we can write the field to. */
@@ -198,19 +200,18 @@ export const countPendingAlerts = async ({
 }): Promise<number> => {
   const response = await retryTransientEsErrors(
     () =>
-      esClient.count(
-        {
-          index: alertsIndex,
-          query,
-          ignore_unavailable: true,
-          allow_no_indices: true,
-        },
-        { signal }
-      ),
+      runEsqlRead({
+        esClient,
+        query: esql.from([alertsIndex]).pipe`STATS total = COUNT(*)`,
+        // The caller's query is shared with the update-by-query, so it stays Query DSL.
+        filter: query,
+        signal,
+        tolerateMissingIndex: true,
+      }),
     { logger }
   );
 
-  return response.count;
+  return esqlCount(response);
 };
 
 /**

@@ -6,7 +6,13 @@
  */
 
 import type { ElasticsearchClient } from '@kbn/core/server';
-import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
+import type {
+  EsqlQueryRequest,
+  QueryDslQueryContainer,
+} from '@elastic/elasticsearch/lib/api/types';
+import type { ESQLSearchResponse } from '@kbn/es-types';
+import { isEsqlUnknownIndexError } from './es_errors';
 import { BulkDropAggregator } from './bulk_drop_aggregator';
 import type { BulkDropTypeSummary } from './bulk_drop_aggregator';
 
@@ -95,29 +101,29 @@ export const getLatestEntityMetadataDoc = async <TDoc>(
   }
 ): Promise<TDoc | null> => {
   try {
-    const response = await esClient.search<TDoc>({
-      index: params.index,
-      size: 1,
-      // `unmapped_type` keeps this a graceful "no hits" instead of a hard
-      // search_phase_execution_exception on a backing index where `@timestamp`
-      // has no mapping yet (e.g. a freshly auto-created index that never received a document).
-      sort: [{ '@timestamp': { order: 'desc', unmapped_type: 'date' } }],
-      query: {
-        bool: {
-          filter: [
-            { term: { 'event.action': params.eventAction } },
-            { term: { 'entity.id': params.entityId } },
-            ...(params.filter ?? []),
-          ],
-        },
-      },
-    });
+    const { filter: _composerFilter, ...request } = esql.from([params.index], ['_source'])
+      .where`event.action == ${{ eventAction: params.eventAction }} AND entity.id == ${{
+      entityId: params.entityId,
+    }}`.pipe`SORT @timestamp DESC NULLS LAST`
+      .limit(1)
+      .toRequest();
+    // The caller's extra clauses stay Query DSL, so they match exactly as before.
+    const response = (await esClient.esql.query({
+      ...(request as unknown as EsqlQueryRequest),
+      ...(params.filter?.length ? { filter: { bool: { filter: params.filter } } } : {}),
+    })) as unknown as ESQLSearchResponse;
 
-    return response.hits.hits[0]?._source ?? null;
+    const sourceColumn = response.columns.findIndex(({ name }) => name === '_source');
+    const source = response.values[0]?.[sourceColumn];
+    return source !== null && typeof source === 'object' ? (source as TDoc) : null;
   } catch (error) {
     // Datastream not created yet (no docs written in this space) → no summary.
     // A 403 (no metadata read privilege) still propagates to the caller.
-    if (error?.meta?.statusCode === 404 || error?.statusCode === 404) {
+    if (
+      isEsqlUnknownIndexError(error) ||
+      error?.meta?.statusCode === 404 ||
+      error?.statusCode === 404
+    ) {
       return null;
     }
     throw error;

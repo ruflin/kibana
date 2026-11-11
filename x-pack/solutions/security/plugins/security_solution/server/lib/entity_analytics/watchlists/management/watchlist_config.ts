@@ -16,11 +16,7 @@ import type {
 import { SavedObjectsErrorHelpers } from '@kbn/core/server';
 import { isSavedObjectErrorResult } from '@kbn/core-saved-objects-server';
 import type { SetOptional } from 'type-fest';
-import type {
-  AggregationsFilterAggregate,
-  AggregationsStringTermsAggregate,
-  AggregationsStringTermsBucket,
-} from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import { nodeBuilder } from '@kbn/es-query';
 import type { WatchlistObject } from '../../../../../common/api/entity_analytics/watchlists/management/common.gen';
 import type { MonitoringEntitySource } from '../../../../../common/api/entity_analytics/watchlists/data_source/common.gen';
@@ -29,6 +25,7 @@ import { getIndexForWatchlist } from '../entities/utils';
 import { generateWatchlistEntityIndexMappings } from '../entities/mappings';
 import { watchlistConfigTypeName } from './saved_object/watchlist_config_type';
 import { createOrUpdateIndex } from '../../utils/create_or_update_index';
+import { esqlRows, runEsqlRead } from '../../utils/esql_read';
 import { watchlistEntitySourceTypeName } from '../entity_sources/infra';
 import { invalidateEntitySourceApiKey } from '../entity_sources/entity_source_api_key';
 import { MANUAL_SOURCE_ID } from '../entity_sources/manual/constants';
@@ -424,43 +421,19 @@ export class WatchlistConfigClient {
     }
 
     try {
-      const response = await this.deps.esClient.search({
-        index,
-        ignore_unavailable: true,
-        size: 0,
-        query: {
-          terms: {
-            'watchlist.id': ids,
-          },
-        },
-        aggs: {
-          watchlist_counts: {
-            terms: {
-              field: 'watchlist.id',
-              size: ids.length,
-            },
-            aggs: {
-              manual_entities: {
-                filter: {
-                  term: {
-                    'labels.source_ids': MANUAL_SOURCE_ID,
-                  },
-                },
-              },
-            },
-          },
-        },
+      const response = await runEsqlRead({
+        esClient: this.deps.esClient,
+        query: esql.from([index]).where`watchlist.id IN (${{ ids }})`
+          .pipe`STATS entityCount = COUNT(*), manualCount = COUNT(*) WHERE MV_CONTAINS(labels.source_ids, ${{
+          manualSourceId: MANUAL_SOURCE_ID,
+        }}) BY watchlist.id`.limit(ids.length),
+        tolerateMissingIndex: true,
       });
 
-      const watchlistCountsAgg = response.aggregations?.watchlist_counts as
-        | AggregationsStringTermsAggregate
-        | undefined;
-      const buckets = (watchlistCountsAgg?.buckets as AggregationsStringTermsBucket[]) ?? [];
-      for (const bucket of buckets) {
-        const manualEntities = bucket.manual_entities as AggregationsFilterAggregate | undefined;
-        metadata[String(bucket.key)] = {
-          entityCount: bucket.doc_count,
-          hasManualEntities: (manualEntities?.doc_count ?? 0) > 0,
+      for (const row of esqlRows(response)) {
+        metadata[String(row['watchlist.id'])] = {
+          entityCount: Number(row.entityCount),
+          hasManualEntities: Number(row.manualCount) > 0,
         };
       }
     } catch (err) {

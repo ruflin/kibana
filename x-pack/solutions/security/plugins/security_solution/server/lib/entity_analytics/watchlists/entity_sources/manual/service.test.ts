@@ -177,12 +177,13 @@ describe('manual entity service', () => {
   describe('unassign', () => {
     it('returns not_found for entities not manually assigned', async () => {
       const { esClient, service } = createService();
-      esClient.search.mockResolvedValue({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        hits: { hits: [] },
-      });
+      esClient.esql.query.mockResolvedValue({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: 'entity.id', type: 'keyword' },
+        ],
+        values: [],
+      } as never);
 
       const result = await service.unassign(['user:unknown']);
 
@@ -197,14 +198,13 @@ describe('manual entity service', () => {
 
     it('unassigns manually assigned entities successfully', async () => {
       const { esClient, crudClient, service } = createService();
-      esClient.search.mockResolvedValueOnce({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        hits: {
-          hits: [{ _id: 'doc-1', _index: 'test-index', _source: { entity: { id: 'user:known' } } }],
-        },
-      });
+      esClient.esql.query.mockResolvedValueOnce({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: 'entity.id', type: 'keyword' },
+        ],
+        values: [['doc-1', 'user:known']],
+      } as never);
       (crudClient.listEntities as jest.Mock).mockResolvedValue({
         entities: [
           {
@@ -230,32 +230,28 @@ describe('manual entity service', () => {
         ],
       });
 
-      expect(esClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: watchlist.index,
-          query: {
-            bool: {
-              must: [
-                { terms: { 'entity.id': ['user:known', 'user:unknown'] } },
-                { term: { 'watchlist.id': watchlist.id } },
-                { term: { 'labels.source_ids': MANUAL_SOURCE_ID } },
-              ],
-            },
-          },
-        })
+      expect(esClient.esql.query).toHaveBeenCalledWith(
+        {
+          query: `FROM ${watchlist.index} METADATA _id | WHERE (entity.id IN (?euids)) AND watchlist.id == ?watchlistId AND MV_CONTAINS(labels.source_ids, ?manualSourceId) | KEEP _id, entity.id | LIMIT 2`,
+          params: [
+            { euids: ['user:known', 'user:unknown'] },
+            { watchlistId: watchlist.id },
+            { manualSourceId: MANUAL_SOURCE_ID },
+          ],
+        },
+        { signal: undefined }
       );
     });
 
     it('handles errors during unassignment', async () => {
       const { esClient, crudClient, service } = createService();
-      esClient.search.mockResolvedValueOnce({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        hits: {
-          hits: [{ _id: 'doc-1', _index: 'test-index', _source: { entity: { id: 'user:known' } } }],
-        },
-      });
+      esClient.esql.query.mockResolvedValueOnce({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: 'entity.id', type: 'keyword' },
+        ],
+        values: [['doc-1', 'user:known']],
+      } as never);
       (crudClient.listEntities as jest.Mock).mockRejectedValue(new Error('Store search failed'));
 
       const result = await service.unassign(['user:known']);

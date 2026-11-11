@@ -6,7 +6,8 @@
  */
 
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
-import type { LogsEndpointAction } from '../../../../../common/endpoint/types';
+import { esql } from '@elastic/esql';
+import { esqlRows, runEsqlRead } from '../../../../lib/entity_analytics/utils/esql_read';
 import { ENDPOINT_ACTIONS_INDEX } from '../../../../../common/endpoint/constants';
 import { catchAndWrapError } from '../../../utils';
 import { NotFoundError } from '../../../errors';
@@ -19,22 +20,19 @@ export const getActionAgentType = async (
   esClient: ElasticsearchClient,
   actionId: string
 ): Promise<{ agentType: ResponseActionAgentType }> => {
-  const response = await esClient
-    .search<LogsEndpointAction>({
-      index: ENDPOINT_ACTIONS_INDEX,
-      query: {
-        bool: {
-          filter: [{ term: { action_id: actionId } }],
-        },
-      },
-      _source: ['EndpointActions.input_type'],
-      size: 1,
-    })
-    .catch(catchAndWrapError);
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([ENDPOINT_ACTIONS_INDEX]).where`action_id == ${{ actionId }}`
+      .pipe`KEEP EndpointActions.input_type`.limit(1),
+    // The index pattern may match nothing, which the search read as an empty result.
+    tolerateMissingIndex: true,
+  }).catch(catchAndWrapError);
 
-  if (!response?.hits?.hits[0]?._source?.EndpointActions.input_type) {
+  const agentType = esqlRows(response)[0]?.['EndpointActions.input_type'];
+
+  if (typeof agentType !== 'string' || !agentType) {
     throw new NotFoundError(`Action id [${actionId}] not found`, response);
   }
 
-  return { agentType: response.hits.hits[0]._source.EndpointActions.input_type };
+  return { agentType: agentType as ResponseActionAgentType };
 };

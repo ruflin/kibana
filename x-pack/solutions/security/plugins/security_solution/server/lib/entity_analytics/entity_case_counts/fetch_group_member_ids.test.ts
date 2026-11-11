@@ -12,18 +12,13 @@ const RESOLVED_TO_FIELD = 'entity.relationships.resolution.resolved_to';
 
 const buildClient = (members: ReadonlyArray<[memberId: string, headId: string]>) => {
   const esClient = elasticsearchServiceMock.createElasticsearchClient();
-  esClient.search.mockResolvedValue({
-    took: 1,
-    timed_out: false,
-    _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-    hits: {
-      hits: members.map(([memberId, headId]) => ({
-        _index: 'entities',
-        _id: memberId,
-        fields: { 'entity.id': [memberId], [RESOLVED_TO_FIELD]: [headId] },
-      })),
-    },
-  });
+  esClient.esql.query.mockResolvedValue({
+    columns: [
+      { name: 'entity.id', type: 'keyword' },
+      { name: RESOLVED_TO_FIELD, type: 'keyword' },
+    ],
+    values: members.map(([memberId, headId]) => [memberId, headId]),
+  } as never);
   return esClient;
 };
 
@@ -46,11 +41,14 @@ describe('fetchGroupMemberIds', () => {
 
     await fetchGroupMemberIds(esClient, 'security', ['host:a', 'host:b']);
 
-    expect(esClient.search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        index: expect.stringContaining('security'),
-        query: { terms: { [RESOLVED_TO_FIELD]: ['host:a', 'host:b'] } },
-      })
+    expect(esClient.esql.query).toHaveBeenCalledWith(
+      {
+        query: expect.stringMatching(
+          /^FROM \S*security\S* \| WHERE `?entity\.relationships\.resolution\.resolved_to`? IN \(\?entityIds\) \| KEEP/
+        ),
+        params: [{ entityIds: ['host:a', 'host:b'] }],
+      },
+      { signal: undefined }
     );
   });
 
@@ -59,14 +57,17 @@ describe('fetchGroupMemberIds', () => {
 
     await fetchGroupMemberIds(esClient, 'default', ['host:a']);
 
-    expect(esClient.search).toHaveBeenCalledWith(expect.objectContaining({ size: 10_000 }));
+    expect(esClient.esql.query).toHaveBeenCalledWith(
+      expect.objectContaining({ query: expect.stringContaining('| LIMIT 10000') }),
+      expect.anything()
+    );
   });
 
   it('reads nothing without entity ids', async () => {
     const esClient = buildClient([]);
 
     expect(await fetchGroupMemberIds(esClient, 'default', [])).toEqual({});
-    expect(esClient.search).not.toHaveBeenCalled();
+    expect(esClient.esql.query).not.toHaveBeenCalled();
   });
 
   it('fails when the groups have more members than one request reads', async () => {
@@ -80,30 +81,30 @@ describe('fetchGroupMemberIds', () => {
 
 describe('fetchGroupMembers', () => {
   it("returns each member's id with the asked-for fields of its record, nested", async () => {
-    const esClient = buildClient([['host:a1', 'host:a']]);
-    esClient.search.mockResolvedValueOnce({
-      took: 1,
-      timed_out: false,
-      _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-      hits: {
-        hits: [
-          {
-            _index: 'entities',
-            _id: 'host:a1',
-            fields: { 'entity.id': ['host:a1'], [RESOLVED_TO_FIELD]: ['host:a'] },
-            _source: { 'asset.criticality': 'high_impact' },
-          },
+    const esClient = elasticsearchServiceMock.createElasticsearchClient();
+    esClient.esql.query.mockResolvedValueOnce({
+      columns: [
+        { name: 'entity.id', type: 'keyword' },
+        { name: RESOLVED_TO_FIELD, type: 'keyword' },
+        { name: '_source', type: '_source' },
+      ],
+      values: [
+        [
+          'host:a1',
+          'host:a',
+          { 'asset.criticality': 'high_impact', 'entity.name': 'not asked for' },
         ],
-      },
-    });
+      ],
+    } as never);
 
     expect(await fetchGroupMembers(esClient, 'default', ['host:a'], ['asset.criticality'])).toEqual(
       {
         'host:a': [{ id: 'host:a1', record: { asset: { criticality: 'high_impact' } } }],
       }
     );
-    expect(esClient.search).toHaveBeenCalledWith(
-      expect.objectContaining({ _source: ['asset.criticality'] })
+    expect(esClient.esql.query).toHaveBeenCalledWith(
+      expect.objectContaining({ query: expect.stringMatching(/^FROM \S+ METADATA _source \|/) }),
+      expect.anything()
     );
   });
 });

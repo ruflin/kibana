@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { SavedObjectsClientContract } from '@kbn/core/server';
 import {
   MonitoringEngineComponentResourceEnum,
@@ -15,6 +16,7 @@ import type { PrivilegeMonitoringDataClient } from './data_client';
 import { PRIVILEGE_MONITORING_ENGINE_STATUS } from '../constants';
 import { removePrivilegeMonitoringTask, scheduleNow } from '../tasks/privilege_monitoring_task';
 import { PrivilegeMonitoringEngineActions } from '../auditing/actions';
+import { esqlCount, runEsqlRead } from '../../utils/esql_read';
 
 export type EngineStatusService = ReturnType<typeof createEngineStatusService>;
 export const createEngineStatusService = (
@@ -110,14 +112,14 @@ export const createEngineStatusService = (
 
   const getCurrentUserCount = async () => {
     const esClient = dataClient.deps.clusterClient.asCurrentUser;
-    return esClient.count({
-      index: dataClient.index,
-      query: {
-        term: {
-          'user.is_privileged': true,
-        },
-      },
-    });
+    const count = esqlCount(
+      await runEsqlRead({
+        esClient,
+        query: esql.from([dataClient.index]).where`user.is_privileged == true`
+          .pipe`STATS total = COUNT(*)`,
+      })
+    );
+    return { count };
   };
 
   return { get, disable, scheduleNow: _scheduleNow, getCurrentUserCount };

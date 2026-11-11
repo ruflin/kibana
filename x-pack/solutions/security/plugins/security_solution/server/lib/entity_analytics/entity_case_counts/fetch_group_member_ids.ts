@@ -5,11 +5,13 @@
  * 2.0.
  */
 
-import { mapValues } from 'lodash';
+import { mapValues, pick } from 'lodash';
+import { esql } from '@elastic/esql';
 import { unflattenObject } from '@kbn/object-utils';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type { Entity } from '@kbn/entity-store/common';
 import { ENTITY_LATEST, getEntitiesAlias } from '@kbn/entity-store/server';
+import { esqlRows, runEsqlRead } from '../utils/esql_read';
 
 const ENTITY_ID_FIELD = 'entity.id';
 const RESOLVED_TO_FIELD = 'entity.relationships.resolution.resolved_to';
@@ -34,25 +36,33 @@ export const fetchGroupMembers = async (
   recordFields: readonly string[] = []
 ): Promise<Record<string, GroupMember[]>> => {
   if (entityIds.length === 0) return {};
-  const { hits } = await esClient.search<Entity>({
-    index: getEntitiesAlias(ENTITY_LATEST, spaceId),
-    ignore_unavailable: true,
-    size: MAX_MEMBERS + 1,
-    _source: recordFields.length > 0 ? [...recordFields] : false,
-    fields: [ENTITY_ID_FIELD, RESOLVED_TO_FIELD],
-    query: { terms: { [RESOLVED_TO_FIELD]: [...entityIds] } },
+  const withRecords = recordFields.length > 0;
+  const filtered = esql.from(
+    [getEntitiesAlias(ENTITY_LATEST, spaceId)],
+    withRecords ? ['_source'] : []
+  ).where`entity.relationships.resolution.resolved_to IN (${{ entityIds: [...entityIds] }})`;
+  const response = await runEsqlRead({
+    esClient,
+    query: (withRecords
+      ? filtered.pipe`KEEP entity.id, entity.relationships.resolution.resolved_to, _source`
+      : filtered.pipe`KEEP entity.id, entity.relationships.resolution.resolved_to`
+    ).limit(MAX_MEMBERS + 1),
+    tolerateMissingIndex: true,
   });
-  if (hits.hits.length > MAX_MEMBERS) {
+  const rows = esqlRows(response);
+  if (rows.length > MAX_MEMBERS) {
     throw new Error('The groups of these entities have too many members to read');
   }
 
   const members: Record<string, GroupMember[]> = {};
-  hits.hits.forEach(({ fields, _source: record }) => {
-    const [id] = fields?.[ENTITY_ID_FIELD] ?? [];
-    const [headId] = fields?.[RESOLVED_TO_FIELD] ?? [];
+  rows.forEach((row) => {
+    const id = row[ENTITY_ID_FIELD];
+    const headId = row[RESOLVED_TO_FIELD];
     if (typeof id === 'string' && typeof headId === 'string') {
       // The Entity Store can hold fields as dotted keys, such as `asset.criticality`.
-      (members[headId] ??= []).push({ id, record: unflattenObject(record ?? {}) as Entity });
+      const source = unflattenObject((row._source as object | undefined) ?? {});
+      const record = withRecords ? pick(source, recordFields) : {};
+      (members[headId] ??= []).push({ id, record: record as Entity });
     }
   });
   return members;
