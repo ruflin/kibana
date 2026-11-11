@@ -2,6 +2,44 @@
 
 Provides sandboxed containers for AI agents to run untrusted commands.
 
+## Local development
+
+The plugin talks to `sandbox-api` from [`elastic/sandbox-service`](https://github.com/elastic/sandbox-service)
+(a private repository) over gRPC. It is configured with `xpack.sandbox.{enabled, host, port, api_key, ssl.*}`.
+Without `enabled: true` and an `api_key`, `getSession` throws and the sandbox is off.
+
+| Option | Use it when |
+| --- | --- |
+| Local minikube | Sandbox commands must reach services on your machine, such as a local Elasticsearch, or you need a specific sandbox-service version. |
+| Shared eval cluster | You only need public endpoints. Needs a dev credential from `@elastic/nightshift-investigations-team`. |
+
+Setup, in short (the sandbox-service repo's `docs/kibana-local.md` has the full steps and a
+troubleshooting table):
+
+1. Clone `elastic/sandbox-service` next to Kibana and run `./scripts/minikube-deploy.sh` there. It
+   needs minikube 1.39+, `kubectl`, Docker, `openssl` and `python3`.
+2. Leave `kubectl --context sandbox-service port-forward svc/sandbox-api 9090:9090` running.
+3. Add to the git-ignored `config/kibana.dev.yml`, with `SANDBOX_API_KEY` set to the credential the
+   script prints (do not write it into the file):
+
+   ```yaml
+   xpack.sandbox:
+     enabled: true
+     host: localhost
+     port: 9090
+     api_key: ${SANDBOX_API_KEY}
+     ssl:
+       certificate_authorities: /absolute/path/to/home/.sandbox-minikube/ca.crt
+   ```
+
+   Do not set `ssl.certificate` or `ssl.key`: a client certificate takes precedence over the dev
+   credential and every call fails.
+
+To have your coding agent do this, ask it to follow the `nightshift-local-sandbox` skill
+(`.agents/skills/nightshift-local-sandbox/SKILL.md`). It covers prerequisites, deploy, the
+port-forward, the Kibana config and the Nightshift telemetry connector, and says when to stop and
+ask you.
+
 ## Getting a session
 
 Plugins get a `SandboxSession` from `SandboxPluginStart.getSession` (or `getSessionForSpace`
