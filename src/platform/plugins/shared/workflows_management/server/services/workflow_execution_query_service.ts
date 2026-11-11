@@ -8,6 +8,10 @@
  */
 
 import type { estypes } from '@elastic/elasticsearch';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
+import type { ESQLSearchResponse } from '@kbn/es-types';
+import { isEsqlUnknownIndexError } from '@kbn/storage-adapter';
 import { ExecutionType } from '@kbn/workflows';
 import type {
   EsWorkflowStepExecution,
@@ -819,25 +823,24 @@ export class WorkflowExecutionQueryService {
       return new Set();
     }
     try {
-      const response = await this.deps.esClient.search<unknown>({
-        index: WORKFLOWS_INDEX,
-        query: {
-          bool: {
-            must: [{ ids: { values: ids } }, { term: { spaceId } }],
-            must_not: [{ exists: { field: 'deleted_at' } }],
-          },
-        },
-        _source: false,
-        size: ids.length,
-        track_total_hits: false,
-      });
+      const { query, params } = esql.from([WORKFLOWS_INDEX], ['_id']).where`_id IN (${ids.map(
+        (id) => esql.str(id)
+      )}) AND spaceId == ${{
+        spaceId,
+      }} AND deleted_at IS NULL`.pipe`KEEP _id`
+        .limit(ids.length)
+        .toRequest();
+      const response = (await this.deps.esClient.esql.query({
+        query,
+        params,
+      } as unknown as EsqlQueryRequest)) as unknown as ESQLSearchResponse;
       const alive = new Set<string>();
-      for (const hit of response.hits.hits) {
-        if (hit._id) alive.add(hit._id);
+      for (const [id] of response.values) {
+        if (typeof id === 'string') alive.add(id);
       }
       return alive;
     } catch (error) {
-      if (isIndexNotFoundError(error)) {
+      if (isIndexNotFoundError(error) || isEsqlUnknownIndexError(error)) {
         // Fresh install / test env: no workflows index yet means no alive
         // workflows, so every step execution is by definition an orphan.
         return new Set();

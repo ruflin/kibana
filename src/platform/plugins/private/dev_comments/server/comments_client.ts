@@ -9,6 +9,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { errors } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import { StorageIndexAdapter, type IStorageClient } from '@kbn/storage-adapter';
 import type { Comment, CommentPatch, CommentSnapshot, NewComment, NewSnapshot } from '../common';
@@ -101,11 +102,10 @@ export class CommentsClient {
   public async create(input: NewComment): Promise<Comment> {
     // The cap keeps the store and the list bounded; it is checked, not enforced:
     // comments created at the same moment can take the count slightly past it.
-    const { hits } = await this.comments.search({ size: 0, track_total_hits: true });
-    if (hits.total.value >= MAX_COMMENTS) {
-      throw new CommentsLimitError(
-        `At most ${MAX_COMMENTS} comments can be stored; ${hits.total.value} are.`
-      );
+    const { values } = await this.comments.esql({ pipeline: esql`STATS total = COUNT(*)` });
+    const total = Number(values[0]?.[0] ?? 0);
+    if (total >= MAX_COMMENTS) {
+      throw new CommentsLimitError(`At most ${MAX_COMMENTS} comments can be stored; ${total} are.`);
     }
     const now = new Date().toISOString();
     const id = uuidv4();

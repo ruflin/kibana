@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { IScopedClusterClient } from '@kbn/core/server';
 
 import type { ConnectorDocument } from '@kbn/search-connectors';
@@ -16,6 +17,7 @@ import {
 } from '@kbn/search-connectors';
 
 import { toAlphanumeric } from '../../../common/utils/to_alphanumeric';
+import { runEsql, toEsqlSource } from '../../utils/esql_helpers';
 
 export const generateApiKey = async (
   client: IScopedClusterClient,
@@ -39,11 +41,16 @@ export const generateApiKey = async (
     },
   });
 
-  const connectorResult = await client.asCurrentUser.search<ConnectorDocument>({
-    index: CONNECTORS_INDEX,
-    query: { term: { index_name: indexName } },
-  });
-  const connector = connectorResult.hits.hits[0];
+  const connectorResult = await runEsql(
+    client.asCurrentUser,
+    esql.from([toEsqlSource(CONNECTORS_INDEX)], ['_id', '_source']).where`index_name == ${{
+      indexName,
+    }}`.pipe`KEEP _id, _source`.limit(1)
+  );
+  const [connectorRow] = connectorResult.values;
+  const connector = connectorRow
+    ? { _id: connectorRow[0] as string, _source: connectorRow[1] as ConnectorDocument }
+    : undefined;
   if (connector) {
     const apiKeyFields = isNative
       ? {

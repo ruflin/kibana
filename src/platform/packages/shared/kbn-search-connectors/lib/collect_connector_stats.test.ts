@@ -33,7 +33,9 @@ describe('collect connector stats', () => {
     indices: {
       stats: jest.fn(),
     },
-    search: jest.fn(),
+    esql: {
+      query: jest.fn(),
+    },
   };
   const mockSyncJobsResponse: Paginate<ConnectorSyncJob> = {
     _meta: {
@@ -69,13 +71,10 @@ describe('collect connector stats', () => {
         },
       })
     );
-    mockClient.search.mockImplementation(() =>
+    mockClient.esql.query.mockImplementation(() =>
       Promise.resolve({
-        aggregations: {
-          table_count: {
-            value: 7,
-          },
-        },
+        columns: [{ name: 'table_count', type: 'long' }],
+        values: [[7]],
       })
     );
 
@@ -86,5 +85,8 @@ describe('collect connector stats', () => {
       expectedMysqlConnectorStats,
       expectedDeletedConnectorStats,
     ]);
+    expect(mockClient.esql.query).toHaveBeenCalledWith({
+      query: `FROM ${mysqlConnector.index_name} | STATS table_count = COUNT_DISTINCT(\`Table.keyword\`)`,
+    });
   });
 });

@@ -54,9 +54,10 @@ describe('EsIndexFilesMetadataClient', () => {
 
     it('should retrieve backing index on update', async () => {
       // For `.getBackingIndex()`
-      esClient.search.mockResolvedValueOnce({
-        hits: { hits: [{ _index: 'foo-00001' } as estypes.SearchHit] },
-      } as estypes.SearchResponse);
+      esClient.esql.query.mockResolvedValueOnce({
+        columns: [{ name: '_index', type: 'keyword' }],
+        values: [['foo-00001']],
+      } as never);
       // For `.get()`
       esClient.search.mockResolvedValueOnce({
         hits: { hits: [{ _source: { file: generateMetadata() } } as estypes.SearchHit] },
@@ -64,15 +65,9 @@ describe('EsIndexFilesMetadataClient', () => {
 
       await metaClient.update({ id: '123', metadata: generateMetadata() });
 
-      expect(esClient.search).toHaveBeenCalledWith({
-        _source: false,
-        query: {
-          term: {
-            _id: '123',
-          },
-        },
-        size: 1,
-        index: 'foo',
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query: 'FROM foo METADATA _id, _index | WHERE _id == ?id | KEEP _index | LIMIT 1',
+        params: [{ id: '123' }],
       });
       expect(esClient.update).toHaveBeenCalledWith(expect.objectContaining({ index: 'foo-00001' }));
     });

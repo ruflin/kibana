@@ -5,9 +5,10 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { IScopedClusterClient, Logger } from '@kbn/core/server';
 
-import type { Connector, ConnectorSyncJobDocument } from '@kbn/search-connectors';
+import type { Connector } from '@kbn/search-connectors';
 import {
   CONNECTORS_JOBS_INDEX,
   fetchConnectorByIndexName,
@@ -16,6 +17,12 @@ import {
 
 import { ENTERPRISE_SEARCH_CONNECTOR_CRAWLER_SERVICE_TYPE } from '../../../common/constants';
 import type { ElasticsearchIndexWithIngestion } from '../../../common/types/indices';
+import {
+  esqlCount,
+  isEsqlUnknownIndexException,
+  runEsql,
+  toEsqlSource,
+} from '../../utils/esql_helpers';
 import { isIndexNotFoundException } from '../../utils/identify_exceptions';
 
 import { mapIndexStats } from './utils/map_index_stats';
@@ -25,31 +32,21 @@ const hasInProgressSyncs = async (
   connectorId: string
 ): Promise<{ inProgress: boolean; pending: boolean }> => {
   try {
-    const syncs = await client.asCurrentUser.search<ConnectorSyncJobDocument>({
-      index: CONNECTORS_JOBS_INDEX,
-      query: {
-        bool: {
-          filter: [
-            { term: { 'connector.id': connectorId } },
-            {
-              dis_max: {
-                queries: [
-                  { term: { status: SyncStatus.IN_PROGRESS } },
-                  { term: { status: SyncStatus.PENDING } },
-                ],
-              },
-            },
-          ],
-        },
-      },
-    });
-    const inProgress = syncs.hits.hits.some(
-      (sync) => sync._source?.status === SyncStatus.IN_PROGRESS
+    // Filter on the connector id and the two statuses; the search returned the default 10 hits.
+    const syncs = await runEsql(
+      client.asCurrentUser,
+      esql.from([toEsqlSource(CONNECTORS_JOBS_INDEX)]).where`connector.id == ${{
+        connectorId,
+      }} AND status IN (${[SyncStatus.IN_PROGRESS, SyncStatus.PENDING].map((status) =>
+        esql.str(status)
+      )})`.pipe`KEEP status`.limit(10)
     );
-    const pending = syncs.hits.hits.some((sync) => sync._source?.status === SyncStatus.PENDING);
+    const statuses = syncs.values.map(([status]) => status);
+    const inProgress = statuses.includes(SyncStatus.IN_PROGRESS);
+    const pending = statuses.includes(SyncStatus.PENDING);
     return { inProgress, pending };
   } catch (error) {
-    if (isIndexNotFoundException(error)) {
+    if (isIndexNotFoundException(error) || isEsqlUnknownIndexException(error)) {
       return { inProgress: false, pending: false };
     }
     throw error;
@@ -65,7 +62,7 @@ export const fetchIndex = async (
   const indexData = indexDataResult[index];
   const { indices } = await client.asCurrentUser.indices.stats({ index });
 
-  const { count } = await client.asCurrentUser.count({ index });
+  const count = await esqlCount(client.asCurrentUser, index);
 
   if (!indices || !indices[index] || !indexData) {
     throw new Error('404');

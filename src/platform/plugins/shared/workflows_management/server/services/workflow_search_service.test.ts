@@ -40,12 +40,12 @@ const makeSource = (overrides?: Partial<WorkflowProperties>): WorkflowProperties
 
 const makeDeps = (): {
   deps: WorkflowSearchDeps;
-  storageClient: { search: jest.Mock };
+  storageClient: { search: jest.Mock; esql: jest.Mock };
   esClient: ReturnType<typeof elasticsearchServiceMock.createElasticsearchClient>;
   workflowExecutionsDataClient: { search: jest.Mock };
   logger: ReturnType<typeof loggerMock.create>;
 } => {
-  const storageClient = { search: jest.fn() };
+  const storageClient = { search: jest.fn(), esql: jest.fn() };
   const esClient = elasticsearchServiceMock.createElasticsearchClient();
   const workflowExecutionsDataClient = { search: jest.fn() };
   const logger = loggerMock.create();
@@ -62,6 +62,14 @@ const makeDeps = (): {
     logger,
   };
 };
+
+const statsResponse = (enabled: number, disabled: number) => ({
+  columns: [
+    { name: 'enabled', type: 'long' },
+    { name: 'disabled', type: 'long' },
+  ],
+  values: [[enabled, disabled]],
+});
 
 const hitWithSort = (id: string, sort: unknown[]) => ({
   _id: id,
@@ -353,28 +361,24 @@ describe('WorkflowSearchService', () => {
   describe('getWorkflowStats', () => {
     it('returns enabled/disabled counts from aggregation buckets', async () => {
       const { deps, storageClient } = makeDeps();
-      storageClient.search.mockResolvedValue({
-        aggregations: {
-          enabled_count: { doc_count: 7 },
-          disabled_count: { doc_count: 3 },
-        },
-      });
+      storageClient.esql.mockResolvedValue(statsResponse(7, 3));
 
       const service = new WorkflowSearchService(deps);
       const stats = await service.getWorkflowStats('default');
 
       expect(stats.workflows).toEqual({ enabled: 7, disabled: 3 });
       expect(stats.executions).toBeUndefined();
+
+      const { pipeline, filter } = storageClient.esql.mock.calls[0][0];
+      expect(pipeline.toRequest().query).toBe(
+        'STATS enabled = COUNT(*) WHERE enabled == TRUE, disabled = COUNT(*) WHERE enabled == FALSE'
+      );
+      expect(filter.bool).toEqual(expect.objectContaining({ must: expect.any(Array) }));
     });
 
     it('includes execution history stats when includeExecutionStats=true', async () => {
       const { deps, storageClient, workflowExecutionsDataClient } = makeDeps();
-      storageClient.search.mockResolvedValue({
-        aggregations: {
-          enabled_count: { doc_count: 1 },
-          disabled_count: { doc_count: 0 },
-        },
-      });
+      storageClient.esql.mockResolvedValue(statsResponse(1, 0));
       workflowExecutionsDataClient.search.mockResolvedValue({
         aggregations: {
           daily_stats: {
@@ -417,12 +421,7 @@ describe('WorkflowSearchService', () => {
 
     it('includes managed executions in history stats when includeManagedExecutionStats=true', async () => {
       const { deps, storageClient, workflowExecutionsDataClient } = makeDeps();
-      storageClient.search.mockResolvedValue({
-        aggregations: {
-          enabled_count: { doc_count: 1 },
-          disabled_count: { doc_count: 0 },
-        },
-      });
+      storageClient.esql.mockResolvedValue(statsResponse(1, 0));
       workflowExecutionsDataClient.search.mockResolvedValue({
         aggregations: {
           daily_stats: {
@@ -452,12 +451,7 @@ describe('WorkflowSearchService', () => {
 
     it('returns an empty execution-history array when the executions index is missing', async () => {
       const { deps, storageClient, workflowExecutionsDataClient, logger } = makeDeps();
-      storageClient.search.mockResolvedValue({
-        aggregations: {
-          enabled_count: { doc_count: 0 },
-          disabled_count: { doc_count: 0 },
-        },
-      });
+      storageClient.esql.mockResolvedValue(statsResponse(0, 0));
       workflowExecutionsDataClient.search.mockRejectedValue(
         new errors.ResponseError({
           statusCode: 404,

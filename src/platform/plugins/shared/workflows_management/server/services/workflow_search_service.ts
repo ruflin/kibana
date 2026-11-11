@@ -8,6 +8,7 @@
  */
 
 import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { KibanaRequest } from '@kbn/core/server';
 import type {
   EsWorkflowExecution,
@@ -276,27 +277,17 @@ export class WorkflowSearchService {
       managed: 'unmanaged',
     });
     if (options?.accessControlFilter) statsFilter.must.push(options.accessControlFilter);
-    const statsResponse = await this.deps.workflowStorage.getClient().search({
-      size: 0,
-      track_total_hits: true,
-      query: {
-        bool: statsFilter,
-      },
-      aggs: {
-        enabled_count: {
-          filter: { term: { enabled: true } },
-        },
-        disabled_count: {
-          filter: { term: { enabled: false } },
-        },
-      },
+    // The workflow filters (space, deleted, managed, access control) stay in the request `filter`.
+    const statsResponse = await this.deps.workflowStorage.getClient().esql({
+      filter: { bool: statsFilter },
+      pipeline: esql`STATS enabled = COUNT(*) WHERE enabled == TRUE, disabled = COUNT(*) WHERE enabled == FALSE`,
     });
 
-    const aggs = statsResponse.aggregations;
+    const [enabled, disabled] = statsResponse.values[0] ?? [];
     const workflowsStats: WorkflowStatsDto = {
       workflows: {
-        enabled: aggs?.enabled_count.doc_count ?? 0,
-        disabled: aggs?.disabled_count.doc_count ?? 0,
+        enabled: typeof enabled === 'number' ? enabled : 0,
+        disabled: typeof disabled === 'number' ? disabled : 0,
       },
     };
 

@@ -13,6 +13,7 @@ import { fetchConnectorByIndexName } from '@kbn/search-connectors';
 import { fetchIndex } from './fetch_index';
 
 jest.mock('@kbn/search-connectors', () => ({
+  CONNECTORS_JOBS_INDEX: '.elastic-connectors-sync-jobs',
   SyncStatus: {
     CANCELED: 'canceled',
     CANCELING: 'canceling',
@@ -28,17 +29,21 @@ jest.mock('@kbn/search-connectors', () => ({
 describe('fetchIndex lib function', () => {
   const mockClient = {
     asCurrentUser: {
-      count: jest.fn().mockReturnValue({ count: 100 }),
+      esql: {
+        query: jest.fn().mockImplementation(({ query }: { query: string }) =>
+          query.includes('STATS total')
+            ? { columns: [{ name: 'total', type: 'long' }], values: [[100]] }
+            : {
+                columns: [{ name: 'status', type: 'keyword' }],
+                values: [['in_progress'], ['pending']],
+              }
+        ),
+      },
       index: jest.fn(),
       indices: {
         get: jest.fn(),
         stats: jest.fn(),
       },
-      search: jest.fn().mockReturnValue({
-        hits: {
-          hits: [{ _source: { status: 'in_progress' } }, { _source: { status: 'pending' } }],
-        },
-      }),
     },
     asInternalUser: {},
   };
@@ -110,11 +115,11 @@ describe('fetchIndex lib function', () => {
   });
 
   it('should return data and stats for index and connector if connector is present', async () => {
-    mockClient.asCurrentUser.search.mockReturnValue({
-      hits: {
-        hits: [{ _source: { status: 'canceled' } }, { _source: { status: 'pending' } }],
-      },
-    });
+    mockClient.asCurrentUser.esql.query.mockImplementation(({ query }: { query: string }) =>
+      query.includes('STATS total')
+        ? { columns: [{ name: 'total', type: 'long' }], values: [[100]] }
+        : { columns: [{ name: 'status', type: 'keyword' }], values: [['pending']] }
+    );
     mockClient.asCurrentUser.indices.get.mockImplementation(() =>
       Promise.resolve({
         index_name: { aliases: [], data: 'full index' },
@@ -134,6 +139,12 @@ describe('fetchIndex lib function', () => {
       ...result,
       connector: { doc: 'doc', service_type: 'some-service-type' },
       has_pending_syncs: true,
+    });
+    expect(mockClient.asCurrentUser.esql.query).toHaveBeenCalledWith({
+      query: expect.stringContaining(
+        'FROM .elastic-connectors-sync-jobs | WHERE connector.id == ?connectorId AND (status IN ("in_progress", "pending")) | KEEP status | LIMIT 10'
+      ),
+      params: expect.any(Array),
     });
   });
 

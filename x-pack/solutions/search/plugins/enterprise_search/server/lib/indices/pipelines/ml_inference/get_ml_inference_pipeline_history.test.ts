@@ -4,82 +4,31 @@
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
-import type {
-  AggregationsMultiBucketAggregateBase,
-  AggregationsStringRareTermsBucketKeys,
-  SearchResponse,
-} from '@elastic/elasticsearch/lib/api/types';
+import { errors } from '@elastic/elasticsearch';
 import type { ElasticsearchClient } from '@kbn/core/server';
 
 import type { MlInferenceHistoryResponse } from '../../../../../common/types/pipelines';
 
 import { fetchMlInferencePipelineHistory } from './get_ml_inference_pipeline_history';
 
-const DEFAULT_RESPONSE: SearchResponse = {
-  _shards: {
-    failed: 0,
-    skipped: 0,
-    successful: 1,
-    total: 1,
-  },
-  hits: {
-    hits: [],
-    max_score: null,
-    total: {
-      relation: 'eq' as 'eq',
-      value: 10,
-    },
-  },
-  timed_out: false,
-  took: 1,
+const COLUMNS = [
+  { name: 'doc_count', type: 'long' },
+  { name: 'pipeline', type: 'keyword' },
+];
+const emptyMockResponse = { columns: COLUMNS, values: [] };
+const listMockResponse = {
+  columns: COLUMNS,
+  values: [
+    [20, 'ml-inference-test-001'],
+    [33, 'ml-inference-test-002'],
+  ],
 };
-type HistorySearchResponse = SearchResponse<
-  unknown,
-  {
-    inference_processors: AggregationsMultiBucketAggregateBase<AggregationsStringRareTermsBucketKeys>;
-  }
->;
-const emptyMockResponse: HistorySearchResponse = {
-  ...DEFAULT_RESPONSE,
-  aggregations: {
-    inference_processors: {
-      buckets: [],
-    },
-  },
-};
-const listMockResponse: HistorySearchResponse = {
-  ...DEFAULT_RESPONSE,
-  aggregations: {
-    inference_processors: {
-      buckets: [
-        {
-          doc_count: 20,
-          key: 'ml-inference-test-001',
-        },
-        {
-          doc_count: 33,
-          key: 'ml-inference-test-002',
-        },
-      ],
-    },
-  },
-};
-const objectMockResponse: HistorySearchResponse = {
-  ...DEFAULT_RESPONSE,
-  aggregations: {
-    inference_processors: {
-      buckets: {
-        '11111': {
-          doc_count: 20,
-          key: 'ml-inference-test-001',
-        },
-        '22222': {
-          doc_count: 33,
-          key: 'ml-inference-test-002',
-        },
-      },
-    },
-  },
+const reorderedMockResponse = {
+  columns: [COLUMNS[1], COLUMNS[0]],
+  values: [
+    ['ml-inference-test-001', 20],
+    ['ml-inference-test-002', 33],
+  ],
 };
 
 const expectedMockResults: MlInferenceHistoryResponse = {
@@ -97,7 +46,7 @@ const expectedMockResults: MlInferenceHistoryResponse = {
 
 describe('fetchMlInferencePipelineHistory', () => {
   const mockClient = {
-    search: jest.fn(),
+    esql: { query: jest.fn() },
   };
   const client = mockClient as unknown as ElasticsearchClient;
   const indexName = 'unit-test-index';
@@ -106,42 +55,47 @@ describe('fetchMlInferencePipelineHistory', () => {
   });
 
   it('should query ingest pipelines from documents', async () => {
-    mockClient.search.mockResolvedValue(emptyMockResponse);
+    mockClient.esql.query.mockResolvedValue(emptyMockResponse);
 
     await fetchMlInferencePipelineHistory(client, indexName);
-    expect(mockClient.search).toHaveBeenCalledWith({
-      aggs: {
-        inference_processors: {
-          terms: {
-            field: '_ingest.processors.pipeline.enum',
-            size: 100,
-          },
-        },
-      },
-      index: indexName,
-      size: 0,
+    expect(mockClient.esql.query).toHaveBeenCalledWith({
+      query: `FROM ${indexName} | STATS doc_count = COUNT(*) BY pipeline = \`_ingest.processors.pipeline.enum\` | SORT doc_count DESC, pipeline ASC | LIMIT 100`,
     });
   });
   it('should return empty history when no results found', async () => {
-    mockClient.search.mockResolvedValue(emptyMockResponse);
+    mockClient.esql.query.mockResolvedValue(emptyMockResponse);
 
     const response = await fetchMlInferencePipelineHistory(client, indexName);
     expect(response).toEqual({ history: [] });
   });
   it('should return empty history when no aggregations returned', async () => {
-    mockClient.search.mockResolvedValue(DEFAULT_RESPONSE);
+    // The index maps no pipeline field: ES|QL fails on the unknown column.
+    mockClient.esql.query.mockRejectedValue(
+      new errors.ResponseError({
+        statusCode: 400,
+        body: {
+          error: {
+            type: 'verification_exception',
+            reason: 'Found 1 problem\nline 1:1: Unknown column [_ingest.processors.pipeline.enum]',
+          },
+        },
+        headers: {},
+        meta: {} as never,
+        warnings: [],
+      })
+    );
 
     const response = await fetchMlInferencePipelineHistory(client, indexName);
     expect(response).toEqual({ history: [] });
   });
   it('should return history with aggregated list', async () => {
-    mockClient.search.mockResolvedValue(listMockResponse);
+    mockClient.esql.query.mockResolvedValue(listMockResponse);
 
     const response = await fetchMlInferencePipelineHistory(client, indexName);
     expect(response).toEqual(expectedMockResults);
   });
   it('should return history with aggregated object', async () => {
-    mockClient.search.mockResolvedValue(objectMockResponse);
+    mockClient.esql.query.mockResolvedValue(reorderedMockResponse);
 
     const response = await fetchMlInferencePipelineHistory(client, indexName);
     expect(response).toEqual(expectedMockResults);

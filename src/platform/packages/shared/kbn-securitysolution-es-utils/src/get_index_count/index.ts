@@ -7,7 +7,15 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '../elasticsearch_client';
+
+// Index names the ES|QL parser reads without quotes. Anything else is quoted, so that an index
+// name can never end the `FROM` command.
+const UNQUOTED_SOURCE = /^[A-Za-z0-9._*:-]+$/;
+
+const toEsqlSource = (source: string): string =>
+  UNQUOTED_SOURCE.test(source) ? source : `"${source.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
 /**
  * Retrieves the count of documents in a given index
@@ -24,12 +32,10 @@ export const getIndexCount = async ({
   esClient: ElasticsearchClient;
   index: string;
 }): Promise<number> => {
-  const response = await esClient.count(
-    {
-      index,
-    },
-    { meta: true }
-  );
+  const sources = index.split(',').map((source) => toEsqlSource(source.trim()));
+  const { query } = esql.from(sources).pipe`STATS total = COUNT(*)`.toRequest();
+  const response = (await esClient.esql.query({ query })) as unknown as { values: unknown[][] };
+  const total = response.values[0]?.[0];
 
-  return response.body.count;
+  return typeof total === 'number' ? total : 0;
 };

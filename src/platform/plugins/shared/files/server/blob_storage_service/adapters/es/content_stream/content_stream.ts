@@ -16,7 +16,8 @@ import { defaults } from 'lodash';
 import type { Writable, Readable } from 'stream';
 import { Duplex } from 'stream';
 
-import type { GetResponse } from '@elastic/elasticsearch/lib/api/types';
+import type { EsqlQueryRequest, GetResponse } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import { inspect } from 'util';
 import { wrapErrorAndReThrow } from '../../../../file_client/utils';
 import type { FileChunkDocument } from '../mappings';
@@ -91,20 +92,19 @@ export class ContentStream extends Duplex {
   }
 
   private async getChunkRealIndex(id: string): Promise<string> {
-    const chunkDocMeta = await this.client.search({
-      index: this.index,
-      size: 1,
-      query: {
-        term: {
-          _id: id,
-        },
-      },
-      _source: false, // suppress the document content
-    });
+    // Only `_index` is selected: the document content (the binary `data` field) is not read.
+    const { query, params } = esql.from([this.index], ['_id', '_index']).where`_id == ${{ id }}`
+      .pipe`KEEP _index`
+      .limit(1)
+      .toRequest();
+    const chunkDocMeta = (await this.client.esql.query({
+      query,
+      params,
+    } as unknown as EsqlQueryRequest)) as unknown as { values: unknown[][] };
 
-    const docIndex = chunkDocMeta.hits.hits?.[0]?._index;
+    const docIndex = chunkDocMeta.values[0]?.[0];
 
-    if (!docIndex) {
+    if (typeof docIndex !== 'string' || !docIndex) {
       const err = new Error(
         `Unable to determine index for file chunk id [${id}] in index (alias) [${this.index}]`
       );

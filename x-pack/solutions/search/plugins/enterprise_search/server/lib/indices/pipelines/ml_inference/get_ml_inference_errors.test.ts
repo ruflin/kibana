@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { errors } from '@elastic/elasticsearch';
 import type { ElasticsearchClient } from '@kbn/core/server';
 
 import { getMlInferenceErrors } from './get_ml_inference_errors';
@@ -13,7 +14,7 @@ describe('getMlInferenceErrors', () => {
   const indexName = 'my-index';
 
   const mockClient = {
-    search: jest.fn(),
+    esql: { query: jest.fn() },
   };
 
   beforeEach(() => {
@@ -21,30 +22,17 @@ describe('getMlInferenceErrors', () => {
   });
 
   it('should fetch aggregations and transform them', async () => {
-    mockClient.search.mockImplementation(() =>
+    mockClient.esql.query.mockImplementation(() =>
       Promise.resolve({
-        aggregations: {
-          errors: {
-            buckets: [
-              {
-                key: 'Error message 1',
-                doc_count: 100,
-                max_error_timestamp: {
-                  value: 1664977836100,
-                  value_as_string: '2022-10-05T13:50:36.100Z',
-                },
-              },
-              {
-                key: 'Error message 2',
-                doc_count: 200,
-                max_error_timestamp: {
-                  value: 1664977836200,
-                  value_as_string: '2022-10-05T13:50:36.200Z',
-                },
-              },
-            ],
-          },
-        },
+        columns: [
+          { name: 'doc_count', type: 'long' },
+          { name: 'max_error_timestamp', type: 'date' },
+          { name: 'message', type: 'keyword' },
+        ],
+        values: [
+          [100, '2022-10-05T13:50:36.100Z', 'Error message 1'],
+          [200, '2022-10-05T13:50:36.200Z', 'Error message 2'],
+        ],
       })
     );
 
@@ -65,15 +53,27 @@ describe('getMlInferenceErrors', () => {
         timestamp: '2022-10-05T13:50:36.200Z',
       },
     ]);
-    expect(mockClient.search).toHaveBeenCalledTimes(1);
+    expect(mockClient.esql.query).toHaveBeenCalledTimes(1);
+    expect(mockClient.esql.query).toHaveBeenCalledWith({
+      query: `FROM ${indexName} | STATS doc_count = COUNT(*), max_error_timestamp = MAX(\`_ingest.inference_errors.timestamp\`) BY message = \`_ingest.inference_errors.message.enum\` | SORT max_error_timestamp DESC | LIMIT 20`,
+    });
   });
 
   it('should return an empty array if there are no aggregates', async () => {
-    mockClient.search.mockImplementation(() =>
-      Promise.resolve({
-        aggregations: {
-          errors: [],
+    // The index maps no inference error fields: ES|QL fails on the unknown column.
+    mockClient.esql.query.mockRejectedValue(
+      new errors.ResponseError({
+        statusCode: 400,
+        body: {
+          error: {
+            type: 'verification_exception',
+            reason:
+              'Found 1 problem\nline 1:1: Unknown column [_ingest.inference_errors.timestamp]',
+          },
         },
+        headers: {},
+        meta: {} as never,
+        warnings: [],
       })
     );
 

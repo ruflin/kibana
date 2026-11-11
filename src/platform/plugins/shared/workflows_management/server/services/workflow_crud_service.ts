@@ -10,6 +10,7 @@
 import type { estypes } from '@elastic/elasticsearch';
 import { randomBytes } from 'node:crypto';
 
+import { esql } from '@elastic/esql';
 import pMap from 'p-map';
 import { firstValueFrom } from 'rxjs';
 import type { KibanaRequest } from '@kbn/core/server';
@@ -1929,12 +1930,13 @@ export class WorkflowCrudService {
       return new Set();
     }
 
-    const response = await this.deps.workflowStorage.getClient().search({
-      query: { ids: { values: ids } },
-      size: ids.length,
-      track_total_hits: false,
+    const response = await this.deps.workflowStorage.getClient().esql({
+      metadata: ['_id'],
+      pipeline: esql`WHERE _id IN (${ids.map((id) => esql.str(id))}) | KEEP _id | LIMIT ${{
+        limit: ids.length,
+      }}`,
     });
 
-    return new Set(response.hits.hits.map((hit) => hit._id).filter((id): id is string => !!id));
+    return new Set(response.values.map(([id]) => id).filter((id): id is string => !!id));
   }
 }

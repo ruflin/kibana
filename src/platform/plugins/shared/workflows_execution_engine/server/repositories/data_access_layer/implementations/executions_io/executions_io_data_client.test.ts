@@ -7,6 +7,7 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
+import { errors } from '@elastic/elasticsearch';
 import { elasticsearchServiceMock } from '@kbn/core/server/mocks';
 import { loggerMock } from '@kbn/logging-mocks';
 
@@ -34,6 +35,7 @@ describe('ExecutionsIoDataClient', () => {
     } as unknown as DataStreamMetadataManager;
     client = new ExecutionsIoDataClient({ esClient, metadataManager, logger });
     esClient.search.mockResolvedValue({ hits: { hits: [] } } as never);
+    esClient.esql.query.mockResolvedValue({ columns: [], values: [] } as never);
   });
 
   it('returns an empty result without reading Elasticsearch', async () => {
@@ -391,8 +393,9 @@ describe('ExecutionsIoDataClient', () => {
   });
 
   it('reports a conflict for an id that exists in an older backing index without writing it', async () => {
-    esClient.search.mockResolvedValueOnce({
-      hits: { hits: [{ _id: 'output:step-1', _index: OLDER_INDEX }] },
+    esClient.esql.query.mockResolvedValueOnce({
+      columns: [{ name: '_id', type: 'keyword' }],
+      values: [['output:step-1']],
     } as never);
 
     const result = await client.bulkCreate({
@@ -407,6 +410,10 @@ describe('ExecutionsIoDataClient', () => {
       ],
     });
 
+    expect(esClient.esql.query).toHaveBeenCalledWith({
+      query: `FROM ${WORKFLOWS_EXECUTIONS_IO_DATA_STREAM} METADATA _id | WHERE _id IN ("output:step-1") | KEEP _id | LIMIT 1`,
+      params: [],
+    });
     expect(esClient.bulk).not.toHaveBeenCalled();
     expect(result.errors).toBe(true);
     expect(result.items[0]).toEqual(
@@ -415,6 +422,42 @@ describe('ExecutionsIoDataClient', () => {
         error: expect.objectContaining({ type: 'version_conflict_engine_exception' }),
       })
     );
+  });
+
+  it('creates documents when the IO data stream does not exist yet', async () => {
+    esClient.esql.query.mockRejectedValueOnce(
+      new errors.ResponseError({
+        statusCode: 400,
+        body: {
+          error: {
+            type: 'verification_exception',
+            reason: 'Found 1 problem\nline 1:1: Unknown index [x]',
+          },
+        },
+        headers: {},
+        meta: {} as never,
+        warnings: [],
+      })
+    );
+    esClient.bulk.mockResolvedValue({
+      errors: false,
+      items: [{ create: { _id: 'output:step-1', _index: NEWER_INDEX, status: 201 } }],
+    } as never);
+
+    const result = await client.bulkCreate({
+      documents: [
+        {
+          executionId: 'step-1',
+          type: 'output',
+          value: { done: true },
+          size: 2,
+          '@timestamp': '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(esClient.bulk).toHaveBeenCalledTimes(1);
+    expect(result.errors).toBe(false);
   });
 
   it('reports a write-index conflict per item instead of throwing', async () => {

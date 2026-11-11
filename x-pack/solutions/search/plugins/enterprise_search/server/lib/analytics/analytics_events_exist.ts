@@ -7,6 +7,7 @@
 
 import type { IScopedClusterClient } from '@kbn/core-elasticsearch-server';
 
+import { esqlCount, isEsqlUnknownIndexException } from '../../utils/esql_helpers';
 import { isIndexNotFoundException } from '../../utils/identify_exceptions';
 
 export const analyticsEventsExist = async (
@@ -14,12 +15,9 @@ export const analyticsEventsExist = async (
   datastreamName: string
 ): Promise<boolean> => {
   try {
-    const response = await client.asCurrentUser.count({
-      index: datastreamName,
-    });
-    return response.count > 0;
+    return (await esqlCount(client.asCurrentUser, datastreamName)) > 0;
   } catch (error) {
-    if (isIndexNotFoundException(error)) {
+    if (isIndexNotFoundException(error) || isEsqlUnknownIndexException(error)) {
       return false;
     }
     throw error;
