@@ -13,7 +13,11 @@ const TREE_ID = 'symptom:checkout-high-latency';
 
 const createEsClient = () => ({
   index: jest.fn().mockResolvedValue({}),
-  search: jest.fn().mockResolvedValue({ hits: { hits: [] } }),
+  esql: {
+    query: jest
+      .fn()
+      .mockResolvedValue({ columns: [{ name: '_source', type: 'object' }], values: [] }),
+  },
 });
 
 const createStore = (esClient: ReturnType<typeof createEsClient>) =>
@@ -83,37 +87,32 @@ describe('record', () => {
 describe('list', () => {
   it('maps learning documents back into records', async () => {
     const esClient = createEsClient();
-    esClient.search.mockResolvedValue({
-      hits: {
-        hits: [
+    esClient.esql.query.mockResolvedValue({
+      columns: [{ name: '_source', type: 'object' }],
+      values: [
+        [
           {
-            _source: {
-              '@timestamp': '2026-09-09T12:00:00.000Z',
-              type: 'decision_tree_learning',
-              title: 'Remediation',
-              tags: ['nightshift', 'decision-tree', 'learning'],
-              kind: 'remediation',
-              tree_id: TREE_ID,
-              content: 'Raise the pool size.',
-              keywords: ['learning:remediation'],
-            },
+            '@timestamp': '2026-09-09T12:00:00.000Z',
+            type: 'decision_tree_learning',
+            title: 'Remediation',
+            tags: ['nightshift', 'decision-tree', 'learning'],
+            kind: 'remediation',
+            tree_id: TREE_ID,
+            content: 'Raise the pool size.',
+            keywords: ['learning:remediation'],
           },
         ],
-      },
+      ],
     });
 
     const learnings = await createStore(esClient).list();
 
-    expect(esClient.search).toHaveBeenCalledWith(
+    // The type is a top-level field and sits in the query; the space is a flattened subfield, so it
+    // stays exact as the request filter.
+    expect(esClient.esql.query).toHaveBeenCalledWith(
       expect.objectContaining({
-        query: {
-          bool: {
-            filter: [
-              { term: { type: 'decision_tree_learning' } },
-              { term: { 'attributes.space_id': 'default' } },
-            ],
-          },
-        },
+        query: expect.stringContaining('WHERE type == "decision_tree_learning"'),
+        filter: { bool: { filter: [{ term: { 'attributes.space_id': 'default' } }] } },
       }),
       expect.anything()
     );

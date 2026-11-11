@@ -9,6 +9,8 @@ import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import type { ConversationPublicClient } from '@kbn/agent-builder-server';
 import { isResponseError } from '@kbn/es-errors';
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
+import { esqlCount, runEsqlRead } from '../lib/esql_read';
 import { WIKI_AI_INDEX_DEST } from '../../common/wiki';
 import { DECISION_TREE_AI_INDEX_DEST } from '../../common/decision_trees';
 import { MEMORY_INDEX } from '../../common/memory';
@@ -65,17 +67,18 @@ export const createKnowledgePurgeClient = ({
   getConversations: () => Promise<ConversationPublicClient | undefined>;
   signal?: AbortSignal;
 }): KnowledgePurgeClient => {
+  // ES|QL: the space is a flattened subfield, so it stays an exact request filter; the time range
+  // is a top-level field and goes in the WHERE.
+  // A missing index is an error in ES|QL, so `runEsqlRead` returns `undefined` and the count is 0.
   const countIndex = async (index: string, since: string): Promise<number> => {
-    try {
-      const { count } = await esClient.count(
-        { index, query: writtenSince(spaceId, since) },
-        { signal }
-      );
-      return count;
-    } catch (error) {
-      if (isIndexNotFound(error)) return 0;
-      throw error;
-    }
+    const response = await runEsqlRead({
+      esClient,
+      query: esql.from([index]).pipe`WHERE @timestamp >= TO_DATETIME(${{ since }})`
+        .pipe`STATS total = COUNT(*)`,
+      filter: { term: { [SPACE_ID_FIELD]: spaceId } },
+      signal,
+    });
+    return esqlCount(response);
   };
 
   const deleteIndex = async (index: string, since: string): Promise<number> => {

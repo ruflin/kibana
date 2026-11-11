@@ -7,6 +7,8 @@
 
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import { isResponseError } from '@kbn/es-errors';
+import { esql } from '@elastic/esql';
+import { esqlRows, esqlSources, runEsqlRead } from '../lib/esql_read';
 import {
   countsForTree,
   extractMermaid,
@@ -387,6 +389,10 @@ const retryOnConflict = async <Result>(attempt: () => Promise<Result>): Promise<
   }
 };
 
+/** ES|QL over the decision-tree index for one document `type`, reading the top-level `type` field. */
+const decisionTreeRows = (columns: string[], type: string) =>
+  esql.from([DECISION_TREE_AI_INDEX_DEST], columns).pipe`WHERE type == ${esql.str(type)}`;
+
 export const createDecisionTreeStore = ({
   esClient,
   logger,
@@ -476,28 +482,21 @@ export const createDecisionTreeStore = ({
 
   return {
     list: async () => {
-      const response = await esClient.search<DecisionTreeHeadSource>(
-        {
-          index: DECISION_TREE_AI_INDEX_DEST,
-          ignore_unavailable: true,
-          allow_no_indices: true,
-          size: MAX_TREES,
-          track_total_hits: false,
-          query: {
-            bool: {
-              filter: [
-                { term: { type: 'decision_tree' } },
-                { term: { tags: DECISION_TREE_TAG } },
-                { term: { [SPACE_ID_FIELD]: spaceId } },
-              ],
-            },
+      const response = await runEsqlRead({
+        esClient,
+        query: decisionTreeRows(['_source'], 'decision_tree')
+          .pipe`SORT @timestamp DESC NULLS LAST`.limit(MAX_TREES),
+        filter: {
+          bool: {
+            filter: [
+              { term: { tags: DECISION_TREE_TAG } },
+              { term: { [SPACE_ID_FIELD]: spaceId } },
+            ],
           },
-          sort: [{ '@timestamp': { order: 'desc', unmapped_type: 'date' } }],
         },
-        { signal }
-      );
-
-      return response.hits.hits.flatMap((hit) => (hit._source ? [headToSummary(hit._source)] : []));
+        signal,
+      });
+      return esqlSources<DecisionTreeHeadSource>(response).map(headToSummary);
     },
 
     get: async (treeId) => {
@@ -619,62 +618,48 @@ export const createDecisionTreeStore = ({
     },
 
     listTreeIdsForInvestigation: async (investigationId) => {
-      // Buckets by tree rather than reading version hits, so a tree with many versions cannot
-      // push the investigation's other trees out of the response.
-      const response = await esClient.search<
-        DecisionTreeVersionSource,
-        { tree_ids: { buckets: Array<{ key: string }> } }
-      >(
-        {
-          index: DECISION_TREE_AI_INDEX_DEST,
-          ignore_unavailable: true,
-          allow_no_indices: true,
-          size: 0,
-          track_total_hits: false,
-          query: {
-            bool: {
-              filter: [
-                // The head carries the last writer's conversation, so only versions say every
-                // investigation that wrote the tree.
-                { term: { type: 'decision_tree_version' } },
-                { term: { 'attributes.conversation_id': investigationId } },
-                { term: { [SPACE_ID_FIELD]: spaceId } },
-              ],
-            },
+      // Groups versions by tree rather than reading version rows, so a tree with many versions
+      // cannot push the investigation's other trees out of the result.
+      const response = await runEsqlRead({
+        esClient,
+        query: decisionTreeRows([], 'decision_tree_version')
+          .pipe`STATS versions = COUNT(*) BY tree_id = FIELD_EXTRACT(attributes, "tree_id")`
+          .pipe`WHERE tree_id IS NOT NULL`.pipe`SORT versions DESC`
+          .limit(MAX_TREES)
+          .keep('tree_id'),
+        filter: {
+          bool: {
+            // The head carries the last writer's conversation, so only versions say every
+            // investigation that wrote the tree. It is a flattened subfield: request filter.
+            filter: [
+              { term: { 'attributes.conversation_id': investigationId } },
+              { term: { [SPACE_ID_FIELD]: spaceId } },
+            ],
           },
-          aggs: { tree_ids: { terms: { field: 'attributes.tree_id', size: MAX_TREES } } },
         },
-        { signal }
+        signal,
+      });
+      return esqlRows(response).flatMap((row) =>
+        typeof row.tree_id === 'string' ? [row.tree_id] : []
       );
-
-      return (response.aggregations?.tree_ids.buckets ?? []).map((bucket) => bucket.key);
     },
 
     listVersions: async (treeId) => {
-      const response = await esClient.search<DecisionTreeVersionSource>(
-        {
-          index: DECISION_TREE_AI_INDEX_DEST,
-          ignore_unavailable: true,
-          allow_no_indices: true,
-          size: MAX_VERSIONS,
-          track_total_hits: false,
-          query: {
-            bool: {
-              filter: [
-                { term: { type: 'decision_tree_version' } },
-                { term: { 'attributes.tree_id': symptomTreeId(symptomSlugFromTreeId(treeId)) } },
-                { term: { [SPACE_ID_FIELD]: spaceId } },
-              ],
-            },
+      const response = await runEsqlRead({
+        esClient,
+        query: decisionTreeRows(['_source'], 'decision_tree_version')
+          .pipe`SORT @timestamp DESC NULLS LAST`.limit(MAX_VERSIONS),
+        filter: {
+          bool: {
+            filter: [
+              { term: { 'attributes.tree_id': symptomTreeId(symptomSlugFromTreeId(treeId)) } },
+              { term: { [SPACE_ID_FIELD]: spaceId } },
+            ],
           },
-          sort: [{ '@timestamp': { order: 'desc', unmapped_type: 'date' } }],
         },
-        { signal }
-      );
-
-      return response.hits.hits.flatMap((hit) =>
-        hit._source ? [versionToSummary(hit._source)] : []
-      );
+        signal,
+      });
+      return esqlSources<DecisionTreeVersionSource>(response).map(versionToSummary);
     },
 
     getVersion: async (treeId, version) => {
