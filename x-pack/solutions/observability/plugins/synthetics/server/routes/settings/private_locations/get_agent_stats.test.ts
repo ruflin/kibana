@@ -62,13 +62,7 @@ const bucket = (
     usedPct,
     cpuPct,
   }: { total?: number; used?: number; usedPct?: number; cpuPct?: number }
-) => ({
-  key,
-  total: { value: total ?? null },
-  used: { value: used ?? null },
-  usedPct: { value: usedPct ?? null },
-  cpuPct: { value: cpuPct ?? null },
-});
+) => [total ?? null, used ?? null, usedPct ?? null, cpuPct ?? null, key];
 
 const makeContext = ({
   listAgentsImpl,
@@ -89,7 +83,16 @@ const makeContext = ({
     namespaces?: string[];
   }>;
 }) => {
-  const search = jest.fn().mockResolvedValue({ aggregations: { by_host: { buckets } } });
+  const search = jest.fn().mockResolvedValue({
+    columns: [
+      { name: 'total', type: 'double' },
+      { name: 'used', type: 'double' },
+      { name: 'usedPct', type: 'double' },
+      { name: 'cpuPct', type: 'double' },
+      { name: 'host.name', type: 'keyword' },
+    ],
+    values: buckets,
+  });
   const routeContext = {
     server: {
       fleet: { agentService: { asInternalUser: { listAgents: listAgentsImpl } } },
@@ -110,7 +113,9 @@ const makeContext = ({
       logger: { error: jest.fn(), warn: jest.fn() },
     },
     context: {
-      core: Promise.resolve({ elasticsearch: { client: { asCurrentUser: { search } } } }),
+      core: Promise.resolve({
+        elasticsearch: { client: { asCurrentUser: { esql: { query: search } } } },
+      }),
     },
     savedObjectsClient: {},
     syntheticsMonitorClient: {},
@@ -176,9 +181,11 @@ describe('getPrivateLocationAgentStats route', () => {
     expect(agentStat.cpuPct).toBe(0.1);
     expect(listAgents).toHaveBeenCalledWith(expect.objectContaining({ showInactive: true }));
 
-    const query = search.mock.calls[0][0].query;
-    const termsFilter = query.bool.filter.find((f: any) => f.terms?.['host.name']);
-    expect(termsFilter.terms['host.name']).toEqual(['WIN-Server01']);
+    const request = search.mock.calls[0][0];
+    expect(request.query).toBe(
+      'FROM metrics-system.memory-*, metrics-system.cpu-* | WHERE @timestamp >= NOW() - 10 minutes | WHERE host.name IN (?hostNames) | STATS total = MAX(system.memory.total), used = AVG(system.memory.actual.used.bytes), usedPct = AVG(system.memory.actual.used.pct), cpuPct = AVG(system.cpu.total.norm.pct) BY host.name | LIMIT 1'
+    );
+    expect(request.params).toEqual([{ hostNames: ['WIN-Server01'] }]);
   });
 
   it('caps usedMemoryMib at totalMemoryMib', async () => {

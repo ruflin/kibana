@@ -10,36 +10,35 @@ import { hasProfilingData } from './has_profiling_data';
 
 describe('hasProfilingData', () => {
   function createSetupOptions() {
-    const search = jest.fn();
+    const esqlFn = jest.fn();
 
     const setupOptions = {
       client: {} as ProfilingSetupOptions['client'],
-      clientWithProfilingAuth: { search },
+      clientWithProfilingAuth: { esql: esqlFn },
       logger: {} as ProfilingSetupOptions['logger'],
       soClient: {} as ProfilingSetupOptions['soClient'],
       spaceId: 'test-space',
     } as unknown as ProfilingSetupOptions;
 
-    return { setupOptions, search };
+    return { setupOptions, esqlFn };
   }
 
   it('searches the Universal Profiling indices, excluding the OTel ones', async () => {
-    const { setupOptions, search } = createSetupOptions();
-    search.mockResolvedValue({ hits: { total: { value: 0 } } });
+    const { setupOptions, esqlFn } = createSetupOptions();
+    esqlFn.mockResolvedValue({ columns: [], values: [] });
 
     await hasProfilingData(setupOptions);
 
-    expect(search).toHaveBeenCalledWith('has_any_profiling_data', {
-      index: ['profiling*', '-*.otel-*'],
-      size: 0,
-      track_total_hits: 1,
-      terminate_after: 1,
-    });
+    expect(esqlFn).toHaveBeenCalledWith('has_any_profiling_data', expect.anything());
+    expect(esqlFn.mock.calls[0][1].toRequest().query).toBe('FROM profiling*, -*.otel-* | LIMIT 1');
   });
 
   it('returns data available when there are hits', async () => {
-    const { setupOptions, search } = createSetupOptions();
-    search.mockResolvedValue({ hits: { total: { value: 1 } } });
+    const { setupOptions, esqlFn } = createSetupOptions();
+    esqlFn.mockResolvedValue({
+      columns: [{ name: '@timestamp', type: 'date' }],
+      values: [['2026-01-01']],
+    });
 
     await expect(hasProfilingData(setupOptions)).resolves.toEqual({
       data: { available: true },
@@ -47,8 +46,8 @@ describe('hasProfilingData', () => {
   });
 
   it('returns data not available when there are no hits', async () => {
-    const { setupOptions, search } = createSetupOptions();
-    search.mockResolvedValue({ hits: { total: { value: 0 } } });
+    const { setupOptions, esqlFn } = createSetupOptions();
+    esqlFn.mockResolvedValue({ columns: [], values: [] });
 
     await expect(hasProfilingData(setupOptions)).resolves.toEqual({
       data: { available: false },
@@ -56,8 +55,8 @@ describe('hasProfilingData', () => {
   });
 
   it('returns data not available when the search fails', async () => {
-    const { setupOptions, search } = createSetupOptions();
-    search.mockRejectedValue(new Error('search failed'));
+    const { setupOptions, esqlFn } = createSetupOptions();
+    esqlFn.mockRejectedValue(new Error('search failed'));
 
     await expect(hasProfilingData(setupOptions)).resolves.toEqual({
       data: { available: false },

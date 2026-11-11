@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { Logger } from '@kbn/core/server';
 import type { ProfilingESClient } from '@kbn/profiling-data-access-plugin/server';
 import { PROFILING_EVENTS_INDEX_BY_SCHEMA, ProfilingSchema } from '@kbn/profiling-utils';
@@ -81,13 +82,14 @@ export async function findDownsampledIndex({
   const initialExp = 6;
   let sampleCountFromInitialExp = 0;
   try {
-    const resp = await client.search('find_downsampled_index', {
-      index: getFullDownsampledIndex(schema, initialExp, 5),
-      query: filter,
-      size: 0,
-      track_total_hits: true,
-    });
-    sampleCountFromInitialExp = resp.hits.total.value;
+    // The common filter (KQL, epoch_second range) stays in the Query DSL `filter`.
+    const resp = await client.esql(
+      'find_downsampled_index',
+      esql.from([getFullDownsampledIndex(schema, initialExp, 5)]).pipe`STATS total = COUNT(*)`,
+      filter
+    );
+    const total = resp.values[0]?.[resp.columns.findIndex(({ name }) => name === 'total')];
+    sampleCountFromInitialExp = typeof total === 'number' ? total : 0;
   } catch (e) {
     logger.error(e.message);
   }

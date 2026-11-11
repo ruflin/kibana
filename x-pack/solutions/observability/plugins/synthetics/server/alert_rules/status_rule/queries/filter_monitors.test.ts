@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import { getFilters } from './filter_monitors';
+import { getFilters, queryFilterMonitors } from './filter_monitors';
 
 describe('getFilters', () => {
   it('returns an empty array when all parameters are empty', () => {
@@ -76,5 +76,41 @@ describe('getFilters', () => {
   it('ignores empty values in an otherwise valid object', () => {
     const ruleParams = { monitorTypes: [], locations: ['us-east'], tags: [], projects: [] };
     expect(getFilters(ruleParams)).toEqual([{ terms: { 'observer.name': ['us-east'] } }]);
+  });
+});
+
+describe('queryFilterMonitors', () => {
+  const ruleParams = { monitorTypes: [], locations: [], tags: [], projects: [], kqlQuery: 'x: 1' };
+
+  it('returns undefined without a valid KQL query', async () => {
+    const esql = jest.fn();
+    const esClient = { esql, heartbeatIndices: 'synthetics-*' } as any;
+
+    expect(
+      await queryFilterMonitors({ spaceId: 'default', esClient, ruleParams: {} as any })
+    ).toBeUndefined();
+    expect(esql).not.toHaveBeenCalled();
+  });
+
+  it('groups the matching monitors by config_id', async () => {
+    const esql = jest.fn().mockResolvedValue({
+      columns: [{ name: 'config_id', type: 'keyword' }],
+      values: [['a'], ['b']],
+    });
+    const esClient = { esql, heartbeatIndices: 'synthetics-*' } as any;
+
+    const ids = await queryFilterMonitors({
+      spaceId: 'default',
+      esClient,
+      ruleParams: ruleParams as any,
+    });
+
+    expect(ids).toEqual(['a', 'b']);
+    expect(esql.mock.calls[0][0].toRequest().query).toBe(
+      'FROM synthetics-* | STATS BY config_id | LIMIT 10000'
+    );
+    expect(esql.mock.calls[0][1].filter.bool.filter).toContainEqual({
+      terms: { 'meta.space_id': ['default', '*'] },
+    });
   });
 });

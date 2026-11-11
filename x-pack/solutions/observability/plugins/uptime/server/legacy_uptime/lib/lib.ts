@@ -16,7 +16,9 @@ import {
   type ElasticsearchRequestLoggingOptions,
 } from '@kbn/core/server';
 import type { estypes } from '@elastic/elasticsearch';
-import type { ESSearchResponse } from '@kbn/es-types';
+import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import type { ComposerQuery } from '@elastic/esql';
+import type { ESQLSearchResponse, ESSearchResponse } from '@kbn/es-types';
 import { RequestStatus } from '@kbn/inspector-plugin/common';
 import type { InspectResponse } from '@kbn/observability-plugin/typings/common';
 import { enableInspectEsQueries } from '@kbn/observability-plugin/common';
@@ -26,6 +28,7 @@ import { DYNAMIC_SETTINGS_DEFAULT_ATTRIBUTES } from '../../constants/settings';
 import type { DynamicSettingsAttributes } from '../../runtime_types/settings';
 import { settingsObjectId, umDynamicSettings } from './saved_objects/uptime_settings';
 import { API_URLS } from '../../../common/constants';
+import { EMPTY_ESQL_RESPONSE, isEsqlUnknownIndexError, toEsqlRequest } from './esql_read';
 
 export type { UMServerLibs } from '../uptime_server';
 
@@ -139,6 +142,74 @@ export class UptimeEsClient {
 
     return res;
   }
+  /**
+   * Runs an ES|QL query over the heartbeat indices. `buildQuery` receives the resolved index list
+   * (the dynamic setting is read first, as in `search`). An index pattern that matches nothing
+   * yields an empty response. The Query DSL `filter` carries the clauses that are not a plain
+   * `WHERE` on a scalar field (date math ranges, `exists`).
+   */
+  async esql(
+    buildQuery: (indices: string[]) => ComposerQuery,
+    {
+      filter,
+      operationName,
+      throwOnUnknownIndex = false,
+    }: {
+      filter?: QueryDslQueryContainer;
+      operationName?: string;
+      /** Rethrow the "Unknown index" error instead of returning an empty response. */
+      throwOnUnknownIndex?: boolean;
+    } = {}
+  ): Promise<{ response: ESQLSearchResponse; indices: string }> {
+    await this.initSettings();
+
+    // An empty setting meant "all indices" for the DSL calls (`index: ''`).
+    const indexList = this.heartbeatIndices
+      .split(',')
+      .map((index) => index.trim())
+      .filter(Boolean);
+    const esParams = {
+      ...toEsqlRequest(buildQuery(indexList.length ? indexList : ['*'])),
+      ...(filter ? { filter } : {}),
+    };
+    const startTimeNow = Date.now();
+
+    let res: ESQLSearchResponse | undefined;
+    let esError: unknown;
+    let esRequestStatus: RequestStatus = RequestStatus.PENDING;
+    try {
+      res = (await this.baseESClient.esql.query(esParams, {
+        context: { loggingOptions: getElasticsearchRequestLoggingOptions() },
+      })) as unknown as ESQLSearchResponse;
+      esRequestStatus = RequestStatus.OK;
+    } catch (e) {
+      if (!throwOnUnknownIndex && isEsqlUnknownIndexError(e)) {
+        return { response: EMPTY_ESQL_RESPONSE, indices: this.heartbeatIndices };
+      }
+      esError = e;
+      esRequestStatus = RequestStatus.ERROR;
+    }
+    if (this.request) {
+      this.inspectableEsQueries.push(
+        getInspectResponse({
+          esError: (esError ?? null) as Parameters<typeof getInspectResponse>[0]['esError'],
+          esRequestParams: esParams,
+          esRequestStatus,
+          esResponse: res,
+          kibanaRequest: this.request,
+          operationName: operationName ?? '',
+          startTime: startTimeNow,
+        })
+      );
+    }
+
+    if (esError) {
+      throw esError;
+    }
+
+    return { response: res ?? EMPTY_ESQL_RESPONSE, indices: this.heartbeatIndices };
+  }
+
   async count<TParams>(params: TParams): Promise<CountResponse> {
     let res: any;
     let esError: any;

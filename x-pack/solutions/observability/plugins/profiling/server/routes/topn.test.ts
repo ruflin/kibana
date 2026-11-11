@@ -55,6 +55,9 @@ describe('TopN data from Elasticsearch', () => {
           },
         }) as Promise<any>
     ),
+    esql: jest
+      .fn()
+      .mockResolvedValue({ columns: [{ name: 'total', type: 'long' }], values: [[0]] }),
     getEsClient: jest.fn(() => context.elasticsearch.client.asCurrentUser),
     profilingFlamegraph: jest.fn(
       (request) =>
@@ -87,7 +90,7 @@ describe('TopN data from Elasticsearch', () => {
   });
 
   describe('when fetching Stack Traces', () => {
-    it('should call search twice', async () => {
+    it('should query ES twice (down-sampled count with ES|QL, then search)', async () => {
       await topNElasticSearchQuery({
         client,
         logger,
@@ -101,7 +104,8 @@ describe('TopN data from Elasticsearch', () => {
         profilingSchema: ProfilingSchema.ECS,
       });
 
-      expect(client.search).toHaveBeenCalledTimes(2);
+      expect(client.esql).toHaveBeenCalledTimes(1);
+      expect(client.search).toHaveBeenCalledTimes(1);
     });
   });
 });
@@ -109,26 +113,25 @@ describe('TopN data from Elasticsearch', () => {
 // Without events in the down-sampled index, the TopN histogram is computed from the full events index
 function createSchemaClient() {
   return {
-    search: jest.fn(async (operationName: string) =>
-      operationName === 'find_downsampled_index'
-        ? { hits: { total: { value: 0 } } }
-        : {
-            aggregations: {
-              group_by: {
-                buckets: [
-                  {
-                    key: 'stacktrace-id',
-                    doc_count: 1,
-                    count: { value: 1 },
-                    over_time: { buckets: [] },
-                  },
-                ],
-              },
+    esql: jest
+      .fn()
+      .mockResolvedValue({ columns: [{ name: 'total', type: 'long' }], values: [[0]] }),
+    search: jest.fn(async () => ({
+      aggregations: {
+        group_by: {
+          buckets: [
+            {
+              key: 'stacktrace-id',
+              doc_count: 1,
+              count: { value: 1 },
               over_time: { buckets: [] },
-              total_count: { value: 1 },
             },
-          }
-    ),
+          ],
+        },
+        over_time: { buckets: [] },
+        total_count: { value: 1 },
+      },
+    })),
     profilingStacktraces: jest.fn().mockResolvedValue({ sampling_rate: 1 }),
   };
 }
@@ -165,13 +168,15 @@ describe('topNElasticSearchQuery', () => {
 
       await queryTopN({ client, searchField: ProfilingESField.HostID, schema });
 
-      expect(client.search).toHaveBeenNthCalledWith(
-        1,
+      expect(client.esql).toHaveBeenCalledWith(
         'find_downsampled_index',
-        expect.objectContaining({ index: downsampledIndex })
+        expect.anything(),
+        'any::query' // the mocked common filter
       );
-      expect(client.search).toHaveBeenNthCalledWith(
-        2,
+      expect(client.esql.mock.calls[0][1].toRequest().query).toBe(
+        `FROM ${downsampledIndex} | STATS total = COUNT(*)`
+      );
+      expect(client.search).toHaveBeenCalledWith(
         'get_topn_histogram',
         expect.objectContaining({ index: fullEventsIndex })
       );

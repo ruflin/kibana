@@ -5,6 +5,7 @@
  * 2.0.
  */
 import type { IndicesStatsIndicesStats } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import { kqlQuery } from '@kbn/observability-plugin/server';
 import type { ProfilingESClient } from '@kbn/profiling-data-access-plugin/server';
 import { universalProfilingEventsIndices } from './get_indices_stats';
@@ -42,54 +43,52 @@ export async function getDailyDataGenerationSize({
   allIndicesStats?: Record<string, IndicesStatsIndicesStats>;
   kuery: string;
 }) {
-  const response = await client.search('profiling_indices_size', {
-    index: [
-      ...universalProfilingEventsIndices,
-      'profiling-stacktraces',
-      'profiling-hosts',
-      'profiling-metrics',
-    ].join(),
-    query: {
+  // The KQL and the `epoch_second` range stay in the Query DSL `filter`. `kqlQuery` returns an
+  // array of clauses, so they are spread into a `bool` filter (the previous DSL body spread the
+  // array into an object, which is not a valid query for a non-empty `kuery`).
+  const response = await client.esql(
+    'profiling_indices_size',
+    esql.from(
+      [
+        ...universalProfilingEventsIndices,
+        'profiling-stacktraces',
+        'profiling-hosts',
+        'profiling-metrics',
+      ],
+      ['_index']
+    ).pipe`STATS number_of_documents = COUNT(*) BY _index`.limit(1000),
+    {
       bool: {
-        filter: {
+        filter: [
           ...kqlQuery(kuery),
-          range: {
-            '@timestamp': {
-              gte: String(timeFrom),
-              lt: String(timeTo),
-              format: 'epoch_second',
+          {
+            range: {
+              '@timestamp': {
+                gte: String(timeFrom),
+                lt: String(timeTo),
+                format: 'epoch_second',
+              },
             },
           },
-        },
+        ],
       },
-    },
-    aggs: {
-      indices: {
-        terms: {
-          field: '_index',
-        },
-        aggs: {
-          number_of_documents: {
-            value_count: {
-              field: '_index',
-            },
-          },
-        },
-      },
-    },
-  });
+    }
+  );
 
+  const indexColumn = response.columns.findIndex(({ name }) => name === '_index');
+  const countColumn = response.columns.findIndex(({ name }) => name === 'number_of_documents');
   const estimatedIncrementalSize = allIndicesStats
-    ? response.aggregations?.indices.buckets.reduce((prev, curr) => {
+    ? response.values.reduce((prev, row) => {
+        const numberOfDocs = row[countColumn];
         return (
           prev +
           getEstimatedSizeForDocumentsInIndex({
             allIndicesStats,
-            indexName: curr.key as string,
-            numberOfDocs: curr.number_of_documents.value,
+            indexName: String(row[indexColumn]),
+            numberOfDocs: typeof numberOfDocs === 'number' ? numberOfDocs : 0,
           })
         );
-      }, 0) ?? 0
+      }, 0)
     : 0;
 
   const durationAsDays = (timeTo - timeFrom) / 60 / 60 / 24;

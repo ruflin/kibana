@@ -19,7 +19,8 @@ import type {
   IUiSettingsClient,
 } from '@kbn/core/server';
 import type { estypes } from '@elastic/elasticsearch';
-import type { ESSearchResponse, InferSearchResponseOf } from '@kbn/es-types';
+import type { ComposerQuery } from '@elastic/esql';
+import type { ESQLSearchResponse, ESSearchResponse, InferSearchResponseOf } from '@kbn/es-types';
 import { RequestStatus } from '@kbn/inspector-plugin/common';
 import type { InspectResponse } from '@kbn/observability-plugin/typings/common';
 import { enableInspectEsQueries, searchExcludedDataTiers } from '@kbn/observability-plugin/common';
@@ -27,6 +28,7 @@ import { getInspectResponse, type DataTier } from '@kbn/observability-shared-plu
 import { excludeTiersQuery } from '@kbn/observability-utils-common/es/queries/exclude_tiers_query';
 import { SYNTHETICS_API_URLS, SYNTHETICS_INDEX_PATTERN } from '../common/constants';
 import type { SyntheticsServerSetup } from './types';
+import { EMPTY_ESQL_RESPONSE, isEsqlUnknownIndexError, toEsqlRequest } from './lib/esql_read';
 
 /**
  * Combines an existing query with a filter that excludes the configured data
@@ -189,6 +191,64 @@ export class SyntheticsEsClient {
     }
 
     return res;
+  }
+
+  /**
+   * Runs a composed ES|QL query. Like `search`, it applies the excluded data tiers and the project
+   * routing, and an index pattern that matches nothing yields an empty response (the DSL calls use
+   * `ignore_unavailable`). The Query DSL `filter` carries the clauses that are not a plain `WHERE`
+   * on a scalar field (date math ranges, `exists`, multi-valued keywords).
+   */
+  async esql(
+    query: ComposerQuery,
+    { filter, operationName }: { filter?: QueryDslQueryContainer; operationName?: string } = {}
+  ): Promise<ESQLSearchResponse> {
+    const excludedDataTiers = await this.getExcludedDataTiers();
+    const esFilter = excludedDataTiers.length
+      ? applyExcludedDataTiersToQuery(filter, excludedDataTiers)
+      : filter;
+    const esParams = this.withProjectRouting({
+      ...toEsqlRequest(query),
+      ...(esFilter ? { filter: esFilter } : {}),
+    });
+    const startTimeNow = Date.now();
+    const isInspectorEnabled = await this.getInspectEnabled();
+
+    let res: ESQLSearchResponse | undefined;
+    let esError: unknown;
+    let esRequestStatus: RequestStatus = RequestStatus.PENDING;
+    try {
+      res = (await this.baseESClient.esql.query(esParams, {
+        context: { loggingOptions: getElasticsearchRequestLoggingOptions() },
+      })) as unknown as ESQLSearchResponse;
+      esRequestStatus = RequestStatus.OK;
+    } catch (e) {
+      if (isEsqlUnknownIndexError(e)) {
+        return EMPTY_ESQL_RESPONSE;
+      }
+      esError = e;
+      esRequestStatus = RequestStatus.ERROR;
+    }
+
+    if ((isInspectorEnabled || this.isDev) && this.request) {
+      this.inspectableEsQueries.push(
+        getInspectResponse({
+          esError: (esError ?? null) as Parameters<typeof getInspectResponse>[0]['esError'],
+          esRequestParams: esParams,
+          esRequestStatus,
+          esResponse: res,
+          kibanaRequest: this.request,
+          operationName: operationName ?? '',
+          startTime: startTimeNow,
+        })
+      );
+    }
+
+    if (esError) {
+      throw esError;
+    }
+
+    return res ?? EMPTY_ESQL_RESPONSE;
   }
 
   async msearch<

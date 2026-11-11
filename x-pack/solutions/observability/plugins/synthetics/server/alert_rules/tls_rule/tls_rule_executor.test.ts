@@ -160,12 +160,13 @@ describe('tlsRuleExecutor', () => {
       const tlsRule = new TLSRuleExecutor(
         ...getTLSRuleExecutorParams({ kqlQuery: 'monitor.type : "tcp" ' })
       );
+      mockEsClient.esql.query.mockResolvedValueOnce({ columns: [], values: [] } as any);
 
       await tlsRule.getMonitors();
 
-      expect(mockEsClient.search).toHaveBeenCalledWith(
+      expect(mockEsClient.esql.query).toHaveBeenCalledWith(
         expect.objectContaining({
-          query: expect.objectContaining({
+          filter: expect.objectContaining({
             bool: expect.objectContaining({
               filter: expect.arrayContaining([
                 {
@@ -182,7 +183,7 @@ describe('tlsRuleExecutor', () => {
             }),
           }),
         }),
-        { meta: true, context: { loggingOptions: { loggerName: 'synthetics' } } }
+        { context: { loggingOptions: { loggerName: 'synthetics' } } }
       );
     });
   });

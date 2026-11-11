@@ -5,6 +5,8 @@
  * 2.0.
  */
 
+import { errors } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { MsearchResponse } from '@elastic/elasticsearch/lib/api/types';
 import type { DataTier } from '@kbn/observability-shared-plugin/common';
 import { SyntheticsEsClient, applyExcludedDataTiersToQuery } from './lib';
@@ -367,6 +369,61 @@ describe('SyntheticsEsClient', () => {
 
       expect(syntheticsEsClient.isInspectorEnabled).toBe(true);
       expect(mockUiSettings.get).toHaveBeenCalledWith('observability:enableInspectEsQueries');
+    });
+  });
+
+  describe('esql', () => {
+    const response = { columns: [{ name: 'total', type: 'long' }], values: [[1]] };
+
+    it('runs the composed query with the Query DSL filter and the excluded data tiers', async () => {
+      esClient.esql.query.mockResolvedValueOnce(response as any);
+      syntheticsEsClient.uiSettingsClient = {
+        get: jest.fn().mockResolvedValue(['data_frozen']),
+      } as any;
+
+      const result = await syntheticsEsClient.esql(esql.from(['synthetics-*']).limit(1), {
+        filter: { term: { 'monitor.id': 'a' } },
+      });
+
+      expect(result).toEqual(response);
+      expect(esClient.esql.query).toHaveBeenCalledWith(
+        {
+          query: 'FROM synthetics-* | LIMIT 1',
+          params: [],
+          filter: {
+            bool: {
+              filter: [
+                { term: { 'monitor.id': 'a' } },
+                { bool: { must_not: [{ terms: { _tier: ['data_frozen'] } }] } },
+              ],
+            },
+          },
+        },
+        { context: { loggingOptions: { loggerName: 'synthetics' } } }
+      );
+    });
+
+    it('returns an empty response when no index matches', async () => {
+      esClient.esql.query.mockRejectedValueOnce(
+        new errors.ResponseError({
+          statusCode: 400,
+          body: { error: { type: 'verification_exception', reason: 'Unknown index [x]' } },
+          headers: {},
+          warnings: [],
+          meta: {} as any,
+        })
+      );
+
+      expect(await syntheticsEsClient.esql(esql.from(['x']).limit(1))).toEqual({
+        columns: [],
+        values: [],
+      });
+    });
+
+    it('rethrows other errors', async () => {
+      esClient.esql.query.mockRejectedValueOnce(new Error('boom'));
+
+      await expect(syntheticsEsClient.esql(esql.from(['x']).limit(1))).rejects.toThrow('boom');
     });
   });
 });

@@ -5,6 +5,9 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import type { ESQLSearchResponse } from '@kbn/es-types';
 import { SYNTHETICS_INDEX_PATTERN } from '../../../common/constants';
 import { getAPIKeyForSyntheticsService } from '../get_api_key';
 import { getFakeKibanaRequest } from '../utils/fake_kibana_request';
@@ -64,30 +67,24 @@ export const getRecentlyActiveAgentIds = async (
       getFakeKibanaRequest({ id: apiKey.id, api_key: apiKey.apiKey })
     ).asCurrentUser;
 
-    const result = await esClient.search<unknown, { agents: { buckets: Array<{ key: string }> } }>(
-      {
-        index: SYNTHETICS_INDEX_PATTERN,
-        ignore_unavailable: true,
-        allow_no_indices: true,
-        size: 0,
-        track_total_hits: false,
-        query: {
-          bool: {
-            filter: [
-              { range: { '@timestamp': { gte: now - windowMs, format: 'epoch_millis' } } },
-              { terms: { 'agent.id': agentIds } },
-            ],
-          },
-        },
-        aggs: {
-          agents: { terms: { field: 'agent.id', size: agentIds.length } },
-        },
-      },
+    // A missing index is an ES|QL error, which the best-effort catch below turns into an empty set.
+    const result = await esClient.esql.query(
+      esql.from([SYNTHETICS_INDEX_PATTERN]).pipe`WHERE @timestamp >= TO_DATETIME(${{
+        since: new Date(now - windowMs).toISOString(),
+      }})`.pipe`WHERE agent.id IN (${{ agentIds }})`.pipe`STATS BY agent.id`
+        .limit(agentIds.length)
+        .toRequest() as unknown as EsqlQueryRequest,
       { signal }
     );
 
-    for (const bucket of result.aggregations?.agents.buckets ?? []) {
-      active.add(bucket.key);
+    const agentIdColumn = (result as unknown as ESQLSearchResponse).columns.findIndex(
+      ({ name }) => name === 'agent.id'
+    );
+    for (const row of (result as unknown as ESQLSearchResponse).values) {
+      const agentId = row[agentIdColumn];
+      if (typeof agentId === 'string') {
+        active.add(agentId);
+      }
     }
   } catch (e) {
     if (signal.aborted) {

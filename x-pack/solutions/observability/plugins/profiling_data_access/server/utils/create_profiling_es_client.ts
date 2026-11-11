@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import type { ESSearchRequest, InferSearchResponseOf } from '@kbn/es-types';
+import type { ESQLSearchResponse, ESSearchRequest, InferSearchResponseOf } from '@kbn/es-types';
 import type {
   BaseFlameGraph,
   ESTopNFunctions,
@@ -15,6 +15,7 @@ import type {
 import { unwrapEsResponse } from '@kbn/observability-plugin/server';
 import type { CreateProfilingEsClient } from './profiling_es_client';
 import { withProfilingSpan } from './with_profiling_span';
+import { EMPTY_ESQL_RESPONSE, isEsqlUnknownIndexError, toEsqlRequest } from './esql_read';
 
 const PROFILING_STATUS_TIMEOUT_SECONDS = 60;
 
@@ -40,6 +41,24 @@ export const createProfilingEsClient: CreateProfilingEsClient = ({ esClient, abo
       );
 
       return unwrapEsResponse(promise);
+    },
+    async esql(operationName, query, filter) {
+      try {
+        const response = await withProfilingSpan(operationName, () =>
+          esClient.esql.query(
+            { ...toEsqlRequest(query), ...(filter ? { filter } : {}) },
+            {
+              signal: abortSignal,
+            }
+          )
+        );
+        return response as unknown as ESQLSearchResponse;
+      } catch (error) {
+        if (isEsqlUnknownIndexError(error)) {
+          return EMPTY_ESQL_RESPONSE;
+        }
+        throw error;
+      }
     },
     profilingStacktraces({
       query,

@@ -7,7 +7,13 @@
 
 import { elasticsearchServiceMock } from '@kbn/core/server/mocks';
 import { SOURCE_SERVICE_NAME_FIELD, SOURCE_SESSION_ID_FIELD } from './source_fields';
-import { buildPageVisits, buildTimeline, getSession, type OtelSource } from './get_session';
+import {
+  SESSION_TIMELINE_SIZE,
+  buildPageVisits,
+  buildTimeline,
+  getSession,
+  type OtelSource,
+} from './get_session';
 
 const START = '2026-10-20T10:00:00.000Z';
 const startMs = Date.parse(START);
@@ -100,49 +106,21 @@ describe('buildPageVisits', () => {
 });
 
 describe('getSession', () => {
+  const sessionColumns = [{ name: '_source', type: '_source' }];
+
   it('returns null when the session is not in the sessions index', async () => {
     const client = elasticsearchServiceMock.createElasticsearchClient();
-    client.search.mockResolvedValueOnce({
-      took: 1,
-      timed_out: false,
-      _shards: { total: 1, successful: 1, failed: 0 },
-      hits: { hits: [] },
-    });
+    client.esql.query.mockResolvedValueOnce({ columns: sessionColumns, values: [] } as any);
 
     expect(await getSession(client, { serviceName: 'web', sessionId: 'abc' })).toBeNull();
-    expect(client.search).toHaveBeenCalledTimes(1);
+    expect(client.esql.query).toHaveBeenCalledTimes(1);
   });
 
   it('loads the summary and the raw events for the session', async () => {
     const client = elasticsearchServiceMock.createElasticsearchClient();
-    client.search
-      .mockResolvedValueOnce({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, failed: 0 },
-        hits: {
-          hits: [
-            {
-              _index: 'digital-experience-sessions-1',
-              _source: {
-                session: { id: 'abc' },
-                service: { name: 'web' },
-                start_time: START,
-                end_time: at(10_000),
-              },
-            },
-          ],
-        },
-      })
-      .mockResolvedValueOnce({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, failed: 0 },
-        hits: {
-          total: { value: 5, relation: 'eq' },
-          hits: events.slice(0, 5).map((source) => ({ _index: 'logs', _source: source })),
-        },
-      });
+    client.esql.query
+      .mockResolvedValueOnce(summaryResponse({ start_time: START, end_time: at(10_000) }) as any)
+      .mockResolvedValueOnce(eventsResponse(events.slice(0, 5)) as any);
 
     const detail = await getSession(client, { serviceName: 'web', sessionId: 'abc' });
 
@@ -150,9 +128,17 @@ describe('getSession', () => {
     expect(detail?.timeline).toHaveLength(5);
     expect(detail?.timelineTruncated).toBe(false);
     expect(detail?.pageVisits.map(({ page }) => page)).toEqual(['/', '/cart']);
-    expect(client.search.mock.calls[1][0]).toEqual(
+    expect(client.esql.query.mock.calls[0][0]).toEqual({
+      query:
+        'FROM digital-experience-sessions-* METADATA _source | WHERE service.name == ?serviceName AND session.id == ?sessionId | SORT end_time DESC NULLS LAST | KEEP _source | LIMIT 1',
+      params: [{ serviceName: 'web' }, { sessionId: 'abc' }],
+    });
+    expect(client.esql.query.mock.calls[1][0]).toEqual(
       expect.objectContaining({
-        query: {
+        query: expect.stringContaining(
+          'SORT @timestamp ASC NULLS LAST | KEEP _source | LIMIT 1001'
+        ),
+        filter: {
           bool: {
             filter: [
               { term: { [SOURCE_SESSION_ID_FIELD]: 'abc' } },
@@ -166,11 +152,27 @@ describe('getSession', () => {
     );
   });
 
+  it('flags a truncated timeline when more events than the timeline size match', async () => {
+    const client = elasticsearchServiceMock.createElasticsearchClient();
+    const many = Array.from({ length: SESSION_TIMELINE_SIZE + 1 }, (_, i) => ({
+      '@timestamp': at(i),
+      event_name: 'browser.user_action.click',
+    }));
+    client.esql.query
+      .mockResolvedValueOnce(summaryResponse({ start_time: START, end_time: at(10_000) }) as any)
+      .mockResolvedValueOnce(eventsResponse(many) as any);
+
+    const detail = await getSession(client, { serviceName: 'web', sessionId: 'abc' });
+
+    expect(detail?.timeline).toHaveLength(SESSION_TIMELINE_SIZE);
+    expect(detail?.timelineTruncated).toBe(true);
+  });
+
   it('keeps the last page visit open until the newest raw event', async () => {
     const client = elasticsearchServiceMock.createElasticsearchClient();
-    client.search
-      .mockResolvedValueOnce(summaryResponse({ start_time: START, end_time: at(3_000) }))
-      .mockResolvedValueOnce(eventsResponse(events.slice(0, 5)));
+    client.esql.query
+      .mockResolvedValueOnce(summaryResponse({ start_time: START, end_time: at(3_000) }) as any)
+      .mockResolvedValueOnce(eventsResponse(events.slice(0, 5)) as any);
 
     const detail = await getSession(client, { serviceName: 'web', sessionId: 'abc' });
 
@@ -182,9 +184,9 @@ describe('getSession', () => {
 
   it('does not throw when the summary has no start or end time', async () => {
     const client = elasticsearchServiceMock.createElasticsearchClient();
-    client.search
-      .mockResolvedValueOnce(summaryResponse({}))
-      .mockResolvedValueOnce(eventsResponse(events.slice(0, 5)));
+    client.esql.query
+      .mockResolvedValueOnce(summaryResponse({}) as any)
+      .mockResolvedValueOnce(eventsResponse(events.slice(0, 5)) as any);
 
     const detail = await getSession(client, { serviceName: 'web', sessionId: 'abc' });
 
@@ -192,31 +194,17 @@ describe('getSession', () => {
       0, 1_000, 2_000, 5_000, 6_000,
     ]);
     expect(detail?.pageVisits.at(-1)?.endTime).toBe(at(6_000));
-    const eventsQuery = client.search.mock.calls[1][0]?.query?.bool?.filter;
-    expect(JSON.stringify(eventsQuery)).not.toContain('range');
+    const eventsFilter = (client.esql.query.mock.calls[1][0] as { filter?: unknown }).filter;
+    expect(JSON.stringify(eventsFilter)).not.toContain('range');
   });
 });
 
 const summaryResponse = (times: { start_time?: string; end_time?: string }) => ({
-  took: 1,
-  timed_out: false,
-  _shards: { total: 1, successful: 1, failed: 0 },
-  hits: {
-    hits: [
-      {
-        _index: 'digital-experience-sessions-1',
-        _source: { session: { id: 'abc' }, service: { name: 'web' }, ...times },
-      },
-    ],
-  },
+  columns: [{ name: '_source', type: '_source' }],
+  values: [[{ session: { id: 'abc' }, service: { name: 'web' }, ...times }]],
 });
 
 const eventsResponse = (sources: OtelSource[]) => ({
-  took: 1,
-  timed_out: false,
-  _shards: { total: 1, successful: 1, failed: 0 },
-  hits: {
-    total: { value: sources.length, relation: 'eq' as const },
-    hits: sources.map((source) => ({ _index: 'logs', _source: source })),
-  },
+  columns: [{ name: '_source', type: '_source' }],
+  values: sources.map((source) => [source]),
 });

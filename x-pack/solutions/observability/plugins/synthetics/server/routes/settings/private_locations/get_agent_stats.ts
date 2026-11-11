@@ -5,10 +5,14 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import type { ESQLSearchResponse } from '@kbn/es-types';
 import { buildPolicyBaseIdWithFallbackKuery } from '@kbn/fleet-plugin/common';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import { DEFAULT_SPACE_ID } from '@kbn/core-spaces-common';
 import { ALL_SPACES_ID } from '@kbn/spaces-plugin/common/constants';
+import { esqlRows } from '../../../lib/esql_read';
 import { getPrivateLocationsAndAgentPolicies } from './get_private_locations';
 import type { SyntheticsServerSetup } from '../../../types';
 import type { SyntheticsRestApiRouteFactory } from '../../types';
@@ -147,54 +151,36 @@ const getHostMetricsFromSystem = async (
     return byHost;
   }
 
-  const res = await esClient.search<
-    unknown,
-    {
-      by_host: {
-        buckets: Array<{
-          key: string;
-          total?: { value?: number | null };
-          used?: { value?: number | null };
-          usedPct?: { value?: number | null };
-          cpuPct?: { value?: number | null };
-        }>;
-      };
-    }
-  >({
-    index: 'metrics-system.memory-*,metrics-system.cpu-*',
-    ignore_unavailable: true,
-    allow_no_indices: true,
-    size: 0,
-    query: {
-      bool: {
-        filter: [
-          { terms: { 'host.name': hostNames } },
-          { range: { '@timestamp': { gte: 'now-10m' } } },
-        ],
-      },
-    },
-    aggregations: {
-      by_host: {
-        terms: { field: 'host.name', size: hostNames.length },
-        aggregations: {
-          total: { max: { field: 'system.memory.total' } },
-          used: { avg: { field: 'system.memory.actual.used.bytes' } },
-          usedPct: { avg: { field: 'system.memory.actual.used.pct' } },
-          cpuPct: { avg: { field: 'system.cpu.total.norm.pct' } },
-        },
-      },
-    },
-  });
+  // A missing index or an unmapped field makes ES|QL fail where the DSL returned no buckets; the
+  // caller already treats a failed metrics lookup as "no metrics" (see the `.catch` at the call site).
+  const res = (await esClient.esql.query(
+    esql.from(['metrics-system.memory-*', 'metrics-system.cpu-*'])
+      .pipe`WHERE @timestamp >= NOW() - 10 minutes`.pipe`WHERE host.name IN (${{ hostNames }})`
+      .pipe`STATS
+          total = MAX(system.memory.total),
+          used = AVG(system.memory.actual.used.bytes),
+          usedPct = AVG(system.memory.actual.used.pct),
+          cpuPct = AVG(system.cpu.total.norm.pct)
+        BY host.name`
+      .limit(hostNames.length)
+      .toRequest() as unknown as EsqlQueryRequest
+  )) as unknown as ESQLSearchResponse;
 
   const toMib = (bytes?: number | null): number | null =>
     typeof bytes === 'number' && bytes > 0 ? Math.round(bytes / BYTES_PER_MIB) : null;
 
-  for (const bucket of res.aggregations?.by_host?.buckets ?? []) {
-    const usedPct = bucket.usedPct?.value;
-    const cpuPct = bucket.cpuPct?.value;
-    byHost.set(bucket.key.toLowerCase(), {
-      totalMib: toMib(bucket.total?.value),
-      usedMib: toMib(bucket.used?.value),
+  for (const row of esqlRows(res)) {
+    const hostName = row['host.name'];
+    if (typeof hostName !== 'string') {
+      continue;
+    }
+    const total = row.total;
+    const used = row.used;
+    const usedPct = row.usedPct;
+    const cpuPct = row.cpuPct;
+    byHost.set(hostName.toLowerCase(), {
+      totalMib: toMib(typeof total === 'number' ? total : null),
+      usedMib: toMib(typeof used === 'number' ? used : null),
       usedPct: typeof usedPct === 'number' ? usedPct : null,
       cpuPct: typeof cpuPct === 'number' ? cpuPct : null,
     });

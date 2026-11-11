@@ -6,7 +6,7 @@
  */
 
 import { getJourneyDetails } from './get_journey_details';
-import { mockSearchResult } from './test_helpers';
+import { getUptimeESMockClient } from './test_helpers';
 
 describe('getJourneyDetails', () => {
   let mockData: unknown;
@@ -45,60 +45,65 @@ describe('getJourneyDetails', () => {
     };
   });
 
+  const journeyColumns = [
+    { name: '_id', type: 'keyword' },
+    { name: '_source', type: '_source' },
+  ];
+  const siblingColumns = [
+    { name: '@timestamp', type: 'date' },
+    { name: 'monitor.check_group', type: 'keyword' },
+  ];
+
   it('formats ref detail data', async () => {
-    expect(
-      await getJourneyDetails({
-        uptimeEsClient: mockSearchResult(mockData),
-        checkGroup: '85946468-d385-11eb-8848-acde48001122',
-      })
-    ).toMatchInlineSnapshot(`
-      Object {
-        "journey": Object {
-          "@timestamp": "2021-06-22T18:13:19.013Z",
-          "_id": "uTjtNHoBu1okBtVwOgMb",
-          "monitor": Object {
-            "check_group": "85946468-d385-11eb-8848-acde48001122",
-            "id": "my-browser-monitor-inline",
-            "name": "My Monitor - inline",
-            "status": "up",
-            "timespan": Object {
-              "gte": "2021-06-22T18:13:19.013Z",
-              "lt": "2021-06-22T18:14:19.013Z",
-            },
-            "type": "browser",
-          },
-          "synthetics": Object {
-            "index": 0,
-            "journey": Object {
-              "id": "inline",
-              "name": "inline",
-            },
-            "package_version": "1.0.0-beta.2",
-            "payload": Object {
-              "params": Object {},
-              "source": "async ({ page, browser, params }) => {
-              scriptFn.apply(null, [core_1.step, page, browser, params]);
-          }",
-            },
-            "type": "journey/start",
-          },
-        },
-        "next": Object {
-          "checkGroup": "85946468-d385-11eb-8848-acde48001122",
-          "timestamp": "2021-06-22T18:13:19.013Z",
-        },
-        "previous": Object {
-          "checkGroup": "85946468-d385-11eb-8848-acde48001122",
-          "timestamp": "2021-06-22T18:13:19.013Z",
-        },
-        "timestamp": "2021-06-22T18:13:19.013Z",
+    const { esClient, uptimeEsClient } = getUptimeESMockClient();
+    esClient.esql.query.mockImplementation((async (request: { query: string }) => {
+      if (request.query.includes('@timestamp <')) {
+        return {
+          columns: siblingColumns,
+          values: [['2021-06-22T18:12:19.013Z', 'previous-check-group']],
+        };
       }
-    `);
+      if (request.query.includes('@timestamp >')) {
+        return {
+          columns: siblingColumns,
+          values: [['2021-06-22T18:14:19.013Z', 'next-check-group']],
+        };
+      }
+      return {
+        columns: journeyColumns,
+        values: [[(mockData as { _id: string })._id, (mockData as { _source: unknown })._source]],
+      };
+    }) as any);
+
+    const result = await getJourneyDetails({
+      uptimeEsClient,
+      checkGroup: '85946468-d385-11eb-8848-acde48001122',
+    });
+
+    expect(result).toMatchObject({
+      timestamp: '2021-06-22T18:13:19.013Z',
+      journey: {
+        _id: 'uTjtNHoBu1okBtVwOgMb',
+        '@timestamp': '2021-06-22T18:13:19.013Z',
+        monitor: { id: 'my-browser-monitor-inline', status: 'up', type: 'browser' },
+        synthetics: { index: 0, type: 'journey/start' },
+      },
+      previous: { checkGroup: 'previous-check-group', timestamp: '2021-06-22T18:12:19.013Z' },
+      next: { checkGroup: 'next-check-group', timestamp: '2021-06-22T18:14:19.013Z' },
+    });
+
+    const queries = esClient.esql.query.mock.calls.map(([request]) => (request as any).query);
+    expect(queries).toEqual([
+      'FROM heartbeat-* METADATA _id, _source | WHERE monitor.check_group == ?checkGroup | WHERE synthetics.type == "journey/start" | KEEP _id, _source | LIMIT 1',
+      'FROM heartbeat-* | WHERE monitor.id == ?monitorId | WHERE synthetics.type == "journey/start" | WHERE @timestamp < TO_DATETIME(?ts) | SORT @timestamp DESC NULLS LAST | KEEP @timestamp, monitor.check_group | LIMIT 1',
+      'FROM heartbeat-* | WHERE monitor.id == ?monitorId | WHERE synthetics.type == "journey/start" | WHERE @timestamp > TO_DATETIME(?ts) | SORT @timestamp ASC NULLS LAST | KEEP @timestamp, monitor.check_group | LIMIT 1',
+    ]);
   });
 
   it('returns null for 0 hits', async () => {
-    expect(
-      await getJourneyDetails({ uptimeEsClient: mockSearchResult([]), checkGroup: 'check_group' })
-    ).toBe(null);
+    const { esClient, uptimeEsClient } = getUptimeESMockClient();
+    esClient.esql.query.mockResolvedValue({ columns: journeyColumns, values: [] } as any);
+
+    expect(await getJourneyDetails({ uptimeEsClient, checkGroup: 'check_group' })).toBe(null);
   });
 });

@@ -22,7 +22,11 @@ const makeServer = (service?: { manifestUrl?: string; devUrl?: string }): Synthe
     config: { service },
     coreStart: {
       elasticsearch: {
-        client: { asScoped: () => ({ asCurrentUser: { search, security: { hasPrivileges } } }) },
+        client: {
+          asScoped: () => ({
+            asCurrentUser: { esql: { query: search }, security: { hasPrivileges } },
+          }),
+        },
       },
     },
     encryptedSavedObjects: {
@@ -40,6 +44,11 @@ const mockValidApiKey = () =>
   jest
     .spyOn(getApiKeyModule, 'getAPIKeyForSyntheticsService')
     .mockResolvedValue({ apiKey: { id: 'k', apiKey: 's', name: 'n' }, isValid: true } as never);
+
+const agentsResponse = (...ids: string[]) => ({
+  columns: [{ name: 'agent.id', type: 'keyword' }],
+  values: ids.map((id) => [id]),
+});
 
 const openSignal = () => new AbortController().signal;
 
@@ -64,9 +73,7 @@ describe('getRecentlyActiveAgentIds', () => {
 
   it('returns the agent ids that wrote synthetics data within the window', async () => {
     mockValidApiKey();
-    search.mockResolvedValue({
-      aggregations: { agents: { buckets: [{ key: 'a' }, { key: 'c' }] } },
-    });
+    search.mockResolvedValue(agentsResponse('a', 'c'));
 
     const active = await getActive(withServiceConfig(), ['a', 'b', 'c']);
 
@@ -74,14 +81,9 @@ describe('getRecentlyActiveAgentIds', () => {
     expect(getDecryptedAsInternalUser).not.toHaveBeenCalled();
     expect(search).toHaveBeenCalledWith(
       expect.objectContaining({
-        query: {
-          bool: {
-            filter: [
-              { range: { '@timestamp': { gte: NOW - WINDOW, format: 'epoch_millis' } } },
-              { terms: { 'agent.id': ['a', 'b', 'c'] } },
-            ],
-          },
-        },
+        query:
+          'FROM synthetics-* | WHERE @timestamp >= TO_DATETIME(?since) | WHERE agent.id IN (?agentIds) | STATS BY agent.id | LIMIT 3',
+        params: [{ since: new Date(NOW - WINDOW).toISOString() }, { agentIds: ['a', 'b', 'c'] }],
       }),
       { signal: expect.any(AbortSignal) }
     );
@@ -113,9 +115,7 @@ describe('getRecentlyActiveAgentIds', () => {
         },
       },
     });
-    search.mockResolvedValue({
-      aggregations: { agents: { buckets: [{ key: 'a' }] } },
-    });
+    search.mockResolvedValue(agentsResponse('a'));
 
     const active = await getActive(withServiceConfig(), ['a']);
 
@@ -136,9 +136,7 @@ describe('getRecentlyActiveAgentIds', () => {
         },
       },
     });
-    search.mockResolvedValue({
-      aggregations: { agents: { buckets: [{ key: 'a' }] } },
-    });
+    search.mockResolvedValue(agentsResponse('a'));
 
     const active = await getActive(makeServer(), ['a']);
 

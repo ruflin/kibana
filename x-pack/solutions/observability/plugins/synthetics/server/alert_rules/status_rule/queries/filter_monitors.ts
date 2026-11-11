@@ -10,7 +10,9 @@ import { fromKueryExpression, toElasticsearchQuery } from '@kbn/es-query';
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
 import type { SyntheticsMonitorStatusRuleParams as StatusRuleParams } from '@kbn/response-ops-rule-params/synthetics_monitor_status';
 import { ALL_SPACES_ID } from '@kbn/security-plugin/common/constants';
+import { esql } from '@elastic/esql';
 import type { SyntheticsEsClient } from '../../../lib';
+import { esqlRows } from '../../../lib/esql_read';
 import {
   FINAL_SUMMARY_FILTER,
   getRangeFilter,
@@ -40,10 +42,13 @@ export async function queryFilterMonitors({
   }
 
   const filters = toElasticsearchQuery(kueryNode);
-  const { body: result } = await esClient.search(
+  // The rule filters stay in the Query DSL `filter` (KQL output, `terms` on multi-valued fields,
+  // date math). ES|QL groups by `config_id`; 10000 matches the cap of the former terms aggregation.
+  const response = await esClient.esql(
+    esql.from(esClient.heartbeatIndices.split(',')).pipe`STATS BY config_id`.limit(10000),
     {
-      size: 0,
-      query: {
+      operationName: 'queryFilterMonitors',
+      filter: {
         bool: {
           filter: [
             FINAL_SUMMARY_FILTER,
@@ -63,19 +68,12 @@ export async function queryFilterMonitors({
           ],
         },
       },
-      aggs: {
-        ids: {
-          terms: {
-            size: 10000,
-            field: 'config_id',
-          },
-        },
-      },
-    },
-    'queryFilterMonitors'
+    }
   );
 
-  return result.aggregations?.ids.buckets.map((bucket) => bucket.key as string);
+  return esqlRows(response).flatMap((row) =>
+    typeof row.config_id === 'string' ? [row.config_id] : []
+  );
 }
 
 export const getFilters = (ruleParams: StatusRuleParams) => {

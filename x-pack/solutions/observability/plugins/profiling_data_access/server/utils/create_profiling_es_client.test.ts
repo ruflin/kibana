@@ -5,6 +5,8 @@
  * 2.0.
  */
 
+import { errors } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import { ProfilingSchema } from '@kbn/profiling-utils';
 import { createProfilingEsClient } from './create_profiling_es_client';
@@ -28,6 +30,7 @@ const createEsClientMock = () => {
 
   const esClient = {
     search: handleEsCall,
+    esql: { query: handleEsCall },
     transport: { request: handleEsCall },
   } as unknown as ElasticsearchClient;
 
@@ -41,6 +44,7 @@ const createEsClientMock = () => {
 
 const methods: ReadonlyArray<[string, (client: ProfilingESClient) => Promise<unknown>]> = [
   ['search', (client) => client.search('test_search', { index: 'test' })],
+  ['esql', (client) => client.esql('test_esql', esql.from(['test']).limit(1))],
   [
     'profilingStacktraces',
     (client) => client.profilingStacktraces({ query: {}, sampleSize: 1, durationSeconds: 1 }),
@@ -199,6 +203,42 @@ describe('createProfilingEsClient', () => {
       await expect(
         createProfilingEsClient({ esClient }).sampleStacktraceIds(sampleParams)
       ).resolves.toEqual(['stacktrace-id-1', 'stacktrace-id-2']);
+    });
+  });
+});
+
+describe('createProfilingEsClient esql', () => {
+  it('sends the query with the Query DSL filter', async () => {
+    const query = jest.fn().mockResolvedValue({ columns: [], values: [] });
+    const client = createProfilingEsClient({
+      esClient: { esql: { query } } as unknown as ElasticsearchClient,
+    });
+
+    await client.esql('test_esql', esql.from(['test']).limit(1), { term: { a: 'b' } });
+
+    expect(query).toHaveBeenCalledWith(
+      { query: 'FROM test | LIMIT 1', params: [], filter: { term: { a: 'b' } } },
+      { signal: undefined }
+    );
+  });
+
+  it('returns an empty response when no index matches', async () => {
+    const query = jest.fn().mockRejectedValue(
+      new errors.ResponseError({
+        statusCode: 400,
+        body: { error: { type: 'verification_exception', reason: 'Unknown index [test]' } },
+        headers: {},
+        warnings: [],
+        meta: {} as never,
+      })
+    );
+    const client = createProfilingEsClient({
+      esClient: { esql: { query } } as unknown as ElasticsearchClient,
+    });
+
+    await expect(client.esql('test_esql', esql.from(['test']).limit(1))).resolves.toEqual({
+      columns: [],
+      values: [],
     });
   });
 });
