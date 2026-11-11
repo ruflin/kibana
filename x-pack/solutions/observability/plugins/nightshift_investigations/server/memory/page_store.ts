@@ -5,11 +5,12 @@
  * 2.0.
  */
 
-import type { estypes } from '@elastic/elasticsearch';
+import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
 import { badRequest } from '@hapi/boom';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import { isNotFoundError, isResponseError } from '@kbn/es-errors';
 import { isElasticsearchWriteConflict } from '@kbn/occ';
+import { isEsqlUnknownIndexError } from '@kbn/storage-adapter';
 import {
   MEMORY_INDEX,
   type MemoryArchiveReason,
@@ -20,6 +21,20 @@ import {
   type MemoryPage,
 } from '../../common/memory';
 import { formatPageRefs, previewText } from './log_format';
+import {
+  buildContentSearchQuery,
+  buildCountQuery,
+  buildDescriptionSearchQuery,
+  buildHybridQuery,
+  buildListQuery,
+  buildPageQuery,
+  buildRecentQuery,
+  countOf,
+  idsOf,
+  rowsOf,
+  runMemoryEsql,
+  type MemoryKeysetCursor,
+} from './memory_esql';
 import { applyUpdate, displayTelemetry, type CounterState, type CounterUpdate } from './ranking';
 import { canonicalizeTag, MAX_MEMORY_TAGS_PER_PAGE } from '../../common/memory_tags';
 
@@ -32,8 +47,6 @@ const MAX_COUNTER_UPDATE_ATTEMPTS = 3;
 const MEMORY_TAG = 'memory';
 const SPACE_ID_FIELD = 'attributes.space_id';
 const ARCHIVE_REASON_FIELD = 'attributes.archive_reason';
-const UPDATED_AT_FIELD = 'attributes.updated_at';
-const SLUG_FIELD = 'attributes.slug';
 
 /** Archived = presence of `archive_reason` (even empty), matching `toPage`. */
 const ARCHIVED_CLAUSE: object = { exists: { field: ARCHIVE_REASON_FIELD } };
@@ -271,6 +284,10 @@ export const createMemoryPageStore = ({
     return error.body.error.type === 'index_not_found_exception';
   };
 
+  // ES|QL reports a missing index as a 400 `verification_exception`, not the 404 `search` returns.
+  const isMissingIndexError = (error: unknown): boolean =>
+    isIndexNotFoundError(error) || isEsqlUnknownIndexError(error);
+
   const idPrefix = `${spaceId}:`;
   const toStoredId = (pageId: string): string => `${idPrefix}${pageId}`;
   /** Drops ids from other spaces and non-canonical page ids. */
@@ -394,12 +411,6 @@ export const createMemoryPageStore = ({
     };
   };
 
-  // Slug is the tiebreaker: ES refuses fielddata on `_id`, and a non-unique sort key drops rows.
-  const PAGINATION_SORT: estypes.Sort = [
-    { [UPDATED_AT_FIELD]: { order: 'desc', unmapped_type: 'date' } },
-    { [SLUG_FIELD]: { order: 'asc', unmapped_type: 'keyword' } },
-  ];
-
   const spaceAndTagFilter = [
     { term: { tags: MEMORY_TAG } },
     { term: { [SPACE_ID_FIELD]: spaceId } },
@@ -420,39 +431,63 @@ export const createMemoryPageStore = ({
     return keywords.map((keyword) => ({ term: { tags: keyword } }));
   };
 
-  const filterClause = (
-    filter: MemoryFilter,
-    tags?: readonly string[],
-    search?: string
-  ): object[] => {
+  // The listing's scope. It is the request `filter` of every ES|QL read, so Elasticsearch applies it
+  // as a Lucene pre-filter; ES|QL cannot filter on the flattened `attributes` subfields itself.
+  const scopeFilter = (filter: MemoryFilter, tags?: readonly string[]): QueryDslQueryContainer => {
     const tagClauses = tagFilterClauses(tags);
-    const searchClauses: object[] = search
-      ? [{ multi_match: { query: search, fields: ['title', 'description'], operator: 'and' } }]
-      : [];
     switch (filter) {
       case 'active':
-        return [
-          ...spaceAndTagFilter,
-          { bool: { must_not: [ARCHIVED_CLAUSE] } },
-          ...tagClauses,
-          ...searchClauses,
-        ];
+        return {
+          bool: {
+            filter: [
+              ...spaceAndTagFilter,
+              { bool: { must_not: [ARCHIVED_CLAUSE] } },
+              ...tagClauses,
+            ] as QueryDslQueryContainer[],
+          },
+        };
       case 'archived':
-        return [...spaceAndTagFilter, ARCHIVED_CLAUSE, ...tagClauses, ...searchClauses];
+        return {
+          bool: {
+            filter: [
+              ...spaceAndTagFilter,
+              ARCHIVED_CLAUSE,
+              ...tagClauses,
+            ] as QueryDslQueryContainer[],
+          },
+        };
       case 'all':
       default:
-        return [...spaceAndTagFilter, ...tagClauses, ...searchClauses];
+        return {
+          bool: { filter: [...spaceAndTagFilter, ...tagClauses] as QueryDslQueryContainer[] },
+        };
     }
   };
 
-  const hitsToPages = (
-    hits: Array<{ _id?: string; _source?: StoredMemoryPage; sort?: unknown[] }>
-  ): MemoryPage[] =>
-    hits.flatMap((hit) => {
-      if (!hit._id || !hit._source) return [];
-      const pageId = toPageId(hit._id);
+  const activeScope: QueryDslQueryContainer = {
+    bool: {
+      filter: spaceAndTagFilter as QueryDslQueryContainer[],
+      must_not: [ARCHIVED_CLAUSE as QueryDslQueryContainer],
+    },
+  };
+
+  // Every archived page of the space whatever the listing, for the header count.
+  const archivedScope: QueryDslQueryContainer = {
+    bool: {
+      filter: [...spaceAndTagFilter, ARCHIVED_CLAUSE] as QueryDslQueryContainer[],
+    },
+  };
+
+  const runEsql = (
+    query: Parameters<typeof runMemoryEsql>[0]['query'],
+    filter: QueryDslQueryContainer
+  ) => runMemoryEsql({ esClient, query, filter, signal });
+
+  const rowsToPages = (rows: Array<{ id: string; source: StoredMemoryPage }>): MemoryPage[] =>
+    rows.flatMap(({ id, source }) => {
+      const pageId = toPageId(id);
       if (!pageId) return [];
-      const page = toPage(pageId, hit._source);
+      const page = toPage(pageId, source);
       return page ? [page] : [];
     });
 
@@ -464,49 +499,56 @@ export const createMemoryPageStore = ({
 
   const emptyStats = (): MemoryStats => ({ total: 0, archived: 0 });
 
-  // `global` ignores the listing's query, so the header's archived count is unfiltered.
-  const archivedAgg = {
-    archived: {
-      global: {},
-      aggs: {
-        inScope: {
-          filter: { bool: { filter: [...spaceAndTagFilter, ARCHIVED_CLAUSE] } },
-        },
-      },
-    },
-  };
-
-  const decodeCursor = (cursor?: string): Array<number | string> | undefined => {
+  const decodeCursor = (cursor?: string): MemoryKeysetCursor | undefined => {
     if (!cursor) return undefined;
     try {
       const decoded: unknown = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8'));
-      if (!Array.isArray(decoded) || decoded.length !== PAGINATION_SORT.length) return undefined;
-      return decoded.every((part) => typeof part === 'number' || typeof part === 'string')
-        ? (decoded as Array<number | string>)
+      if (!Array.isArray(decoded) || decoded.length !== 2) return undefined;
+      const [updatedAt, slug] = decoded;
+      return typeof updatedAt === 'string' && typeof slug === 'string'
+        ? [updatedAt, slug]
         : undefined;
     } catch {
       return undefined;
     }
   };
 
-  const encodeCursor = (sort: unknown[] | undefined): string | undefined =>
-    Array.isArray(sort) && sort.length === PAGINATION_SORT.length
-      ? Buffer.from(JSON.stringify(sort), 'utf8').toString('base64')
-      : undefined;
+  const encodeCursor = (sort: MemoryKeysetCursor | undefined): string | undefined =>
+    sort ? Buffer.from(JSON.stringify(sort), 'utf8').toString('base64') : undefined;
+
+  const loadPagesByIds = async (ids: readonly string[]): Promise<MemoryPage[]> => {
+    const canonical = [...new Set(ids)].filter(isCanonicalMemoryId);
+    if (canonical.length === 0) {
+      return [];
+    }
+    const byStoredId = new Map(canonical.map((id) => [toStoredId(id), id]));
+    try {
+      const response = await esClient.mget<StoredMemoryPage>(
+        {
+          index: MEMORY_INDEX,
+          ids: [...byStoredId.keys()],
+        },
+        { signal }
+      );
+      return response.docs.flatMap((doc) => {
+        const item = doc as { _id?: string; found?: boolean; _source?: StoredMemoryPage };
+        if (!item.found || !item._source || !item._id) return [];
+        const pageId = byStoredId.get(item._id);
+        if (!pageId) return [];
+        const page = toPage(pageId, item._source);
+        return page ? [page] : [];
+      });
+    } catch (err) {
+      if (isIndexNotFoundError(err)) return [];
+      throw err;
+    }
+  };
 
   return {
     async list({ filter = 'all', tags } = {}) {
       try {
-        const response = await esClient.search<StoredMemoryPage>(
-          {
-            index: MEMORY_INDEX,
-            query: { bool: { filter: filterClause(filter, tags) } },
-            size: MAX_LIST_SIZE,
-            sort: PAGINATION_SORT,
-          },
-          { signal }
-        );
-        const pages = hitsToPages(response.hits.hits);
+        const response = await runEsql(buildListQuery(MAX_LIST_SIZE), scopeFilter(filter, tags));
+        const pages = rowsToPages(rowsOf(response));
 
         return {
           pages: pages.map(toSummary),
@@ -516,7 +558,7 @@ export const createMemoryPageStore = ({
           },
         };
       } catch (err) {
-        if (isIndexNotFoundError(err)) {
+        if (isMissingIndexError(err)) {
           return { pages: [], stats: emptyStats() };
         }
         throw err;
@@ -525,46 +567,34 @@ export const createMemoryPageStore = ({
 
     async listPaginated({ filter = 'all', cursor, size, tags, search } = {}) {
       const pageSize = Math.min(Math.max(size ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
-      const searchAfter = decodeCursor(cursor);
+      const keyset = decodeCursor(cursor);
       const searchText = search?.trim() ? search.trim() : undefined;
+      const scope = scopeFilter(filter, tags);
 
       try {
-        const response = await esClient.search<StoredMemoryPage>(
-          {
-            index: MEMORY_INDEX,
-            query: { bool: { filter: filterClause(filter, tags, searchText) } },
-            size: pageSize,
-            track_total_hits: true,
-            sort: PAGINATION_SORT,
-            aggs: archivedAgg,
-            ...(searchAfter ? { search_after: searchAfter } : {}),
-          },
-          { signal }
-        );
+        const [pageResponse, totalResponse, archivedResponse] = await Promise.all([
+          runEsql(buildPageQuery({ pageSize, search: searchText, cursor: keyset }), scope),
+          runEsql(buildCountQuery({ search: searchText }), scope),
+          runEsql(buildCountQuery(), archivedScope),
+        ]);
 
-        const hits = response.hits.hits;
-        const pages = hitsToPages(hits);
-        const lastSort = hits.length > 0 ? hits[hits.length - 1].sort : undefined;
+        const rows = rowsOf(pageResponse);
+        const pages = rowsToPages(rows);
+        const total = countOf(totalResponse);
+        const lastRow = rows[rows.length - 1];
         const nextCursor =
-          hits.length === pageSize && pages.length === pageSize
-            ? encodeCursor(lastSort)
+          rows.length === pageSize && pages.length === pageSize
+            ? encodeCursor(lastRow.sort)
             : undefined;
-        const total =
-          typeof response.hits.total === 'number'
-            ? response.hits.total
-            : response.hits.total?.value ?? 0;
-        const aggs = response.aggregations as
-          | { archived?: { inScope?: { doc_count?: number } } }
-          | undefined;
 
         return {
           pages: pages.map(toSummary),
-          stats: { total, archived: aggs?.archived?.inScope?.doc_count ?? 0 },
+          stats: { total, archived: countOf(archivedResponse) },
           total,
           ...(nextCursor ? { cursor: nextCursor } : {}),
         };
       } catch (err) {
-        if (isIndexNotFoundError(err)) {
+        if (isMissingIndexError(err)) {
           return { pages: [], stats: emptyStats(), total: 0 };
         }
         throw err;
@@ -575,7 +605,6 @@ export const createMemoryPageStore = ({
       const trimmed = query?.trim();
       const isSearch = trimmed !== undefined && trimmed.length > 0;
       const pageSize = size ?? (isSearch ? 50 : 150);
-      const archived = ARCHIVED_CLAUSE;
       logger.debug(
         `Memory retrieve start match=${match} search=${isSearch} size=${pageSize} ` +
           `space=${spaceId} query=${JSON.stringify(previewText(trimmed))}`
@@ -583,59 +612,23 @@ export const createMemoryPageStore = ({
 
       const searchWithQuery = async (queryText: string) => {
         if (match === 'content') {
-          const response = await esClient.search<StoredMemoryPage>(
-            {
-              index: MEMORY_INDEX,
-              query: {
-                bool: {
-                  filter: spaceAndTagFilter,
-                  must_not: [archived],
-                  must: [
-                    {
-                      bool: {
-                        should: [
-                          { match: { title: queryText } },
-                          { match: { content: queryText } },
-                        ],
-                        minimum_should_match: 1,
-                      },
-                    },
-                  ],
-                },
-              },
-              size: pageSize,
-            },
-            { signal }
+          const response = await runEsql(
+            buildContentSearchQuery({ text: queryText, size: pageSize }),
+            activeScope
           );
-          return hitsToPages(response.hits.hits);
+          return rowsToPages(rowsOf(response));
         }
 
+        // FORK and FUSE rank, but `_source` does not survive them: rank first, then load by id.
+        let rankedIds: string[];
         try {
-          const response = await esClient.search<StoredMemoryPage>(
-            {
-              index: MEMORY_INDEX,
-              size: pageSize,
-              retriever: {
-                rrf: {
-                  retrievers: [
-                    { standard: { query: { match: { description: queryText } } } },
-                    { standard: { query: { match: { 'description.semantic': queryText } } } },
-                  ],
-                  filter: {
-                    bool: {
-                      filter: spaceAndTagFilter,
-                      must_not: [archived],
-                    },
-                  },
-                  rank_window_size: pageSize,
-                },
-              },
-            },
-            { signal }
+          const response = await runEsql(
+            buildHybridQuery({ text: queryText, size: pageSize }),
+            activeScope
           );
-          return hitsToPages(response.hits.hits);
+          rankedIds = idsOf(response);
         } catch (err) {
-          if (isIndexNotFoundError(err)) {
+          if (isMissingIndexError(err)) {
             return [];
           }
           logger.warn(
@@ -643,42 +636,25 @@ export const createMemoryPageStore = ({
               err instanceof Error ? err.message : String(err)
             }`
           );
-          const response = await esClient.search<StoredMemoryPage>(
-            {
-              index: MEMORY_INDEX,
-              query: {
-                bool: {
-                  filter: spaceAndTagFilter,
-                  must_not: [archived],
-                  must: [{ match: { description: queryText } }],
-                },
-              },
-              size: pageSize,
-            },
-            { signal }
+          const response = await runEsql(
+            buildDescriptionSearchQuery({ text: queryText, size: pageSize }),
+            activeScope
           );
-          return hitsToPages(response.hits.hits);
+          return rowsToPages(rowsOf(response));
         }
+        return loadPagesByIds(
+          rankedIds.flatMap((storedId) => {
+            const pageId = toPageId(storedId);
+            return pageId ? [pageId] : [];
+          })
+        );
       };
 
       try {
         let pages: MemoryPage[];
         if (!isSearch || trimmed === undefined) {
-          const response = await esClient.search<StoredMemoryPage>(
-            {
-              index: MEMORY_INDEX,
-              query: {
-                bool: {
-                  filter: spaceAndTagFilter,
-                  must_not: [archived],
-                },
-              },
-              size: pageSize,
-              sort: [{ '@timestamp': { order: 'desc' as const } }],
-            },
-            { signal }
-          );
-          pages = hitsToPages(response.hits.hits);
+          const response = await runEsql(buildRecentQuery(pageSize), activeScope);
+          pages = rowsToPages(rowsOf(response));
         } else {
           pages = await searchWithQuery(trimmed);
         }
@@ -687,7 +663,7 @@ export const createMemoryPageStore = ({
         );
         return pages;
       } catch (err) {
-        if (isIndexNotFoundError(err)) {
+        if (isMissingIndexError(err)) {
           logger.debug(`Memory retrieve index ${MEMORY_INDEX} missing — returning 0 hits`);
           return [];
         }
@@ -718,31 +694,7 @@ export const createMemoryPageStore = ({
     },
 
     async getMany(ids) {
-      const canonical = [...new Set(ids)].filter(isCanonicalMemoryId);
-      if (canonical.length === 0) {
-        return [];
-      }
-      const byStoredId = new Map(canonical.map((id) => [toStoredId(id), id]));
-      try {
-        const response = await esClient.mget<StoredMemoryPage>(
-          {
-            index: MEMORY_INDEX,
-            ids: [...byStoredId.keys()],
-          },
-          { signal }
-        );
-        return response.docs.flatMap((doc) => {
-          const item = doc as { _id?: string; found?: boolean; _source?: StoredMemoryPage };
-          if (!item.found || !item._source || !item._id) return [];
-          const pageId = byStoredId.get(item._id);
-          if (!pageId) return [];
-          const page = toPage(pageId, item._source);
-          return page ? [page] : [];
-        });
-      } catch (err) {
-        if (isIndexNotFoundError(err)) return [];
-        throw err;
-      }
+      return loadPagesByIds(ids);
     },
 
     async getVersioned(id) {
