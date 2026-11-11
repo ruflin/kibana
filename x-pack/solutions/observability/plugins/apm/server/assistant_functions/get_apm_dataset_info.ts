@@ -7,10 +7,52 @@
 
 import { compact, mapValues, omit, uniq } from 'lodash';
 import datemath from '@elastic/datemath';
-import { rangeQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 import { GET_APM_DATASET_INFO_FUNCTION_NAME } from '@kbn/observability-ai-assistant-plugin/server';
-import { getTypedSearch } from '../utils/create_typed_es_client';
 import type { FunctionRegistrationParameters } from '.';
+
+// ES|QL fails with a 400 `verification_exception` on an index pattern that matches nothing,
+// where the Query DSL search returned no hits.
+function isUnknownIndexError(error: unknown): boolean {
+  const { statusCode, body } = error as {
+    statusCode?: number;
+    body?: { error?: { type?: string; reason?: string } };
+  };
+  return (
+    statusCode === 400 &&
+    body?.error?.type === 'verification_exception' &&
+    Boolean(body.error.reason?.includes('Unknown index'))
+  );
+}
+
+export async function hasDocumentsInRange({
+  esClient,
+  index,
+  startInMs,
+  endInMs,
+}: {
+  esClient: ElasticsearchClient;
+  index: string;
+  startInMs: number;
+  endInMs: number;
+}): Promise<boolean> {
+  const query = esql.from([index]).pipe`WHERE @timestamp >= TO_DATETIME(${{
+    start: new Date(startInMs).toISOString(),
+  }}) AND @timestamp <= TO_DATETIME(${{ end: new Date(endInMs).toISOString() }})`.pipe`LIMIT 1`;
+
+  try {
+    // The composer types named parameters as entries, the client types them as plain values.
+    const response = await esClient.esql.query(query.toRequest() as unknown as EsqlQueryRequest);
+    return response.values.length > 0;
+  } catch (error) {
+    if (isUnknownIndexError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
 
 export function registerGetApmDatasetInfoFunction({
   apmEventClient,
@@ -54,34 +96,16 @@ export function registerGetApmDatasetInfoFunction({
           .map((index) => index.trim())
       );
 
-      const search = getTypedSearch(
-        (await resources.context.core).elasticsearch.client.asCurrentUser
-      );
+      const esClient = (await resources.context.core).elasticsearch.client.asCurrentUser;
 
       const startInMs = datemath.parse(start ?? 'now-24h')!.valueOf();
       const endInMs = datemath.parse(end ?? 'now')!.valueOf();
 
       const indicesWithData = compact(
         await Promise.all(
-          allIndices.map(async (index) => {
-            const response = await search({
-              index,
-              size: 0,
-              track_total_hits: 1,
-              terminate_after: 1,
-              query: {
-                bool: {
-                  filter: [...rangeQuery(startInMs, endInMs)],
-                },
-              },
-            });
-
-            return response.hits.total &&
-              typeof response.hits.total !== 'number' &&
-              response.hits.total.value > 0
-              ? index
-              : undefined;
-          })
+          allIndices.map(async (index) =>
+            (await hasDocumentsInRange({ esClient, index, startInMs, endInMs })) ? index : undefined
+          )
         )
       );
 
