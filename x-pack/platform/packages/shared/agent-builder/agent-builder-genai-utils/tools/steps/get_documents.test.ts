@@ -12,17 +12,16 @@ describe('getDocumentById', () => {
   describe('CCS targets', () => {
     it('uses _search with term query for a CCS index', async () => {
       const esClient = {
-        search: jest.fn().mockResolvedValue({
-          hits: {
-            hits: [
-              {
-                _id: 'doc-123',
-                _index: 'remote_cluster:logs-test',
-                _source: { message: 'hello', level: 'info' },
-              },
+        esql: {
+          query: jest.fn().mockResolvedValue({
+            columns: [
+              { name: '_id', type: 'keyword' },
+              { name: '_index', type: 'keyword' },
+              { name: '_source', type: '_source' },
             ],
-          },
-        }),
+            values: [['doc-123', 'remote_cluster:logs-test', { message: 'hello', level: 'info' }]],
+          }),
+        },
         get: jest.fn(),
       } as unknown as ElasticsearchClient;
 
@@ -33,15 +32,11 @@ describe('getDocumentById', () => {
       });
 
       // Should use _search, not _get
-      expect(esClient.search).toHaveBeenCalledWith({
-        index: 'remote_cluster:logs-test',
-        size: 1,
-        query: {
-          bool: {
-            filter: [{ term: { _id: 'doc-123' } }],
-            must_not: [{ term: { _tier: 'data_frozen' } }],
-          },
-        },
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query:
+          'FROM remote_cluster:logs-test METADATA _id, _index, _source | WHERE _id == ?id | KEEP _id, _index, _source | LIMIT 1',
+        params: [{ id: 'doc-123' }],
+        filter: { bool: { must_not: [{ term: { _tier: 'data_frozen' } }] } },
       });
       expect(esClient.get).not.toHaveBeenCalled();
 
@@ -55,9 +50,7 @@ describe('getDocumentById', () => {
 
     it('returns not found when _search returns no hits for a CCS index', async () => {
       const esClient = {
-        search: jest.fn().mockResolvedValue({
-          hits: { hits: [] },
-        }),
+        esql: { query: jest.fn().mockResolvedValue({ columns: [], values: [] }) },
         get: jest.fn(),
       } as unknown as ElasticsearchClient;
 
@@ -76,7 +69,7 @@ describe('getDocumentById', () => {
 
     it('omits the frozen tier exclusion when frozen tier indices are included', async () => {
       const esClient = {
-        search: jest.fn().mockResolvedValue({ hits: { hits: [] } }),
+        esql: { query: jest.fn().mockResolvedValue({ columns: [], values: [] }) },
         get: jest.fn(),
       } as unknown as ElasticsearchClient;
 
@@ -87,9 +80,18 @@ describe('getDocumentById', () => {
         esClient,
       });
 
-      const searchCall = (esClient.search as jest.Mock).mock.calls[0][0];
-      expect(searchCall.query.bool).not.toHaveProperty('must_not');
+      const searchCall = (esClient.esql.query as jest.Mock).mock.calls[0][0];
+      expect(searchCall).not.toHaveProperty('filter');
     });
+  });
+
+  it('rejects a CCS index name that is not a plain index pattern', async () => {
+    const esClient = { esql: { query: jest.fn() } } as unknown as ElasticsearchClient;
+
+    await expect(
+      getDocumentById({ id: 'doc-1', index: 'remote:logs | DROP message', esClient })
+    ).rejects.toThrow('Invalid index name or pattern');
+    expect(esClient.esql.query).not.toHaveBeenCalled();
   });
 
   describe('local targets', () => {

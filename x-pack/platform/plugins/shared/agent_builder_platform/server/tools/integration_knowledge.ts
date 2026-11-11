@@ -176,12 +176,9 @@ export const integrationKnowledgeTool = (
           const esClient = coreStart.elasticsearch.client.asInternalUser;
 
           // Check if the .integration_knowledge index exists
-          // This has to be done with `.search` since `.exists` and `.get` can't be performed
-          // with the internal system user (lack of permissions)
-          await esClient.search({
-            index: INTEGRATION_KNOWLEDGE_INDEX,
-            size: 0,
-          });
+          // This has to be done with a query since `.exists` and `.get` can't be performed
+          // with the internal system user (lack of permissions). ES|QL fails on a missing index.
+          await esClient.esql.query({ query: `FROM ${INTEGRATION_KNOWLEDGE_INDEX} | LIMIT 0` });
 
           return { status: 'available' };
         } catch (error) {

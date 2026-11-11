@@ -35,6 +35,8 @@ const createMockEsClient = (): jest.Mocked<ElasticsearchClient> =>
     bulk: bulkMock,
     deleteByQuery: jest.fn().mockResolvedValue({ deleted: 0 }),
     count: jest.fn().mockResolvedValue({ count: 0 }),
+    // hasManualEntry: no manual entry unless a test returns a row
+    esql: { query: jest.fn().mockResolvedValue({ columns: [], values: [] }) },
     indices: { refresh: jest.fn().mockResolvedValue({ _shards: { failed: 0 } }) },
     get: jest.fn().mockResolvedValue({ found: false }),
   } as unknown as jest.Mocked<ElasticsearchClient>);
@@ -842,7 +844,10 @@ describe('createSmlIndexer', () => {
         const logger = createMockLogger();
         const esClient = createMockEsClient();
         // hasManualEntry returns true
-        (esClient.count as jest.Mock).mockResolvedValue({ count: 1 });
+        (esClient.esql.query as jest.Mock).mockResolvedValue({
+          columns: [{ name: 'id', type: 'keyword' }],
+          values: [['lens:existing']],
+        });
         const indexer = createSmlIndexer({ registry, logger });
 
         await indexer.indexAttachment(
@@ -855,22 +860,13 @@ describe('createSmlIndexer', () => {
           })
         );
 
-        expect(esClient.count).toHaveBeenCalledWith(
-          expect.objectContaining({
-            query: expect.objectContaining({
-              bool: expect.objectContaining({
-                filter: expect.arrayContaining([
-                  { term: { id: 'lens:att-protected' } },
-                  {
-                    term: {
-                      'governance.provenance.updated_by.metadata.ingestion_method': 'manual',
-                    },
-                  },
-                ]),
-              }),
-            }),
-          })
-        );
+        expect(esClient.esql.query).toHaveBeenCalledWith({
+          query: 'FROM .test-sml-data | WHERE id == ?id | KEEP id | LIMIT 1',
+          params: [{ id: 'lens:att-protected' }],
+          filter: {
+            term: { 'governance.provenance.updated_by.metadata.ingestion_method': 'manual' },
+          },
+        });
         expect(getSmlEntry).not.toHaveBeenCalled();
         expect(esClient.deleteByQuery).not.toHaveBeenCalled();
         expect(bulkMock).not.toHaveBeenCalled();
@@ -887,7 +883,10 @@ describe('createSmlIndexer', () => {
         );
         const logger = createMockLogger();
         const esClient = createMockEsClient();
-        (esClient.count as jest.Mock).mockResolvedValue({ count: 1 });
+        (esClient.esql.query as jest.Mock).mockResolvedValue({
+          columns: [{ name: 'id', type: 'keyword' }],
+          values: [['lens:existing']],
+        });
         const indexer = createSmlIndexer({ registry, logger });
 
         await indexer.indexAttachment({
@@ -901,7 +900,7 @@ describe('createSmlIndexer', () => {
         });
 
         // hasManualEntry is bypassed entirely when force=true
-        expect(esClient.count).not.toHaveBeenCalled();
+        expect(esClient.esql.query).not.toHaveBeenCalled();
         expect(getSmlEntry).toHaveBeenCalledTimes(1);
         expect(bulkMock).toHaveBeenCalledTimes(1);
         expect(
@@ -917,7 +916,10 @@ describe('createSmlIndexer', () => {
         );
         const logger = createMockLogger();
         const esClient = createMockEsClient();
-        (esClient.count as jest.Mock).mockResolvedValue({ count: 1 });
+        (esClient.esql.query as jest.Mock).mockResolvedValue({
+          columns: [{ name: 'id', type: 'keyword' }],
+          values: [['lens:existing']],
+        });
         const indexer = createSmlIndexer({ registry, logger });
 
         await indexer.indexAttachment(
@@ -929,7 +931,7 @@ describe('createSmlIndexer', () => {
           })
         );
 
-        expect(esClient.count).not.toHaveBeenCalled();
+        expect(esClient.esql.query).not.toHaveBeenCalled();
         expect(getSmlEntry).not.toHaveBeenCalled();
         expect(esClient.deleteByQuery).toHaveBeenCalledTimes(1);
       });
@@ -943,7 +945,7 @@ describe('createSmlIndexer', () => {
         );
         const logger = createMockLogger();
         const esClient = createMockEsClient();
-        (esClient.count as jest.Mock).mockRejectedValue(
+        (esClient.esql.query as jest.Mock).mockRejectedValue(
           Object.assign(new Error('boom'), { statusCode: 500 })
         );
         const indexer = createSmlIndexer({ registry, logger });
@@ -976,7 +978,7 @@ describe('createSmlIndexer', () => {
         );
         const logger = createMockLogger();
         const esClient = createMockEsClient();
-        (esClient.count as jest.Mock).mockRejectedValue(
+        (esClient.esql.query as jest.Mock).mockRejectedValue(
           Object.assign(new Error('index_not_found_exception'), {
             statusCode: 404,
             body: { error: { type: 'index_not_found_exception' } },

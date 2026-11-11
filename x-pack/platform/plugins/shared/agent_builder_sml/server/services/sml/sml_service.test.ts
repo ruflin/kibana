@@ -2104,6 +2104,16 @@ describe('SmlService', () => {
   });
 
   describe('getDocuments', () => {
+    // Documents are read through ES|QL as `_source`; `hitsResponse` keeps the hits to return.
+    beforeEach(() => {
+      esqlQueryMock.mockImplementation(async () => ({
+        columns: [{ name: '_source', type: '_source' }],
+        values: (hitsResponse as { hits: { hits: Array<{ _source: unknown }> } }).hits.hits.map(
+          (hit) => [hit._source]
+        ),
+      }));
+    });
+
     it('fetches documents from ES and returns Map', async () => {
       const service = createSmlService();
       service.setup({ logger });
@@ -2272,7 +2282,7 @@ describe('SmlService', () => {
       });
 
       expect(result.size).toBe(0);
-      expect(esClient.search).not.toHaveBeenCalled();
+      expect(esqlQueryMock).not.toHaveBeenCalled();
     });
 
     it('handles 404 error gracefully', async () => {
@@ -2280,7 +2290,7 @@ describe('SmlService', () => {
       service.setup({ logger });
       const smlService = service.start({ logger });
 
-      esClient.search.mockRejectedValue(createNotFoundError());
+      esqlQueryMock.mockRejectedValue(createNotFoundError());
 
       const result = await smlService.getDocuments({
         ids: ['doc-1'],
@@ -2296,7 +2306,7 @@ describe('SmlService', () => {
       service.setup({ logger });
       const smlService = service.start({ logger });
 
-      esClient.search.mockRejectedValue(new Error('Connection timeout'));
+      esqlQueryMock.mockRejectedValue(new Error('Connection timeout'));
 
       const result = await smlService.getDocuments({
         ids: ['doc-1'],
@@ -2323,70 +2333,59 @@ describe('SmlService', () => {
         esClient: scopedClient,
       });
 
-      expect(esClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: smlIndexName,
-          size: 2,
-          allow_no_indices: true,
-          ignore_unavailable: true,
-          query: {
-            bool: {
-              filter: [
-                { terms: { id: ['id-1', 'id-2'] } },
-                {
-                  bool: {
-                    minimum_should_match: 1,
-                    should: [
-                      {
-                        bool: {
-                          must_not: [
-                            {
-                              nested: {
-                                path: 'permissions.kibana.privileges',
-                                query: { match_all: {} },
-                                score_mode: 'none',
-                              },
-                            },
-                          ],
-                        },
+      expect(esqlQueryMock).toHaveBeenCalledWith({
+        query: `FROM ${smlIndexName} METADATA _source | WHERE id IN (?ids) | KEEP _source | LIMIT 2`,
+        params: [{ ids: ['id-1', 'id-2'] }],
+        filter: {
+          bool: {
+            minimum_should_match: 1,
+            should: [
+              {
+                bool: {
+                  must_not: [
+                    {
+                      nested: {
+                        path: 'permissions.kibana.privileges',
+                        query: { match_all: {} },
+                        score_mode: 'none',
                       },
-                      {
-                        nested: {
-                          path: 'permissions.kibana.privileges',
-                          score_mode: 'none',
-                          query: {
-                            bool: {
-                              filter: [
-                                {
-                                  bool: {
-                                    should: [
-                                      {
-                                        term: {
-                                          'permissions.kibana.privileges.space': 'default',
-                                        },
-                                      },
-                                      {
-                                        term: {
-                                          'permissions.kibana.privileges.space': '*',
-                                        },
-                                      },
-                                    ],
-                                    minimum_should_match: 1,
-                                  },
+                    },
+                  ],
+                },
+              },
+              {
+                nested: {
+                  path: 'permissions.kibana.privileges',
+                  score_mode: 'none',
+                  query: {
+                    bool: {
+                      filter: [
+                        {
+                          bool: {
+                            should: [
+                              {
+                                term: {
+                                  'permissions.kibana.privileges.space': 'default',
                                 },
-                              ],
-                            },
+                              },
+                              {
+                                term: {
+                                  'permissions.kibana.privileges.space': '*',
+                                },
+                              },
+                            ],
+                            minimum_should_match: 1,
                           },
                         },
-                      },
-                    ],
+                      ],
+                    },
                   },
                 },
-              ],
-            },
+              },
+            ],
           },
-        })
-      );
+        },
+      });
       expect(
         (scopedClient.asCurrentUser as jest.Mocked<ElasticsearchClient>).search
       ).not.toHaveBeenCalled();

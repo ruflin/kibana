@@ -7,9 +7,10 @@
 
 import { get } from 'lodash';
 import type { ElasticsearchClient } from '@kbn/core/server';
-import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import { INDEX_PATTERN_ELASTICSEARCH } from '../../../../common/constants';
 import { getCcsIndexPattern } from '../../../lib/alerts/get_ccs_index_pattern';
+import { runEsqlRows } from '../../../lib/esql_read';
 
 export async function fetchLicenseType(
   client: ElasticsearchClient,
@@ -20,39 +21,15 @@ export async function fetchLicenseType(
   if (availableCcs) {
     index = getCcsIndexPattern(index, availableCcs);
   }
-  const params: estypes.SearchRequest = {
-    index,
-    filter_path: ['hits.hits._source.license'],
-    size: 1,
-    sort: [
-      {
-        timestamp: {
-          order: 'desc',
-          unmapped_type: 'long',
-        },
-      },
-    ],
-    query: {
-      bool: {
-        must: [
-          {
-            term: {
-              cluster_uuid: {
-                value: clusterUuid,
-              },
-            },
-          },
-          {
-            term: {
-              type: {
-                value: 'cluster_stats',
-              },
-            },
-          },
-        ],
-      },
-    },
-  };
-  const response = await client.search(params);
-  return get(response, 'hits.hits[0]._source.license.type') as string | undefined;
+  // The latest cluster_stats document of the cluster. `_source` is read as a whole, as the license
+  // object is not mapped the same way in every monitoring index.
+  const rows = await runEsqlRows(
+    client,
+    esql.from(index.split(','), ['_source']).pipe`WHERE cluster_uuid == ${{
+      clusterUuid,
+    }} AND type == "cluster_stats"`.pipe`SORT timestamp DESC NULLS LAST`
+      .keep('_source')
+      .limit(1)
+  );
+  return get(rows[0], '_source.license.type') as string | undefined;
 }

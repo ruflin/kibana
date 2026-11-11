@@ -5,6 +5,8 @@
  * 2.0.
  */
 
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { IScopedClusterClient } from '@kbn/core-elasticsearch-server';
 import type { Logger } from '@kbn/logging';
 import { getIndexPatternFromESQLQuery, parseTimeFieldFromESQLQuery } from '@kbn/esql-utils';
@@ -61,28 +63,47 @@ const resolveDataset = async (
   return null;
 };
 
-interface MinMaxValue {
-  value?: number | null;
-}
+// An index pattern is interpolated into the ES|QL `FROM` command, so only characters that can
+// appear in an index name, an index pattern or a remote cluster prefix are accepted.
+const INDEX_NAME_PATTERN = /^[\w.\-*:+,]+$/;
+
+/** An ES|QL date comes back as an ISO string, a numeric time field as a number. */
+const toEpochMs = (value: unknown): number | null => {
+  if (typeof value === 'number') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
 
 const queryMinMax = async (
   esClient: IScopedClusterClient,
   { index, timeField }: ResolvedDataset,
   projectRouting?: string
 ): Promise<DatasetTimeRange | null> => {
-  const { aggregations } = await esClient.asCurrentUser.search({
-    index,
-    size: 0,
-    track_total_hits: false,
-    aggs: {
-      min_time: { min: { field: timeField } },
-      max_time: { max: { field: timeField } },
-    },
+  if (!INDEX_NAME_PATTERN.test(index)) {
+    throw new Error(`Invalid index pattern: ${index}`);
+  }
+  const { query, params } = esql.from(index.split(',')).pipe`STATS min_time = MIN(${esql.dpar(
+    timeField
+  )}), max_time = MAX(${esql.dpar(timeField)})`.toRequest();
+  const response = (await esClient.asCurrentUser.esql.query({
+    query,
+    ...(params ? { params } : {}),
     ...(projectRouting ? { project_routing: projectRouting } : {}),
-  });
+  } as unknown as EsqlQueryRequest)) as unknown as {
+    columns: Array<{ name: string }>;
+    values: unknown[][];
+  };
 
-  const minMs = (aggregations?.min_time as MinMaxValue | undefined)?.value;
-  const maxMs = (aggregations?.max_time as MinMaxValue | undefined)?.value;
+  const row = response.values?.[0];
+  const columnValue = (name: string) =>
+    row?.[response.columns.findIndex((column) => column.name === name)];
+  const minMs = toEpochMs(columnValue('min_time'));
+  const maxMs = toEpochMs(columnValue('max_time'));
   if (minMs == null || maxMs == null) {
     return null;
   }

@@ -5,8 +5,6 @@
  * 2.0.
  */
 
-import type { estypes } from '@elastic/elasticsearch';
-
 import type { AiopsLogRateAnalysisSchema } from '../api/schema';
 
 import {
@@ -36,6 +34,39 @@ export interface FetchIndexInfoResponse {
   zeroDocsFallback: boolean;
 }
 
+// ES|QL reports a missing index as a 400 `verification_exception` ("Unknown index"). The
+// previous search used `ignore_unavailable: true` and counted no documents for it.
+const isUnknownIndexError = (error: unknown): boolean => {
+  const { statusCode, body } = error as {
+    statusCode?: number;
+    body?: { error?: { type?: string; reason?: string } };
+  };
+  return (
+    statusCode === 400 &&
+    body?.error?.type === 'verification_exception' &&
+    typeof body.error.reason === 'string' &&
+    body.error.reason.includes('Unknown index')
+  );
+};
+
+const fetchTotalDocCount = async (
+  esClient: FetchIndexInfoParams['esClient'],
+  request: ReturnType<typeof getTotalDocCountRequest>,
+  abortSignal?: AbortSignal
+): Promise<number> => {
+  try {
+    const response = (await esClient.esql.query(request, {
+      signal: abortSignal,
+      maxRetries: 0,
+    })) as unknown as { values: unknown[][] };
+    const total = response.values[0]?.[0];
+    return typeof total === 'number' ? total : 0;
+  } catch (error) {
+    if (isUnknownIndexError(error)) return 0;
+    throw error;
+  }
+};
+
 export const fetchIndexInfo = async ({
   esClient,
   abortSignal,
@@ -48,24 +79,20 @@ export const fetchIndexInfo = async ({
   // in parallel but the call to `fetchFieldCandidates` is optional.
 
   // #1 First we define the promises that would fetch the data.
-  const baselineTotalDocCountPromise = esClient.search(
+  const baselineTotalDocCountPromise = fetchTotalDocCount(
+    esClient,
     getTotalDocCountRequest({ ...params, start: params.baselineMin, end: params.baselineMax }),
-    {
-      signal: abortSignal,
-      maxRetries: 0,
-    }
+    abortSignal
   );
 
-  const deviationTotalDocCountPromise = esClient.search(
+  const deviationTotalDocCountPromise = fetchTotalDocCount(
+    esClient,
     getTotalDocCountRequest({
       ...params,
       start: params.deviationMin,
       end: params.deviationMax,
     }),
-    {
-      signal: abortSignal,
-      maxRetries: 0,
-    }
+    abortSignal
   );
 
   const fetchFieldCandidatesPromise = fetchFieldCandidates({
@@ -90,10 +117,8 @@ export const fetchIndexInfo = async ({
   const [respBaselineTotalDocCount, respDeviationTotalDocCount, fieldCandidates] =
     await Promise.all(promises);
 
-  const baselineTotalDocCount = (respBaselineTotalDocCount.hits.total as estypes.SearchTotalHits)
-    .value;
-  const deviationTotalDocCount = (respDeviationTotalDocCount.hits.total as estypes.SearchTotalHits)
-    .value;
+  const baselineTotalDocCount = respBaselineTotalDocCount;
+  const deviationTotalDocCount = respDeviationTotalDocCount;
 
   return {
     keywordFieldCandidates: fieldCandidates?.selectedKeywordFieldCandidates.sort() ?? [],

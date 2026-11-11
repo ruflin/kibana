@@ -74,11 +74,12 @@ describe('jobAuditMessagesProvider - clearJobAuditMessages', () => {
 describe('jobAuditMessagesProvider - getJobAuditMessages', () => {
   it('sends project_routing to search when CPS is enabled', async () => {
     const client = elasticsearchServiceMock.createScopedClusterClient();
-    client.asInternalUser.search.mockResponse({
-      took: 1,
-      timed_out: false,
-      _shards: { failed: 0, successful: 1, total: 1 },
-      hits: { hits: [], total: { value: 0, relation: 'eq' } },
+    client.asInternalUser.esql.query.mockResponse({
+      columns: [
+        { name: '_source', type: '_source' },
+        { name: '_index', type: 'keyword' },
+      ],
+      values: [],
     });
 
     const mlSavedObjectService: Pick<MLSavedObjectService, 'filterJobsForSpace'> = {
@@ -93,9 +94,50 @@ describe('jobAuditMessagesProvider - getJobAuditMessages', () => {
 
     await getJobAuditMessages(mlSavedObjectService as MLSavedObjectService, { jobId: JOB_ID });
 
-    expect(client.asInternalUser.search.mock.calls[0][0]).toHaveProperty(
+    expect(client.asInternalUser.esql.query.mock.calls[0][0]).toHaveProperty(
       'project_routing',
       DEFAULT_ML_PROJECT_ROUTING
     );
+  });
+
+  it('queries the notifications as ES|QL, keeping the date math in the request filter', async () => {
+    const client = elasticsearchServiceMock.createScopedClusterClient();
+    client.asInternalUser.esql.query.mockResponse({
+      columns: [
+        { name: '_source', type: '_source' },
+        { name: '_index', type: 'keyword' },
+      ],
+      values: [
+        [{ job_id: JOB_ID, message: 'older' } as never, '.ml-notifications-000001'],
+        [{ job_id: JOB_ID, message: 'newer' } as never, NOTIFICATION_INDEX],
+        [{ job_id: JOB_ID, message: 'newest' } as never, NOTIFICATION_INDEX],
+      ],
+    });
+
+    const mlSavedObjectService: Pick<MLSavedObjectService, 'filterJobsForSpace'> = {
+      filterJobsForSpace: jest.fn(async (_type, messages) => messages),
+    };
+
+    const { getJobAuditMessages } = jobAuditMessagesProvider(client, createMlClient(), {
+      isServerless: false,
+      cpsEnabled: false,
+    });
+
+    const result = await getJobAuditMessages(mlSavedObjectService as MLSavedObjectService, {
+      jobId: JOB_ID,
+      from: '7d',
+    });
+
+    const request = client.asInternalUser.esql.query.mock.calls[0][0];
+    expect(request).toMatchObject({
+      query:
+        'FROM .ml-notifications* METADATA _source, _index | WHERE (level IS NULL OR level != "activity") AND (job_type IS NULL OR job_type == "anomaly_detector") | WHERE job_id == "" OR job_id == ?jobId | SORT timestamp DESC NULLS LAST, job_id ASC NULLS LAST | KEEP _source, _index | LIMIT 1000',
+      params: [{ jobId: JOB_ID }],
+      filter: { range: { timestamp: { gte: 'now-7d', lte: 'now' } } },
+    });
+    expect(request).not.toHaveProperty('project_routing');
+    expect(result.messages).toHaveLength(3);
+    // Only clearable indices (generation 2 and above) are reported, once per run of messages.
+    expect(result.notificationIndices).toEqual([NOTIFICATION_INDEX]);
   });
 });

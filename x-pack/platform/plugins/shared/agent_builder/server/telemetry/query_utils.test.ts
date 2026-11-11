@@ -5,10 +5,25 @@
  * 2.0.
  */
 
+import { errors } from '@elastic/elasticsearch';
 import type { ElasticsearchClient, SavedObjectsClientContract } from '@kbn/core/server';
 import type { MockedLogger } from '@kbn/logging-mocks';
 import { loggerMock } from '@kbn/logging-mocks';
 import { QueryUtils } from './query_utils';
+
+const unknownIndexError = (index: string) =>
+  new errors.ResponseError({
+    statusCode: 400,
+    body: {
+      error: {
+        type: 'verification_exception',
+        reason: `Found 1 problem\nUnknown index [${index}]`,
+      },
+    },
+    headers: {},
+    warnings: [],
+    meta: {} as never,
+  });
 
 describe('query_utils', () => {
   describe('QueryUtils', () => {
@@ -17,10 +32,18 @@ describe('query_utils', () => {
     let logger: MockedLogger;
     let queryUtils: QueryUtils;
 
+    const mockEsqlRows = (columns: string[], values: unknown[][]) => {
+      (esClient.esql.query as jest.Mock).mockResolvedValue({
+        columns: columns.map((name) => ({ name, type: 'long' })),
+        values,
+      });
+    };
+
     beforeEach(() => {
       esClient = {
         search: jest.fn(),
         count: jest.fn(),
+        esql: { query: jest.fn() },
       } as unknown as jest.Mocked<ElasticsearchClient>;
 
       soClient = {
@@ -212,21 +235,14 @@ describe('query_utils', () => {
 
     describe('getCustomToolsMetrics', () => {
       it('returns custom tools metrics with aggregation data', async () => {
-        esClient.search.mockResolvedValue({
-          took: 1,
-          timed_out: false,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-          hits: { total: { value: 0, relation: 'eq' }, hits: [] },
-          aggregations: {
-            by_type: {
-              buckets: [
-                { key: 'esql', doc_count: 5 },
-                { key: 'index_search', doc_count: 3 },
-                { key: 'workflow', doc_count: 2 },
-              ],
-            },
-          },
-        });
+        mockEsqlRows(
+          ['count', 'type'],
+          [
+            [5, 'esql'],
+            [3, 'index_search'],
+            [2, 'workflow'],
+          ]
+        );
 
         const result = await queryUtils.getCustomToolsMetrics();
 
@@ -241,13 +257,7 @@ describe('query_utils', () => {
       });
 
       it('returns empty metrics when no aggregations', async () => {
-        esClient.search.mockResolvedValue({
-          took: 1,
-          timed_out: false,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-          hits: { total: { value: 0, relation: 'eq' }, hits: [] },
-          aggregations: {},
-        });
+        mockEsqlRows(['count', 'type'], []);
 
         const result = await queryUtils.getCustomToolsMetrics();
 
@@ -258,39 +268,19 @@ describe('query_utils', () => {
       });
 
       it('excludes builtin tools from query', async () => {
-        esClient.search.mockResolvedValue({
-          took: 1,
-          timed_out: false,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-          hits: { total: { value: 0, relation: 'eq' }, hits: [] },
-          aggregations: {
-            by_type: {
-              buckets: [],
-            },
-          },
-        });
+        mockEsqlRows(['count', 'type'], []);
 
         await queryUtils.getCustomToolsMetrics();
 
-        expect(esClient.search).toHaveBeenCalledWith(
-          expect.objectContaining({
-            query: {
-              bool: {
-                must_not: [
-                  {
-                    term: {
-                      type: 'builtin',
-                    },
-                  },
-                ],
-              },
-            },
-          })
-        );
+        expect(esClient.esql.query).toHaveBeenCalledWith({
+          params: [],
+          query:
+            'FROM .chat-tools | WHERE type != "builtin" | STATS count = COUNT(*) BY type | LIMIT 100',
+        });
       });
 
       it('returns default values and logs warning on error', async () => {
-        esClient.search.mockRejectedValue(new Error('ES error'));
+        (esClient.esql.query as jest.Mock).mockRejectedValue(new Error('ES error'));
 
         const result = await queryUtils.getCustomToolsMetrics();
 
@@ -305,7 +295,7 @@ describe('query_utils', () => {
         const error = {
           message: 'index_not_found_exception: no such index [.chat-tools]',
         };
-        esClient.search.mockRejectedValue(error);
+        (esClient.esql.query as jest.Mock).mockRejectedValue(error);
 
         const result = await queryUtils.getCustomToolsMetrics();
 
@@ -315,25 +305,32 @@ describe('query_utils', () => {
         });
         expect(logger.warn).not.toHaveBeenCalled();
       });
+
+      it('does not log warning for an unknown index in ES|QL', async () => {
+        (esClient.esql.query as jest.Mock).mockRejectedValue(unknownIndexError('.chat-tools'));
+
+        const result = await queryUtils.getCustomToolsMetrics();
+
+        expect(result).toEqual({ total: 0, by_type: [] });
+        expect(logger.warn).not.toHaveBeenCalled();
+      });
     });
 
     describe('getCustomAgentsMetrics', () => {
       it('returns custom agents count', async () => {
-        esClient.count.mockResolvedValue({
-          count: 15,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        });
+        mockEsqlRows(['count'], [[15]]);
 
         const result = await queryUtils.getCustomAgentsMetrics();
 
         expect(result).toBe(15);
+        expect(esClient.esql.query).toHaveBeenCalledWith({
+          params: [],
+          query: 'FROM .chat-agents | STATS count = COUNT(*)',
+        });
       });
 
       it('returns 0 when count is undefined', async () => {
-        esClient.count.mockResolvedValue({
-          count: undefined as any,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        });
+        mockEsqlRows(['count'], []);
 
         const result = await queryUtils.getCustomAgentsMetrics();
 
@@ -341,7 +338,7 @@ describe('query_utils', () => {
       });
 
       it('returns 0 and logs warning on error', async () => {
-        esClient.count.mockRejectedValue(new Error('ES error'));
+        (esClient.esql.query as jest.Mock).mockRejectedValue(new Error('ES error'));
 
         const result = await queryUtils.getCustomAgentsMetrics();
 
@@ -353,7 +350,7 @@ describe('query_utils', () => {
         const error = {
           message: 'index_not_found_exception: no such index [.chat-agents]',
         };
-        esClient.count.mockRejectedValue(error);
+        (esClient.esql.query as jest.Mock).mockRejectedValue(error);
 
         const result = await queryUtils.getCustomAgentsMetrics();
 
@@ -364,19 +361,7 @@ describe('query_utils', () => {
 
     describe('getSkillsMetrics', () => {
       it('returns total, custom, and plugin counts from ES', async () => {
-        esClient.search.mockResolvedValue({
-          took: 1,
-          timed_out: false,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-          hits: {
-            total: { value: 42, relation: 'eq' },
-            hits: [],
-          },
-          aggregations: {
-            custom: { doc_count: 30 },
-            plugin: { doc_count: 12 },
-          },
-        });
+        mockEsqlRows(['total', 'custom', 'plugin'], [[42, 30, 12]]);
 
         const result = await queryUtils.getSkillsMetrics();
 
@@ -388,16 +373,7 @@ describe('query_utils', () => {
       });
 
       it('handles hits.total as a number', async () => {
-        esClient.search.mockResolvedValue({
-          took: 1,
-          timed_out: false,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-          hits: { total: 7, hits: [] },
-          aggregations: {
-            custom: { doc_count: 5 },
-            plugin: { doc_count: 2 },
-          },
-        });
+        mockEsqlRows(['total', 'custom', 'plugin'], [[7, 5, 2]]);
 
         const result = await queryUtils.getSkillsMetrics();
 
@@ -407,48 +383,19 @@ describe('query_utils', () => {
       });
 
       it('queries the skills index with track_total_hits and filter aggs', async () => {
-        esClient.search.mockResolvedValue({
-          took: 1,
-          timed_out: false,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-          hits: { total: { value: 0, relation: 'eq' }, hits: [] },
-          aggregations: {
-            custom: { doc_count: 0 },
-            plugin: { doc_count: 0 },
-          },
-        });
+        mockEsqlRows(['total', 'custom', 'plugin'], [[0, 0, 0]]);
 
         await queryUtils.getSkillsMetrics();
 
-        expect(esClient.search).toHaveBeenCalledWith({
-          index: '.chat-skills',
-          size: 0,
-          track_total_hits: true,
-          aggs: {
-            custom: {
-              filter: {
-                bool: {
-                  must_not: { exists: { field: 'plugin_id' } },
-                },
-              },
-            },
-            plugin: {
-              filter: {
-                exists: { field: 'plugin_id' },
-              },
-            },
-          },
+        expect(esClient.esql.query).toHaveBeenCalledWith({
+          params: [],
+          query:
+            'FROM .chat-skills | STATS total = COUNT(*), custom = COUNT(*) WHERE plugin_id IS NULL, plugin = COUNT(*) WHERE plugin_id IS NOT NULL',
         });
       });
 
       it('defaults custom and plugin to 0 when aggregations are missing', async () => {
-        esClient.search.mockResolvedValue({
-          took: 1,
-          timed_out: false,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-          hits: { total: { value: 0, relation: 'eq' }, hits: [] },
-          aggregations: {},
-        });
+        mockEsqlRows(['total', 'custom', 'plugin'], []);
 
         const result = await queryUtils.getSkillsMetrics();
 
@@ -460,7 +407,7 @@ describe('query_utils', () => {
         const error = {
           message: 'index_not_found_exception: no such index [.chat-skills]',
         };
-        esClient.search.mockRejectedValue(error);
+        (esClient.esql.query as jest.Mock).mockRejectedValue(error);
 
         const result = await queryUtils.getSkillsMetrics();
 
@@ -473,7 +420,7 @@ describe('query_utils', () => {
       });
 
       it('logs warning and returns zeros on other errors', async () => {
-        esClient.search.mockRejectedValue(new Error('ES error'));
+        (esClient.esql.query as jest.Mock).mockRejectedValue(new Error('ES error'));
 
         const result = await queryUtils.getSkillsMetrics();
 
@@ -488,22 +435,19 @@ describe('query_utils', () => {
 
     describe('getPluginsCount', () => {
       it('returns plugins count from ES', async () => {
-        esClient.count.mockResolvedValue({
-          count: 9,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        });
+        mockEsqlRows(['count'], [[9]]);
 
         const result = await queryUtils.getPluginsCount();
 
         expect(result).toBe(9);
-        expect(esClient.count).toHaveBeenCalledWith({ index: '.chat-plugins' });
+        expect(esClient.esql.query).toHaveBeenCalledWith({
+          params: [],
+          query: 'FROM .chat-plugins | STATS count = COUNT(*)',
+        });
       });
 
       it('returns 0 when count is undefined', async () => {
-        esClient.count.mockResolvedValue({
-          count: undefined as any,
-          _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        });
+        mockEsqlRows(['count'], []);
 
         const result = await queryUtils.getPluginsCount();
 
@@ -514,7 +458,7 @@ describe('query_utils', () => {
         const error = {
           message: 'index_not_found_exception: no such index [.chat-plugins]',
         };
-        esClient.count.mockRejectedValue(error);
+        (esClient.esql.query as jest.Mock).mockRejectedValue(error);
 
         const result = await queryUtils.getPluginsCount();
 
@@ -523,7 +467,7 @@ describe('query_utils', () => {
       });
 
       it('returns 0 and logs warning on other errors', async () => {
-        esClient.count.mockRejectedValue(new Error('ES error'));
+        (esClient.esql.query as jest.Mock).mockRejectedValue(new Error('ES error'));
 
         const result = await queryUtils.getPluginsCount();
 

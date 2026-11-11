@@ -6,7 +6,8 @@
  */
 
 import type { estypes } from '@elastic/elasticsearch';
-import { sortBy, slice, get, cloneDeep } from 'lodash';
+import { esql } from '@elastic/esql';
+import { sortBy, slice, cloneDeep } from 'lodash';
 import moment from 'moment';
 import Boom from '@hapi/boom';
 import type { IScopedClusterClient } from '@kbn/core/server';
@@ -34,6 +35,8 @@ import { buildAnomalyTableItems } from './build_anomaly_table_items';
 import { ANOMALIES_TABLE_DEFAULT_QUERY_SIZE } from '../../../common/constants/search';
 import { getPartitionFieldsValuesFactory } from './get_partition_fields_values';
 import type { MlClient } from '../../lib/ml_client';
+import { toArray } from '../../lib/esql/esql_read';
+import { ML_RESULTS_INDEX_PATTERN } from '../../../common/constants/index_patterns';
 import { datafeedsProvider } from '../job_service/datafeeds';
 import { annotationServiceProvider } from '../annotation_service';
 import type { ServerlessInfo } from '../../types';
@@ -296,138 +299,46 @@ export function resultsServiceProvider(
 
   // Returns the maximum anomaly_score for result_type:bucket over jobIds for the interval passed in
   async function getMaxAnomalyScore(jobIds: string[] = [], earliestMs: number, latestMs: number) {
-    // Build the criteria to use in the bool filter part of the request.
-    // Adds criteria for the time range plus any specified job IDs.
-    const boolCriteria: object[] = [
-      {
-        range: {
-          timestamp: {
-            gte: earliestMs,
-            lte: latestMs,
-            format: 'epoch_millis',
-          },
-        },
-      },
-    ];
+    let query = esql.from([ML_RESULTS_INDEX_PATTERN])
+      .pipe`WHERE result_type == "bucket" AND timestamp >= TO_DATETIME(${{
+      earliestMs,
+    }}) AND timestamp <= TO_DATETIME(${{ latestMs }})`;
 
     if (jobIds.length > 0) {
-      let jobIdFilterStr = '';
-      jobIds.forEach((jobId, i) => {
-        if (i > 0) {
-          jobIdFilterStr += ' OR ';
-        }
-        jobIdFilterStr += 'job_id:';
-        jobIdFilterStr += jobId;
-      });
-      boolCriteria.push({
-        query_string: {
-          analyze_wildcard: false,
-          query: jobIdFilterStr,
-        },
-      });
+      query = query.pipe`WHERE job_id IN (${{ jobIds }})`;
     }
 
-    const query = {
-      size: 0,
-      query: {
-        bool: {
-          filter: [
-            {
-              query_string: {
-                query: 'result_type:bucket',
-                analyze_wildcard: false,
-              },
-            },
-            {
-              bool: {
-                must: boolCriteria,
-              },
-            },
-          ],
-        },
-      },
-      aggs: {
-        max_score: {
-          max: {
-            field: 'anomaly_score',
-          },
-        },
-      },
-    };
+    const rows = await mlClient.anomalyEsql(
+      query.pipe`STATS maxScore = MAX(anomaly_score)`,
+      jobIds
+    );
+    const maxScore = rows[0]?.maxScore;
 
-    const body = await mlClient.anomalySearch(query, jobIds);
-    const maxScore = get(body, ['aggregations', 'max_score', 'value'], null);
-
-    return { maxScore };
+    return { maxScore: typeof maxScore === 'number' ? maxScore : null };
   }
 
   // Obtains the latest bucket result timestamp by job ID.
   // Returns data over all jobs unless an optional list of job IDs of interest is supplied.
   // Returned response consists of latest bucket timestamps (ms since Jan 1 1970) against job ID
   async function getLatestBucketTimestampByJob(jobIds: string[] = []) {
-    const filter: object[] = [
-      {
-        term: {
-          result_type: 'bucket',
-        },
-      },
-    ];
-
-    if (jobIds.length > 0 && !(jobIds.length === 1 && jobIds[0] === '*')) {
-      let jobIdFilterStr = '';
-      jobIds.forEach((jobId, i) => {
-        if (i > 0) {
-          jobIdFilterStr += ' OR ';
-        }
-        jobIdFilterStr += 'job_id:';
-        jobIdFilterStr += jobId;
-      });
-      filter.push({
-        query_string: {
-          analyze_wildcard: false,
-          query: jobIdFilterStr,
-        },
-      });
-    }
-
-    // Size of job terms agg, consistent with maximum number of jobs supported by Java endpoints.
+    // Size of the per-job grouping, consistent with maximum number of jobs supported by Java endpoints.
     const maxJobs = 10000;
 
-    const body = await mlClient.anomalySearch(
-      {
-        size: 0,
-        query: {
-          bool: {
-            filter,
-          },
-        },
-        aggs: {
-          byJobId: {
-            terms: {
-              field: 'job_id',
-              size: maxJobs,
-            },
-            aggs: {
-              maxTimestamp: {
-                max: {
-                  field: 'timestamp',
-                },
-              },
-            },
-          },
-        },
-      },
+    let query = esql.from([ML_RESULTS_INDEX_PATTERN]).pipe`WHERE result_type == "bucket"`;
+
+    if (jobIds.length > 0 && !(jobIds.length === 1 && jobIds[0] === '*')) {
+      query = query.pipe`WHERE job_id IN (${{ jobIds }})`;
+    }
+
+    const rows = await mlClient.anomalyEsql(
+      query.pipe`STATS maxTimestamp = MAX(timestamp) BY job_id`.limit(maxJobs),
       jobIds
     );
 
-    const bucketsByJobId: Array<{ key: string; maxTimestamp: { value?: number } }> = get(
-      body,
-      ['aggregations', 'byJobId', 'buckets'],
-      []
-    );
     const timestampByJobId: { [key: string]: number | undefined } = Object.create(null);
-    bucketsByJobId.forEach((bucket) => {
-      timestampByJobId[bucket.key] = bucket.maxTimestamp.value;
+    rows.forEach((row) => {
+      const timestamp = typeof row.maxTimestamp === 'string' ? Date.parse(row.maxTimestamp) : NaN;
+      timestampByJobId[String(row.job_id)] = Number.isNaN(timestamp) ? undefined : timestamp;
     });
 
     return timestampByJobId;
@@ -437,33 +348,23 @@ export function resultsServiceProvider(
   // from the given index and job ID.
   // Returned response consists of a list of examples against category ID.
   async function getCategoryExamples(jobId: string, categoryIds: any, maxExamples: number) {
-    const body = await mlClient.anomalySearch(
-      {
-        size: ANOMALIES_TABLE_DEFAULT_QUERY_SIZE, // Matches size of records in anomaly summary table.
-        query: {
-          bool: {
-            filter: [{ term: { job_id: jobId } }, { terms: { category_id: categoryIds } }],
-          },
-        },
-      },
+    const ids = toArray<string | number>(categoryIds).map(Number);
+    const rows = await mlClient.anomalyEsql(
+      esql.from([ML_RESULTS_INDEX_PATTERN]).pipe`WHERE job_id == ${{
+        jobId,
+      }} AND category_id IN (${{ ids }})`
+        .keep('category_id', 'examples')
+        .limit(ANOMALIES_TABLE_DEFAULT_QUERY_SIZE), // Matches size of records in anomaly summary table.
       [jobId]
     );
 
     const examplesByCategoryId: { [key: string]: any } = Object.create(null);
-    // @ts-expect-error incorrect search response type
-    if (body.hits.total.value > 0) {
-      body.hits.hits.forEach((hit: any) => {
-        if (maxExamples) {
-          examplesByCategoryId[hit._source.category_id] = slice(
-            hit._source.examples,
-            0,
-            Math.min(hit._source.examples.length, maxExamples)
-          );
-        } else {
-          examplesByCategoryId[hit._source.category_id] = hit._source.examples;
-        }
-      });
-    }
+    rows.forEach((row) => {
+      const examples = toArray(row.examples);
+      examplesByCategoryId[String(row.category_id)] = maxExamples
+        ? slice(examples, 0, Math.min(examples.length, maxExamples))
+        : examples;
+    });
 
     return examplesByCategoryId;
   }
@@ -472,26 +373,27 @@ export function resultsServiceProvider(
   // Returned response contains four properties - categoryId, regex, examples
   // and terms (space delimited String of the common tokens matched in values of the category).
   async function getCategoryDefinition(jobId: string, categoryId: string) {
-    const body = await mlClient.anomalySearch<any>(
-      {
-        size: 1,
-        query: {
-          bool: {
-            filter: [{ term: { job_id: jobId } }, { term: { category_id: categoryId } }],
-          },
-        },
-      },
+    const rows = await mlClient.anomalyEsql(
+      esql.from([ML_RESULTS_INDEX_PATTERN]).pipe`WHERE job_id == ${{ jobId }} AND category_id == ${{
+        categoryId: Number(categoryId),
+      }}`
+        .keep('category_id', 'regex', 'terms', 'examples')
+        .limit(1),
       [jobId]
     );
 
-    const definition = { categoryId, terms: null, regex: null, examples: [] };
-    // @ts-expect-error incorrect search response type
-    if (body.hits.total.value > 0) {
-      const source = body.hits.hits[0]._source;
-      definition.categoryId = source.category_id;
+    const definition: {
+      categoryId: string | number;
+      terms: unknown;
+      regex: unknown;
+      examples: unknown[];
+    } = { categoryId, terms: null, regex: null, examples: [] };
+    const source = rows[0];
+    if (source) {
+      definition.categoryId = source.category_id as number;
       definition.regex = source.regex;
       definition.terms = source.terms;
-      definition.examples = source.examples;
+      definition.examples = toArray(source.examples);
     }
 
     return definition;
@@ -557,76 +459,30 @@ export function resultsServiceProvider(
       )
       .map((j) => j.job_id);
 
-    let aggs: any;
-    if (fieldToBucket === ML_JOB_ID) {
-      // if bucketing by job_id, then return list of job_ids with at least one stopped_partitions
-      aggs = {
-        unique_terms: {
-          terms: {
-            field: ML_JOB_ID,
-          },
-        },
-      };
-    } else {
-      // if bucketing by partition field value, then return list of unique stopped_partitions for each job
-      aggs = {
-        jobs: {
-          terms: {
-            field: ML_JOB_ID,
-          },
-          aggs: {
-            unique_stopped_partitions: {
-              terms: {
-                field: ML_PARTITION_FIELD_VALUE,
-              },
-            },
-          },
-        },
-      };
-    }
-
     if (jobIdsWithStopOnWarnSet.length > 0) {
       // search for categorizer_stats documents for the current job where the categorization_status is warn
       // Return all the partition_field_value values from the documents found
-      const mustMatchClauses: Array<Record<'match', Record<string, string>>> = [
-        {
-          match: {
-            result_type: 'categorizer_stats',
-          },
-        },
-        {
-          match: {
-            categorization_status: 'warn',
-          },
-        },
-      ];
-      const results = await mlClient.anomalySearch<any>(
-        {
-          size: 0,
-          query: {
-            bool: {
-              must: mustMatchClauses,
-              filter: [
-                {
-                  terms: {
-                    job_id: jobIdsWithStopOnWarnSet,
-                  },
-                },
-              ],
-            },
-          },
-          aggs,
-        },
-        jobIds
-      );
+      const base = esql.from([ML_RESULTS_INDEX_PATTERN])
+        .pipe`WHERE result_type == "categorizer_stats" AND categorization_status == "warn" AND job_id IN (${{
+        jobIdsWithStopOnWarnSet,
+      }})`;
+      // Upper bound on the number of groups returned.
+      const maxGroups = 10000;
+
       if (fieldToBucket === ML_JOB_ID) {
-        finalResults = {
-          // @ts-expect-error incorrect search response type
-          jobs: results.aggregations?.unique_terms?.buckets.map(
-            (b: { key: string; doc_count: number }) => b.key
-          ),
-        };
+        // if bucketing by job_id, then return list of job_ids with at least one stopped_partitions
+        const rows = await mlClient.anomalyEsql(
+          base.pipe`STATS stopped = COUNT(*) BY job_id`.limit(maxGroups),
+          jobIds
+        );
+        finalResults = { jobs: rows.map((row) => String(row.job_id)) };
       } else if (fieldToBucket === ML_PARTITION_FIELD_VALUE) {
+        // if bucketing by partition field value, then return list of unique stopped_partitions for each job
+        const rows = await mlClient.anomalyEsql(
+          base.pipe`WHERE partition_field_value IS NOT NULL`
+            .pipe`STATS stopped = COUNT(*) BY job_id, partition_field_value`.limit(maxGroups),
+          jobIds
+        );
         const jobs: Record<string, string[]> = jobIdsWithStopOnWarnSet.reduce(
           (obj: Record<string, string[]>, jobId: string) => {
             obj[jobId] = [];
@@ -634,12 +490,10 @@ export function resultsServiceProvider(
           },
           {}
         );
-        // @ts-expect-error incorrect search response type
-        results.aggregations.jobs.buckets.forEach(
-          (bucket: { key: string | number; unique_stopped_partitions: { buckets: any[] } }) => {
-            jobs[bucket.key] = bucket.unique_stopped_partitions.buckets.map((b) => b.key);
-          }
-        );
+        rows.forEach((row) => {
+          const jobId = String(row.job_id);
+          jobs[jobId] = [...(jobs[jobId] ?? []), String(row.partition_field_value)];
+        });
         finalResults.jobs = jobs;
       }
     }

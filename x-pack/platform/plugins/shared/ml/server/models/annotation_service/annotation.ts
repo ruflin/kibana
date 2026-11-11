@@ -6,10 +6,11 @@
  */
 
 import Boom from '@hapi/boom';
-import { each, get, omit } from 'lodash';
+import { omit } from 'lodash';
 import type { IScopedClusterClient } from '@kbn/core/server';
 
 import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import { ML_PARTITION_FIELDS } from '@kbn/ml-anomaly-utils';
 
 import type { Annotation, Annotations } from '@kbn/ml-common-types/annotations';
@@ -29,14 +30,10 @@ import { DEFAULT_ML_PROJECT_ROUTING } from '../../../common/constants/cps';
 import { isJobIdValid } from '../../../common/util/job_utils';
 import type { MlClient } from '../../lib/ml_client/types';
 import type { ServerlessInfo } from '../../types';
+import { esqlRows, runEsql } from '../../lib/esql/esql_read';
 
 // TODO All of the following interface/type definitions should
 // eventually be replaced by the proper upstream definitions
-interface EsResult {
-  _source: Annotation;
-  _id: string;
-}
-
 export interface IndexAnnotationArgs {
   jobIds: string[];
   earliestMs: number | null;
@@ -117,30 +114,25 @@ export function annotationProvider(
   }
 
   async function getAnnotationById(id: string): Promise<{ annotation: Annotation; index: string }> {
-    const searchParams: estypes.SearchRequest = {
-      index: ML_ANNOTATIONS_INDEX_ALIAS_READ,
-      size: 1,
-      query: {
-        ids: {
-          values: [id],
-        },
-      },
-    };
+    const response = await runEsql({
+      esClient: asInternalUser,
+      query: esql.from([ML_ANNOTATIONS_INDEX_ALIAS_READ], ['_id', '_index', '_source'])
+        .pipe`WHERE _id == ${{ id }}`
+        .keep('_id', '_index', '_source')
+        .limit(1),
+    });
+    const hit = esqlRows(response)[0];
 
-    const body = await asInternalUser.search<any>(searchParams, { maxRetries: 0 });
-    const totalCount =
-      typeof body.hits.total === 'number' ? body.hits.total : body.hits.total!.value;
-
-    if (totalCount === 0) {
+    if (hit === undefined) {
       throw Boom.notFound(`Cannot find annotation with ID ${id}`);
     }
 
-    const hit = body.hits.hits[0];
+    const source = hit._source as Annotation | undefined;
     const annotation: Annotation = {
-      ...hit._source,
-      event: hit._source?.event ?? ANNOTATION_EVENT_USER,
-      _id: hit._id,
-    };
+      ...source,
+      event: source?.event ?? ANNOTATION_EVENT_USER,
+      _id: hit._id as string,
+    } as Annotation;
 
     if (isAnnotation(annotation) === false) {
       throw new Error('invalid annotation format');
@@ -148,7 +140,7 @@ export function annotationProvider(
 
     await checkJobAccess(annotation.job_id);
 
-    return { annotation, index: hit._index };
+    return { annotation, index: hit._index as string };
   }
 
   async function indexAnnotation(annotation: Annotation, username: string) {
@@ -205,184 +197,95 @@ export function annotationProvider(
       totalCount: 0,
     };
 
-    const boolCriteria: object[] = [];
+    let query = esql.from([ML_ANNOTATIONS_INDEX_ALIAS_READ], ['_id', '_source'])
+      .pipe`WHERE type == ${{
+      annotationType: ANNOTATION_TYPE.ANNOTATION,
+    }} AND annotation IS NOT NULL`;
 
-    // Build the criteria to use in the bool filter part of the request.
     // Adds criteria for the time range plus any specified job IDs.
-    // The nested must_not time range filter queries make sure that we fetch:
+    // The excluded time ranges make sure that we fetch:
     // - annotations with start and end within the time range
     // - annotations that either start or end within the time range
     // - annotations that start before and end after the given time range
     // - but skip annotation that are completely outside the time range
-    //   (the ones that start and end before or after the time range)
+    //   (the ones that start and end before or after the time range).
+    // Annotations without an end_timestamp are never excluded, as with the previous range queries.
     if (earliestMs !== null && latestMs !== null) {
-      boolCriteria.push({
-        bool: {
-          must_not: [
-            {
-              bool: {
-                filter: [
-                  {
-                    range: {
-                      timestamp: {
-                        lte: earliestMs,
-                        format: 'epoch_millis',
-                      },
-                    },
-                  },
-                  {
-                    range: {
-                      end_timestamp: {
-                        lte: earliestMs,
-                        format: 'epoch_millis',
-                      },
-                    },
-                  },
-                ],
-              },
-            },
-            {
-              bool: {
-                filter: [
-                  {
-                    range: {
-                      timestamp: {
-                        gte: latestMs,
-                        format: 'epoch_millis',
-                      },
-                    },
-                  },
-                  {
-                    range: {
-                      end_timestamp: {
-                        gte: latestMs,
-                        format: 'epoch_millis',
-                      },
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        },
-      });
+      query = query.pipe`WHERE NOT (
+        (timestamp <= TO_DATETIME(${{
+          earliestMs,
+        }}) AND end_timestamp IS NOT NULL AND end_timestamp <= TO_DATETIME(${{ earliestMs }}))
+        OR (timestamp >= TO_DATETIME(${{
+          latestMs,
+        }}) AND end_timestamp IS NOT NULL AND end_timestamp >= TO_DATETIME(${{ latestMs }}))
+      )`;
     }
 
-    boolCriteria.push({
-      exists: { field: 'annotation' },
-    });
-
     if (event) {
-      boolCriteria.push({
-        term: { event },
-      });
+      query = query.pipe`WHERE event == ${{ event }}`;
     }
 
     if (jobIds && jobIds.length > 0 && !(jobIds.length === 1 && jobIds[0] === '*')) {
-      let jobIdFilterStr = '';
-      each(jobIds, (jobId, i: number) => {
-        jobIdFilterStr += `${i! > 0 ? ' OR ' : ''}job_id:${jobId}`;
-      });
-      boolCriteria.push({
-        query_string: {
-          analyze_wildcard: false,
-          query: jobIdFilterStr,
-        },
-      });
+      query = query.pipe`WHERE job_id IN (${{ jobIds }})`;
     }
 
-    // Build should clause to further query for annotations in SMV
+    // Build the OR clause to further query for annotations in SMV
     // we want to show either the exact match with detector index and by/over/partition fields
     // OR annotations without any partition fields defined
-    let shouldClauses;
     if (detectorIndex !== undefined && Array.isArray(entities)) {
-      // build clause to get exact match of detector index and by/over/partition fields
-      const beExactMatch = [];
-      beExactMatch.push({
-        term: {
-          detector_index: detectorIndex,
-        },
-      });
-
-      entities.forEach(({ fieldName, fieldType, fieldValue }) => {
-        beExactMatch.push({
-          term: {
-            [getAnnotationFieldName(fieldType)]: fieldName,
-          },
-        });
-        beExactMatch.push({
-          term: {
-            [getAnnotationFieldValue(fieldType)]: fieldValue,
-          },
-        });
-      });
-
+      // Column names come from the fixed ML_PARTITION_FIELDS list, values are named parameters.
+      const params: Record<string, unknown> = { detectorIndex };
       // clause to get annotations that have no partition fields
-      const haveAnyPartitionFields: object[] = [];
-      ML_PARTITION_FIELDS.forEach((field) => {
-        haveAnyPartitionFields.push({
-          exists: {
-            field: getAnnotationFieldName(field),
-          },
-        });
-        haveAnyPartitionFields.push({
-          exists: {
-            field: getAnnotationFieldValue(field),
-          },
-        });
+      const noPartitionFields = ML_PARTITION_FIELDS.map(
+        (field) =>
+          `${getAnnotationFieldName(field)} IS NULL AND ${getAnnotationFieldValue(field)} IS NULL`
+      ).join(' AND ');
+      // clause to get exact match of detector index and by/over/partition fields.
+      // A field type that is not a partition field matches nothing.
+      const exactMatch = ['detector_index == ?detectorIndex'];
+      entities.forEach(({ fieldName, fieldType, fieldValue }, i: number) => {
+        if (!(ML_PARTITION_FIELDS as readonly string[]).includes(fieldType)) {
+          exactMatch.push('false');
+          return;
+        }
+        params[`fieldName${i}`] = String(fieldName);
+        params[`fieldValue${i}`] = String(fieldValue);
+        exactMatch.push(
+          `${getAnnotationFieldName(fieldType)} == ?fieldName${i} AND ${getAnnotationFieldValue(
+            fieldType
+          )} == ?fieldValue${i}`
+        );
       });
-      shouldClauses = [
-        { bool: { must_not: haveAnyPartitionFields } },
-        { bool: { must: beExactMatch } },
-      ];
+      query = query.pipe(`WHERE (${noPartitionFields}) OR (${exactMatch.join(' AND ')})`, params);
     }
 
-    const params: estypes.SearchRequest = {
-      index: ML_ANNOTATIONS_INDEX_ALIAS_READ,
-      size: maxAnnotations,
-      track_total_hits: true,
-      query: {
-        bool: {
-          filter: [
-            {
-              query_string: {
-                query: `type:${ANNOTATION_TYPE.ANNOTATION}`,
-                analyze_wildcard: false,
-              },
-            },
-            {
-              bool: {
-                must: boolCriteria,
-              },
-            },
-          ],
-          ...(shouldClauses ? { should: shouldClauses, minimum_should_match: 1 } : {}),
-        },
-      },
-      ...(serverless.isServerless && serverless.cpsEnabled
-        ? { project_routing: DEFAULT_ML_PROJECT_ROUTING }
-        : {}),
-    };
+    const projectRouting =
+      serverless.isServerless && serverless.cpsEnabled ? DEFAULT_ML_PROJECT_ROUTING : undefined;
 
     try {
-      const body = await asInternalUser.search(params, { maxRetries: 0 });
+      // The total is exact, the previous `track_total_hits: true` search counted all matches too.
+      const [response, countResponse] = await Promise.all([
+        runEsql({
+          esClient: asInternalUser,
+          query: query.keep('_id', '_source').limit(maxAnnotations),
+          projectRouting,
+        }),
+        runEsql({
+          esClient: asInternalUser,
+          query: query.pipe`STATS total = COUNT(*)`,
+          projectRouting,
+        }),
+      ]);
 
-      // @ts-expect-error TODO fix search response types
-      if (body.error !== undefined && body.message !== undefined) {
-        // No need to translate, this will not be exposed in the UI.
-        throw new Error(`Annotations couldn't be retrieved from Elasticsearch.`);
-      }
+      const total = esqlRows(countResponse)[0]?.total;
+      obj.totalCount = typeof total === 'number' ? total : 0;
 
-      // @ts-expect-error incorrect search response type
-      obj.totalCount = body.hits.total.value;
-
-      // @ts-expect-error TODO fix search response types
-      const docs: Annotations = get(body, ['hits', 'hits'], []).map((d: EsResult) => {
+      const docs = esqlRows(response).map((d) => {
         // get the original source document and the document id, we need it
         // to identify the annotation when editing/deleting it.
         // if original `event` is undefined then substitute with 'user` by default
         // since annotation was probably generated by user on the UI
-        const source = omit(d._source, 'project_routing');
+        const source = omit(d._source as Annotation, 'project_routing');
         return {
           ...source,
           event: source.event ?? ANNOTATION_EVENT_USER,

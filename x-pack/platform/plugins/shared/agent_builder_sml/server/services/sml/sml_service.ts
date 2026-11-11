@@ -6,7 +6,8 @@
  */
 
 import { errors } from '@elastic/elasticsearch';
-import type { FieldValue } from '@elastic/elasticsearch/lib/api/types';
+import type { EsqlQueryRequest, FieldValue } from '@elastic/elasticsearch/lib/api/types';
+import { esql as esqlComposer } from '@elastic/esql';
 import type { IScopedClusterClient } from '@kbn/core-elasticsearch-server';
 import type { Logger } from '@kbn/logging';
 import type { KibanaRequest } from '@kbn/core-http-server';
@@ -1212,24 +1213,30 @@ const getDocumentsByIds = async ({
   if (ids.length === 0) return docMap;
 
   try {
-    const response = await esClient.asInternalUser.search<SmlDocument>({
-      index: smlIndexName,
-      size: ids.length,
-      allow_no_indices: true,
-      ignore_unavailable: true,
-      query: {
-        bool: {
-          filter: [{ terms: { id: ids } }, buildVisibilityFilter({ spaceId })],
-        },
-      },
-    });
+    const { query, params } = esqlComposer.from([smlIndexName], ['_source']).pipe`WHERE id IN (${{
+      ids,
+    }})`
+      .keep('_source')
+      .limit(ids.length)
+      .toRequest();
+    const response = (await esClient.asInternalUser.esql.query({
+      query,
+      ...(params ? { params } : {}),
+      // Space scoping and visibility stay a pushed-down Query DSL filter (nested fields).
+      filter: buildVisibilityFilter({ spaceId }),
+    } as unknown as EsqlQueryRequest)) as unknown as {
+      columns: Array<{ name: string }>;
+      values: unknown[][];
+    };
 
-    for (const { _source: doc } of response.hits.hits) {
+    const sourceColumn = response.columns.findIndex((column) => column.name === '_source');
+    for (const row of response.values) {
+      const doc = row[sourceColumn] as SmlDocument | null | undefined;
       if (!doc) continue;
       docMap.set(doc.id, doc);
     }
   } catch (error) {
-    if (!isNotFoundError(error)) {
+    if (!isNotFoundError(error) && !isEsqlIndexMissingError(error)) {
       logger.warn(`SML getDocuments failed: ${(error as Error).message}`);
     }
   }

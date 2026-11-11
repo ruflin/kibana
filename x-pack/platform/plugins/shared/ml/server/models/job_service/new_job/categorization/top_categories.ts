@@ -5,84 +5,39 @@
  * 2.0.
  */
 
-import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 
 import type { CategoryId, Category } from '@kbn/ml-common-types/categories';
 import type { MlClient } from '../../../../lib/ml_client';
+import { ML_RESULTS_INDEX_PATTERN } from '../../../../../common/constants/index_patterns';
 
 export function topCategoriesProvider(mlClient: MlClient) {
   async function getTotalCategories(jobId: string): Promise<number> {
-    const body = await mlClient.anomalySearch<estypes.SearchResponse<any>>(
-      {
-        size: 0,
-        query: {
-          bool: {
-            filter: [
-              {
-                term: {
-                  job_id: jobId,
-                },
-              },
-              {
-                exists: {
-                  field: 'category_id',
-                },
-              },
-            ],
-          },
-        },
-      },
+    const rows = await mlClient.anomalyEsql(
+      esql.from([ML_RESULTS_INDEX_PATTERN]).pipe`WHERE job_id == ${{
+        jobId,
+      }} AND category_id IS NOT NULL`.pipe`STATS total = COUNT(*)`,
       [jobId]
     );
-    return typeof body.hits.total === 'number' ? body.hits.total : body.hits.total!.value;
+    const total = rows[0]?.total;
+    return typeof total === 'number' ? total : 0;
   }
 
   async function getTopCategoryCounts(jobId: string, numberOfCategories: number) {
-    const body = await mlClient.anomalySearch<estypes.SearchResponse<any>>(
-      {
-        size: 0,
-        query: {
-          bool: {
-            filter: [
-              {
-                term: {
-                  job_id: jobId,
-                },
-              },
-              {
-                term: {
-                  result_type: 'model_plot',
-                },
-              },
-              {
-                term: {
-                  by_field_name: 'mlcategory',
-                },
-              },
-            ],
-          },
-        },
-        aggs: {
-          cat_count: {
-            terms: {
-              field: 'by_field_value',
-              size: numberOfCategories,
-            },
-          },
-        },
-      },
+    const rows = await mlClient.anomalyEsql(
+      esql.from([ML_RESULTS_INDEX_PATTERN]).pipe`WHERE job_id == ${{
+        jobId,
+      }} AND result_type == "model_plot" AND by_field_name == "mlcategory" AND by_field_value IS NOT NULL`
+        .pipe`STATS doc_count = COUNT(*) BY by_field_value`
+        .pipe`SORT doc_count DESC, by_field_value ASC`.limit(numberOfCategories),
       [jobId]
     );
 
-    const catCounts: Array<{
-      id: CategoryId;
-      count: number;
-      // @ts-expect-error incorrect search response type
-    }> = body.aggregations?.cat_count?.buckets.map((c: any) => ({
-      id: c.key,
-      count: c.doc_count,
+    const catCounts = rows.map((row) => ({
+      id: row.by_field_value as CategoryId,
+      count: row.doc_count as number,
     }));
-    return catCounts || [];
+    return catCounts;
   }
 
   async function getCategories(
@@ -90,38 +45,19 @@ export function topCategoriesProvider(mlClient: MlClient) {
     catIds: CategoryId[],
     size: number
   ): Promise<Category[]> {
-    const categoryFilter = catIds.length
-      ? {
-          terms: {
-            category_id: catIds,
-          },
-        }
-      : {
-          exists: {
-            field: 'category_id',
-          },
-        };
-    const body = await mlClient.anomalySearch<any>(
-      {
-        size,
-        query: {
-          bool: {
-            filter: [
-              {
-                term: {
-                  job_id: jobId,
-                },
-              },
-              categoryFilter,
-            ],
-          },
-        },
-      },
+    const ids = catIds.map(Number);
+    const query = esql.from([ML_RESULTS_INDEX_PATTERN], ['_source']);
+    const rows = await mlClient.anomalyEsql(
+      (catIds.length
+        ? query.pipe`WHERE job_id == ${{ jobId }} AND category_id IN (${{ ids }})`
+        : query.pipe`WHERE job_id == ${{ jobId }} AND category_id IS NOT NULL`
+      )
+        .keep('_source')
+        .limit(size),
       [jobId]
     );
 
-    // @ts-expect-error incorrect search response type
-    return body.hits.hits?.map((c: { _source: Category }) => c._source) || [];
+    return rows.map((row) => row._source as Category);
   }
 
   async function topCategories(jobId: string, numberOfCategories: number) {

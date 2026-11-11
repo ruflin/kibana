@@ -5,7 +5,11 @@
  * 2.0.
  */
 
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import type { ComposerQuery } from '@elastic/esql';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger, SavedObjectsClientContract } from '@kbn/core/server';
+import { isEsqlUnknownIndexError } from '@kbn/storage-adapter';
 import { chatSystemIndex } from '@kbn/agent-builder-server';
 import { isIndexNotFoundError } from '../utils/is_index_not_found_error';
 import { skillIndexName } from '../services/skills/persisted/client/storage';
@@ -20,6 +24,24 @@ export interface UsageCounterData {
   count: number;
   domainId: string;
 }
+
+/** A missing index is a 404 `index_not_found_exception` in the Query DSL, a 400 `Unknown index` in ES|QL. */
+const isMissingIndexError = (error: unknown): boolean =>
+  isIndexNotFoundError(error) || isEsqlUnknownIndexError(error);
+
+/** The rows of an ES|QL response as objects keyed by column name. */
+const runEsqlRows = async (
+  esClient: ElasticsearchClient,
+  query: ComposerQuery
+): Promise<Array<Record<string, unknown>>> => {
+  const response = (await esClient.esql.query(
+    query.toRequest() as unknown as EsqlQueryRequest
+  )) as unknown as { columns: Array<{ name: string }>; values: unknown[][] };
+  const names = response.columns.map((column) => column.name);
+  return response.values.map((row) =>
+    Object.fromEntries(names.map((name, index) => [name, row[index]]))
+  );
+};
 
 /**
  * Query utilities for telemetry data collection
@@ -112,37 +134,18 @@ export class QueryUtils {
   async getCustomToolsMetrics() {
     try {
       const toolIndexName = chatSystemIndex('tools');
-      const response = await this.esClient.search({
-        index: toolIndexName,
-        size: 0,
-        aggs: {
-          by_type: {
-            terms: {
-              field: 'type',
-              size: 100,
-            },
-          },
-        },
-        query: {
-          bool: {
-            must_not: [
-              {
-                term: {
-                  type: 'builtin',
-                },
-              },
-            ],
-          },
-        },
-      });
+      const rows = await runEsqlRows(
+        this.esClient,
+        esql.from([toolIndexName]).pipe`WHERE type != "builtin"`
+          .pipe`STATS count = COUNT(*) BY type`.limit(100)
+      );
 
-      const buckets = (response.aggregations?.by_type as any)?.buckets || [];
-      const byType = buckets.map((bucket: any) => ({
-        type: bucket.key as string,
-        count: bucket.doc_count as number,
+      const byType = rows.map((row) => ({
+        type: row.type as string,
+        count: row.count as number,
       }));
 
-      const total = buckets.reduce((sum: number, bucket: any) => sum + bucket.doc_count, 0);
+      const total = byType.reduce((sum, { count }) => sum + count, 0);
 
       return {
         total,
@@ -150,7 +153,7 @@ export class QueryUtils {
       };
     } catch (error) {
       // Suppress warning for missing index - expected when no tools have been created yet
-      if (!isIndexNotFoundError(error)) {
+      if (!isMissingIndexError(error)) {
         this.logger.warn(`Failed to fetch custom tools counts: ${error.message}`);
       }
       return {
@@ -166,14 +169,15 @@ export class QueryUtils {
   async getCustomAgentsMetrics() {
     try {
       const agentsIndexName = chatSystemIndex('agents');
-      const response = await this.esClient.count({
-        index: agentsIndexName,
-      });
+      const rows = await runEsqlRows(
+        this.esClient,
+        esql.from([agentsIndexName]).pipe`STATS count = COUNT(*)`
+      );
 
-      return response.count || 0;
+      return (rows[0]?.count as number | undefined) || 0;
     } catch (error) {
       // Suppress warning for missing index - expected when no agents have been created yet
-      if (!isIndexNotFoundError(error)) {
+      if (!isMissingIndexError(error)) {
         this.logger.warn(`Failed to fetch custom agents count: ${error.message}`);
       }
       return 0;
@@ -191,32 +195,15 @@ export class QueryUtils {
     plugin: number;
   }> {
     try {
-      const response = await this.esClient.search({
-        index: skillIndexName,
-        size: 0,
-        track_total_hits: true,
-        aggs: {
-          custom: {
-            filter: {
-              bool: {
-                must_not: { exists: { field: 'plugin_id' } },
-              },
-            },
-          },
-          plugin: {
-            filter: {
-              exists: { field: 'plugin_id' },
-            },
-          },
-        },
-      });
+      const [counts] = await runEsqlRows(
+        this.esClient,
+        esql.from([skillIndexName])
+          .pipe`STATS total = COUNT(*), custom = COUNT(*) WHERE plugin_id IS NULL, plugin = COUNT(*) WHERE plugin_id IS NOT NULL`
+      );
 
-      const total =
-        typeof response.hits.total === 'number'
-          ? response.hits.total
-          : response.hits.total?.value || 0;
-      const customCount = (response.aggregations?.custom as { doc_count?: number })?.doc_count ?? 0;
-      const pluginCount = (response.aggregations?.plugin as { doc_count?: number })?.doc_count ?? 0;
+      const total = (counts?.total as number | undefined) ?? 0;
+      const customCount = (counts?.custom as number | undefined) ?? 0;
+      const pluginCount = (counts?.plugin as number | undefined) ?? 0;
 
       return {
         total,
@@ -224,7 +211,7 @@ export class QueryUtils {
         plugin: pluginCount,
       };
     } catch (error) {
-      if (!isIndexNotFoundError(error)) {
+      if (!isMissingIndexError(error)) {
         this.logger.warn(`Failed to fetch skills metrics: ${(error as Error).message}`);
       }
       return { total: 0, custom: 0, plugin: 0 };
@@ -236,13 +223,14 @@ export class QueryUtils {
    */
   async getPluginsCount(): Promise<number> {
     try {
-      const response = await this.esClient.count({
-        index: pluginIndexName,
-      });
+      const rows = await runEsqlRows(
+        this.esClient,
+        esql.from([pluginIndexName]).pipe`STATS count = COUNT(*)`
+      );
 
-      return response.count || 0;
+      return (rows[0]?.count as number | undefined) || 0;
     } catch (error) {
-      if (!isIndexNotFoundError(error)) {
+      if (!isMissingIndexError(error)) {
         this.logger.warn(`Failed to fetch plugins count: ${(error as Error).message}`);
       }
       return 0;

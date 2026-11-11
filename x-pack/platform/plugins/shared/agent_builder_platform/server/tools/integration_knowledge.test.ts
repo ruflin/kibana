@@ -18,6 +18,7 @@ import type { AgentBuilderPlatformPluginStart, PluginStartDependencies } from '.
 describe('integrationKnowledgeTool', () => {
   let mockCoreSetup: CoreSetup<PluginStartDependencies, AgentBuilderPlatformPluginStart>;
   let mockSearch: jest.Mock;
+  let mockEsqlQuery: jest.Mock;
   let mockLogger: ReturnType<typeof loggingSystemMock.createLogger>;
   let mockRequest: ReturnType<typeof httpServerMock.createKibanaRequest>;
 
@@ -36,6 +37,7 @@ describe('integrationKnowledgeTool', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockEsqlQuery = jest.fn();
 
     mockCoreSetup = coreMock.createSetup() as unknown as CoreSetup<
       PluginStartDependencies,
@@ -350,7 +352,7 @@ describe('integrationKnowledgeTool', () => {
     const setupMockCoreStartServices = () => {
       const mockCoreStart = coreMock.createStart();
       Object.assign(mockCoreStart.elasticsearch.client, {
-        asInternalUser: { search: mockSearch },
+        asInternalUser: { search: mockSearch, esql: { query: mockEsqlQuery } },
         asCurrentUser: { search: mockSearch },
       });
       (mockCoreSetup.getStartServices as jest.Mock).mockResolvedValue([mockCoreStart, {}, {}]);
@@ -358,21 +360,20 @@ describe('integrationKnowledgeTool', () => {
 
     it('returns available when index exists', async () => {
       setupMockCoreStartServices();
-      mockSearch.mockResolvedValue({});
+      mockEsqlQuery.mockResolvedValue({ columns: [], values: [] });
 
       const tool = integrationKnowledgeTool(mockCoreSetup);
       const availability = await tool.availability!.handler!(createAvailabilityContext());
 
       expect(availability.status).toBe('available');
-      expect(mockSearch).toHaveBeenCalledWith({
-        index: '.integration_knowledge',
-        size: 0,
+      expect(mockEsqlQuery).toHaveBeenCalledWith({
+        query: 'FROM .integration_knowledge | LIMIT 0',
       });
     });
 
     it('returns unavailable when index does not exist', async () => {
       setupMockCoreStartServices();
-      mockSearch.mockRejectedValue(new Error('index_not_found_exception'));
+      mockEsqlQuery.mockRejectedValue(new Error('Unknown index [.integration_knowledge]'));
 
       const tool = integrationKnowledgeTool(mockCoreSetup);
       const availability = await tool.availability!.handler!(createAvailabilityContext());

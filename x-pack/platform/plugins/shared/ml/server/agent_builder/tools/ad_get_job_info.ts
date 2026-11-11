@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { z } from '@kbn/zod/v4';
 import { ToolType } from '@kbn/agent-builder-common';
 import { ToolResultType } from '@kbn/agent-builder-common/tools/tool_result';
@@ -16,6 +17,7 @@ import type { MlLicense } from '../../../common/license';
 import type { MlFeatures } from '../../../common/constants/app';
 import type { MlAuthorizationService } from '../../lib/capabilities/check_capabilities';
 import { hasMlCapabilitiesProvider } from '../../lib/capabilities/check_capabilities';
+import { esqlRows, runEsql } from '../../lib/esql/esql_read';
 import type { BuildMlClientFn } from '../ml_client_factory';
 import { AD_GET_JOB_INFO_TOOL_ID } from './tool_ids';
 
@@ -144,14 +146,22 @@ export const createAdGetJobInfoTool = (
               results: [createErrorResult('job_id is required for get_job_messages')],
             };
           }
-          const messagesResponse = await esClient.asInternalUser.search({
-            index: '.ml-notifications-*',
-            query: { term: { job_id: jobId } },
-            sort: [{ timestamp: { order: 'desc' } }],
-            size: 50,
+          const messagesResponse = await runEsql({
+            esClient: esClient.asInternalUser,
+            query: esql.from(['.ml-notifications-*'], ['_id', '_index', '_source'])
+              .pipe`WHERE job_id == ${{ jobId }}`.pipe`SORT timestamp DESC NULLS LAST`
+              .keep('_id', '_index', '_source')
+              .limit(50),
+            emptyOnUnknownIndex: true,
           });
+          // Same hit shape the search returned: the document with its index and ID.
+          const hits = esqlRows(messagesResponse).map(({ _id, _index, _source }) => ({
+            _index,
+            _id,
+            _source,
+          }));
           return {
-            results: [{ type: ToolResultType.other, data: messagesResponse.hits.hits }],
+            results: [{ type: ToolResultType.other, data: hits }],
           };
         }
 
