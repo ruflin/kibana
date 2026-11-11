@@ -1,0 +1,4 @@
+# Optional local backends. The harness runs majority + heuristic with stdlib + numpy.
+# numpy>=1.26
+# sentence-transformers>=3.0  # embedding + MiniLM reranker
+# laya>=0.1                   # self-hosted System One clone (needs GPU or patience)
