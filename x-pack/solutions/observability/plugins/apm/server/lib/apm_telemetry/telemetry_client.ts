@@ -6,9 +6,11 @@
  */
 
 import type { estypes } from '@elastic/elasticsearch';
+import type { ComposerQuery } from '@elastic/esql';
 import type { CoreSetup } from '@kbn/core/server';
-import type { ESSearchRequest, ESSearchResponse } from '@kbn/es-types';
+import type { ESQLSearchResponse, ESSearchRequest, ESSearchResponse } from '@kbn/es-types';
 import { unwrapEsResponse } from '@kbn/observability-plugin/server';
+import { runEsqlRead } from '../helpers/esql_read';
 
 interface RequiredSearchParams {
   index: string | string[];
@@ -38,6 +40,15 @@ export interface TelemetryClient {
     params: TSearchRequest
   ): Promise<ESSearchResponse<unknown, TSearchRequest>>;
 
+  /**
+   * Runs a composed ES|QL query. Resolves to `undefined` when no index matches, where the Query
+   * DSL returned no hits. ES|QL has no request timeout: the abort signal is the only bound.
+   */
+  esqlRead(
+    query: ComposerQuery,
+    filter?: estypes.QueryDslQueryContainer
+  ): Promise<ESQLSearchResponse | undefined>;
+
   indicesStats(
     params: estypes.IndicesStatsRequest
     // promise returned by client has an abort property
@@ -62,6 +73,8 @@ export async function getTelemetryClient({
   return {
     search: (params) =>
       unwrapEsResponse(esClient.asInternalUser.search(params, { meta: true, signal })) as any,
+    esqlRead: (query, filter) =>
+      runEsqlRead({ esClient: esClient.asInternalUser, query, filter, signal }),
     indicesStats: (params) =>
       unwrapEsResponse(esClient.asInternalUser.indices.stats(params, { meta: true, signal })),
     transportRequest: (params) =>

@@ -5,6 +5,7 @@
  * 2.0.
  */
 import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import { getKqlFieldNamesFromExpression } from '@kbn/es-query';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import { createHash } from 'crypto';
@@ -20,18 +21,14 @@ import {
   OPEN_TELEMETRY_BASE_AGENT_NAMES,
   RUM_AGENT_NAMES,
 } from '@kbn/elastic-agent-utils/src/agent_names';
-import { accessKnownApmEventFields } from '@kbn/apm-data-access-plugin/server/utils';
 import {
   AGENT_ACTIVATION_METHOD,
   AGENT_NAME,
   AGENT_VERSION,
-  AT_TIMESTAMP,
-  CLIENT_GEO_COUNTRY_ISO_CODE,
   CLOUD_AVAILABILITY_ZONE,
   CLOUD_PROVIDER,
   CLOUD_REGION,
   CONTAINER_ID,
-  ERROR_GROUP_ID,
   FAAS_TRIGGER_TYPE,
   HOST_NAME,
   HOST_OS_PLATFORM,
@@ -40,7 +37,6 @@ import {
   METRICSET_NAME,
   OBSERVER_HOSTNAME,
   OBSERVER_VERSION,
-  PARENT_ID,
   PROCESSOR_EVENT,
   SERVICE_ENVIRONMENT,
   SERVICE_FRAMEWORK_NAME,
@@ -52,19 +48,16 @@ import {
   SERVICE_RUNTIME_NAME,
   SERVICE_RUNTIME_VERSION,
   SERVICE_VERSION,
-  SPAN_DESTINATION_SERVICE_RESOURCE,
   TRACE_ID,
   TRANSACTION_NAME,
   TRANSACTION_RESULT,
   TRANSACTION_TYPE,
-  USER_AGENT_ORIGINAL,
 } from '../../../../common/es_fields/apm';
 import type { SavedServiceGroup } from '../../../../common/service_groups';
 import {
   APM_SERVICE_GROUP_SAVED_OBJECT_TYPE,
   MAX_NUMBER_OF_SERVICE_GROUPS,
 } from '../../../../common/service_groups';
-import { asMutableArray } from '../../../../common/utils/as_mutable_array';
 import type { AgentName } from '../../../../typings/es_schemas/ui/fields/agent';
 import type {
   APMDataTelemetry,
@@ -76,6 +69,7 @@ import type {
   MetricSupportingRollUp,
 } from '../types';
 import type { IndicesStatsResponse, TelemetryClient } from '../telemetry_client';
+import { esqlRows } from '../../helpers/esql_read';
 import { RollupInterval } from '../../../../common/rollup';
 import type { SavedApmCustomDashboard } from '../../../../common/custom_dashboards';
 import { APM_CUSTOM_DASHBOARDS_SAVED_OBJECT_TYPE } from '../../../../common/custom_dashboards';
@@ -91,6 +85,51 @@ const AGENT_NAMES_WITHOUT_OTEL = without(AGENT_NAMES, ...OPEN_TELEMETRY_AGENT_NA
 type TimeRange = (typeof TIME_RANGES)[number];
 
 const range1d = { range: { '@timestamp': { gte: 'now-1d' } } };
+
+/**
+ * The APM index patterns, which may be comma separated lists. Fields that are not mapped in any
+ * matching index read as null, as they did in the Query DSL.
+ */
+const fromApmIndices = (index: string | string[]) =>
+  esql
+    .from(
+      [index]
+        .flat()
+        .flatMap((pattern) => pattern.split(','))
+        .filter(Boolean)
+    )
+    .addSetCommand('unmapped_fields', 'nullify');
+
+/** The first row of a response as an object, or an empty object when there is none. */
+const firstRow = (response: Parameters<typeof esqlRows>[0]): Record<string, unknown> =>
+  esqlRows(response)[0] ?? {};
+
+/** The number of a stats value, 0 when absent. */
+const asNumber = (value: unknown): number => (typeof value === 'number' ? value : 0);
+
+/** Distinct non-null values of a field, most frequent first (ties by value), like a `terms` aggregation. */
+async function getTopValues({
+  telemetryClient,
+  index,
+  field,
+  size,
+  filter,
+}: {
+  telemetryClient: TelemetryClient;
+  index: string | string[];
+  field: string;
+  size: number;
+  filter?: estypes.QueryDslQueryContainer;
+}): Promise<string[]> {
+  const response = await telemetryClient.esqlRead(
+    fromApmIndices(index).pipe`WHERE ${esql.col(field)} IS NOT NULL`
+      .pipe`STATS doc_count = COUNT(*) BY ${esql.col(field)}`.pipe`SORT doc_count DESC, ${esql.col(
+      field
+    )} ASC`.pipe`LIMIT ${{ size }}`,
+    filter
+  );
+  return esqlRows(response).map((row) => String(row[field]));
+}
 const timeout = '5m';
 
 interface TelemetryTask {
@@ -188,30 +227,18 @@ export const tasks: TelemetryTask[] = [
       }
 
       // fixed date range for reliable results
-      const lastTransaction = (
-        await telemetryClient.search({
-          index: indices.transaction,
-          timeout,
-          query: {
-            bool: {
-              filter: [{ term: { [PROCESSOR_EVENT]: ProcessorEvent.transaction } }],
-            },
-          },
-          size: 1,
-          track_total_hits: false,
-          sort: {
-            [AT_TIMESTAMP]: 'desc' as const,
-          },
-          fields: [AT_TIMESTAMP],
-        })
-      ).hits.hits[0];
+      const lastTransaction = firstRow(
+        await telemetryClient.esqlRead(
+          fromApmIndices(indices.transaction).pipe`WHERE processor.event == "transaction"`
+            .pipe`STATS last_timestamp = MAX(@timestamp)`
+        )
+      ).last_timestamp;
 
-      if (!lastTransaction) {
+      if (typeof lastTransaction !== 'string') {
         return {};
       }
 
-      const end =
-        new Date(lastTransaction.fields[AT_TIMESTAMP]![0] as string).getTime() - 5 * 60 * 1000;
+      const end = new Date(lastTransaction).getTime() - 5 * 60 * 1000;
 
       const start = end - 60 * 1000;
 
@@ -285,54 +312,21 @@ export const tasks: TelemetryTask[] = [
   {
     name: 'cloud',
     executor: async ({ indices, telemetryClient }) => {
-      function getBucketKeys({
-        buckets,
-      }: {
-        buckets: Array<{
-          doc_count: number;
-          key: string | number;
-        }>;
-      }) {
-        return buckets.map((bucket) => bucket.key as string);
-      }
-
       const az = 'availability_zone';
       const region = 'region';
       const provider = 'provider';
 
-      const response = await telemetryClient.search({
-        index: [indices.error, indices.metric, indices.span, indices.transaction],
-        track_total_hits: false,
-        size: 0,
-        timeout,
-        aggs: {
-          [az]: {
-            terms: {
-              field: CLOUD_AVAILABILITY_ZONE,
-            },
-          },
-          [provider]: {
-            terms: {
-              field: CLOUD_PROVIDER,
-            },
-          },
-          [region]: {
-            terms: {
-              field: CLOUD_REGION,
-            },
-          },
-        },
-      });
+      const index = [indices.error, indices.metric, indices.span, indices.transaction];
+      const [azValues, providerValues, regionValues] = await Promise.all(
+        [CLOUD_AVAILABILITY_ZONE, CLOUD_PROVIDER, CLOUD_REGION].map((field) =>
+          getTopValues({ telemetryClient, index, field, size: 10 })
+        )
+      );
 
-      const { aggregations } = response;
-
-      if (!aggregations) {
-        return { cloud: { [az]: [], [provider]: [], [region]: [] } };
-      }
       const cloud = {
-        [az]: getBucketKeys(aggregations[az]),
-        [provider]: getBucketKeys(aggregations[provider]),
-        [region]: getBucketKeys(aggregations[region]),
+        [az]: azValues,
+        [provider]: providerValues,
+        [region]: regionValues,
       };
       return { cloud };
     },
@@ -340,98 +334,43 @@ export const tasks: TelemetryTask[] = [
   {
     name: 'host',
     executor: async ({ indices, telemetryClient }) => {
-      function getBucketKeys({
-        buckets,
-      }: {
-        buckets: Array<{
-          doc_count: number;
-          key: string | number;
-        }>;
-      }) {
-        return buckets.map((bucket) => bucket.key as string);
-      }
-
-      const response = await telemetryClient.search({
+      const platform = await getTopValues({
+        telemetryClient,
         index: [indices.error, indices.metric, indices.span, indices.transaction],
-        track_total_hits: false,
-        size: 0,
-        timeout,
-        aggs: {
-          platform: {
-            terms: {
-              field: HOST_OS_PLATFORM,
-            },
-          },
-        },
+        field: HOST_OS_PLATFORM,
+        size: 10,
       });
 
-      const { aggregations } = response;
-
-      if (!aggregations) {
-        return { host: { os: { platform: [] } } };
-      }
-      const host = {
-        os: {
-          platform: getBucketKeys(aggregations.platform),
-        },
-      };
+      const host = { os: { platform } };
       return { host };
     },
   },
   {
     name: 'environments',
     executor: async ({ indices, telemetryClient }) => {
-      const response = await telemetryClient.search({
-        index: [indices.transaction],
-        track_total_hits: false,
-        size: 0,
-        timeout,
-        query: {
-          bool: {
-            filter: [range1d],
-          },
-        },
-        aggs: {
-          environments: {
-            terms: {
-              field: SERVICE_ENVIRONMENT,
-              size: 5,
-            },
-          },
-          service_environments: {
-            composite: {
-              size: 1000,
-              sources: asMutableArray([
-                {
-                  [SERVICE_ENVIRONMENT]: {
-                    terms: {
-                      field: SERVICE_ENVIRONMENT,
-                      missing_bucket: true,
-                    },
-                  },
-                },
-                {
-                  [SERVICE_NAME]: {
-                    terms: {
-                      field: SERVICE_NAME,
-                    },
-                  },
-                },
-              ] as const),
-            },
-          },
-        },
-      });
+      const [topEnvironments, serviceEnvironmentsResponse] = await Promise.all([
+        getTopValues({
+          telemetryClient,
+          index: [indices.transaction],
+          field: SERVICE_ENVIRONMENT,
+          size: 5,
+          filter: range1d,
+        }),
+        // Same bounds as the composite aggregation: the first 1000 (environment, service) pairs,
+        // where a missing environment is a pair of its own and a missing service is not.
+        telemetryClient.esqlRead(
+          fromApmIndices([indices.transaction])
+            .pipe`WHERE @timestamp >= NOW() - 1 day AND service.name IS NOT NULL`
+            .pipe`STATS doc_count = COUNT(*) BY service.environment, service.name`
+            .pipe`SORT service.environment ASC NULLS FIRST, service.name ASC`.pipe`LIMIT 1000`
+        ),
+      ]);
 
-      const topEnvironments =
-        response.aggregations?.environments.buckets.map((bucket) => bucket.key) ?? [];
       const serviceEnvironments: Record<string, Array<string | null>> = {};
 
-      const buckets = response.aggregations?.service_environments.buckets ?? [];
-
-      buckets.forEach((bucket) => {
-        const serviceName = bucket.key['service.name'];
-        const environment = bucket.key['service.environment'] as string | null;
+      esqlRows(serviceEnvironmentsResponse).forEach((row) => {
+        const serviceName = String(row[SERVICE_NAME]);
+        const environment = (row[SERVICE_ENVIRONMENT] as string | null) ?? null;
 
         const environments = serviceEnvironments[serviceName] ?? [];
 
@@ -482,57 +421,39 @@ export const tasks: TelemetryTask[] = [
         return prevJob.then(async (data) => {
           const { processorEvent, timeRange } = current;
 
-          const totalHitsResponse = await telemetryClient.search({
-            index: indicesByProcessorEvent[processorEvent],
-            size: 0,
-            track_total_hits: true,
-            timeout,
-            query: {
-              bool: {
-                filter: [
-                  { term: { [PROCESSOR_EVENT]: processorEvent } },
-                  ...(timeRange === '1d' ? [range1d] : []),
-                ],
-              },
-            },
-          });
+          const index = indicesByProcessorEvent[processorEvent];
+          const totalHitsResponse = await telemetryClient.esqlRead(
+            timeRange === '1d'
+              ? fromApmIndices(index).pipe`WHERE processor.event == ${{
+                  processorEvent,
+                }} AND @timestamp >= NOW() - 1 day`.pipe`STATS total = COUNT(*)`
+              : fromApmIndices(index).pipe`WHERE processor.event == ${{ processorEvent }}`
+                  .pipe`STATS total = COUNT(*)`
+          );
 
-          const retainmentResponse =
+          const oldestTimestamp =
             timeRange === 'all'
-              ? await telemetryClient.search({
-                  index: indicesByProcessorEvent[processorEvent],
-                  size: 10,
-                  track_total_hits: false,
-                  timeout,
-                  query: {
-                    bool: {
-                      filter: [{ term: { [PROCESSOR_EVENT]: processorEvent } }],
-                    },
-                  },
-                  sort: {
-                    [AT_TIMESTAMP]: 'asc',
-                  },
-                  fields: [AT_TIMESTAMP],
-                })
-              : null;
+              ? firstRow(
+                  await telemetryClient.esqlRead(
+                    fromApmIndices(index).pipe`WHERE processor.event == ${{ processorEvent }}`
+                      .pipe`STATS oldest = MIN(@timestamp)`
+                  )
+                ).oldest
+              : undefined;
 
-          const event = retainmentResponse?.hits.hits[0]?.fields as
-            | {
-                [AT_TIMESTAMP]: number[];
-              }
-            | undefined;
+          const event = typeof oldestTimestamp === 'string' ? oldestTimestamp : undefined;
 
           return merge({}, data, {
             counts: {
               [processorEvent]: {
-                [timeRange]: totalHitsResponse.hits.total.value,
+                [timeRange]: asNumber(firstRow(totalHitsResponse).total),
               },
             },
             ...(event
               ? {
                   retainment: {
                     [processorEvent]: {
-                      ms: new Date().getTime() - new Date(event[AT_TIMESTAMP][0]).getTime(),
+                      ms: new Date().getTime() - new Date(event).getTime(),
                     },
                   },
                 }
@@ -643,33 +564,13 @@ export const tasks: TelemetryTask[] = [
       const servicesPerAgentExcludingOtel = await AGENT_NAMES_WITHOUT_OTEL.reduce(
         (prevJob, agentName) => {
           return prevJob.then(async (data) => {
-            const response = await telemetryClient.search({
-              index: [indices.error, indices.span, indices.metric, indices.transaction],
-              size: 0,
-              track_total_hits: false,
-              timeout,
-              query: {
-                bool: {
-                  filter: [
-                    {
-                      term: {
-                        [AGENT_NAME]: agentName,
-                      },
-                    },
-                    range1d,
-                  ],
-                },
-              },
-              aggs: {
-                services: {
-                  cardinality: {
-                    field: SERVICE_NAME,
-                  },
-                },
-              },
-            });
+            const response = await telemetryClient.esqlRead(
+              fromApmIndices([indices.error, indices.span, indices.metric, indices.transaction])
+                .pipe`WHERE agent.name == ${{ agentName }} AND @timestamp >= NOW() - 1 day`
+                .pipe`STATS services = COUNT_DISTINCT(service.name)`
+            );
 
-            data[agentName] = response.aggregations?.services.value || 0;
+            data[agentName] = asNumber(firstRow(response).services);
             return data;
           });
         },
@@ -679,36 +580,17 @@ export const tasks: TelemetryTask[] = [
       const servicesPerOtelAgents = await OPEN_TELEMETRY_BASE_AGENT_NAMES.reduce(
         (prevJob, baseAgentName) => {
           return prevJob.then(async (accData) => {
-            const response = await telemetryClient.search({
-              index: [indices.error, indices.span, indices.metric, indices.transaction],
-              size: 0,
-              track_total_hits: false,
-              timeout,
-              query: {
-                bool: {
-                  filter: [{ prefix: { [AGENT_NAME]: baseAgentName } }, range1d],
-                },
-              },
-              aggs: {
-                agent_name: {
-                  terms: {
-                    field: AGENT_NAME,
-                    size: 1000,
-                  },
-                  aggs: {
-                    services: {
-                      cardinality: {
-                        field: SERVICE_NAME,
-                      },
-                    },
-                  },
-                },
-              },
-            });
+            const response = await telemetryClient.esqlRead(
+              fromApmIndices([indices.error, indices.span, indices.metric, indices.transaction])
+                .pipe`WHERE STARTS_WITH(agent.name, ${{
+                baseAgentName,
+              }}) AND @timestamp >= NOW() - 1 day`
+                .pipe`STATS services = COUNT_DISTINCT(service.name) BY agent.name`
+                .pipe`SORT services DESC, agent.name ASC`.pipe`LIMIT 1000`
+            );
             const aggregatedServices: Record<string, number> = {};
-            for (const bucket of response.aggregations?.agent_name.buckets ?? []) {
-              const fullAgentName = bucket.key as string;
-              aggregatedServices[fullAgentName] = bucket.services.value || 0;
+            for (const row of esqlRows(response)) {
+              aggregatedServices[String(row[AGENT_NAME])] = asNumber(row.services);
             }
             return {
               ...accData,
@@ -719,25 +601,11 @@ export const tasks: TelemetryTask[] = [
         Promise.resolve({} as Record<string, number>)
       );
 
-      const services = await telemetryClient.search({
-        index: [indices.error, indices.span, indices.metric, indices.transaction],
-        size: 0,
-        track_total_hits: true,
-        terminate_after: 1,
-        query: {
-          bool: {
-            filter: [
-              {
-                exists: {
-                  field: SERVICE_NAME,
-                },
-              },
-              range1d,
-            ],
-          },
-        },
-        timeout,
-      });
+      const services = await telemetryClient.esqlRead(
+        fromApmIndices([indices.error, indices.span, indices.metric, indices.transaction])
+          .pipe`WHERE service.name IS NOT NULL AND @timestamp >= NOW() - 1 day`
+          .pipe`KEEP service.name`.pipe`LIMIT 1`
+      );
 
       const servicesPerAgents: Record<AgentName, number> = {
         ...servicesPerAgentExcludingOtel,
@@ -746,7 +614,7 @@ export const tasks: TelemetryTask[] = [
 
       return {
         has_any_services_per_official_agent: sum(Object.values(servicesPerAgents)) > 0,
-        has_any_services: services?.hits?.total?.value > 0,
+        has_any_services: esqlRows(services).length > 0,
         services_per_agent: servicesPerAgents,
       };
     },
@@ -754,28 +622,15 @@ export const tasks: TelemetryTask[] = [
   {
     name: 'versions',
     executor: async ({ indices, telemetryClient }) => {
-      const response = await telemetryClient.search({
-        index: [indices.transaction, indices.span, indices.error],
-        terminate_after: 1,
-        query: {
-          exists: {
-            field: 'observer.version',
-          },
-        },
-        track_total_hits: false,
-        size: 1,
-        timeout,
-        sort: {
-          '@timestamp': 'desc',
-        },
-        fields: asMutableArray([OBSERVER_VERSION] as const),
-      });
+      const response = await telemetryClient.esqlRead(
+        fromApmIndices([indices.transaction, indices.span, indices.error])
+          .pipe`WHERE observer.version IS NOT NULL`.pipe`SORT @timestamp DESC NULLS LAST`
+          .pipe`LIMIT 1`.pipe`KEEP observer.version`
+      );
 
-      const fields = response.hits.hits[0]?.fields;
+      const observerVersion = [firstRow(response)[OBSERVER_VERSION]].flat()[0];
 
-      const observerVersion = fields && accessKnownApmEventFields(fields)[OBSERVER_VERSION];
-
-      if (!observerVersion) {
+      if (typeof observerVersion !== 'string') {
         return {};
       }
 
@@ -795,151 +650,69 @@ export const tasks: TelemetryTask[] = [
   {
     name: 'groupings',
     executor: async ({ indices, telemetryClient }) => {
-      const errorGroupsCount = (
-        await telemetryClient.search({
-          index: indices.error,
-          size: 0,
-          timeout,
-          track_total_hits: false,
-          query: {
-            bool: {
-              filter: [{ term: { [PROCESSOR_EVENT]: ProcessorEvent.error } }, range1d],
-            },
-          },
-          aggs: {
-            top_service: {
-              terms: {
-                field: SERVICE_NAME,
-                order: {
-                  error_groups: 'desc',
-                },
-                size: 1,
-              },
-              aggs: {
-                error_groups: {
-                  cardinality: {
-                    field: ERROR_GROUP_ID,
-                  },
-                },
-              },
-            },
-          },
-        })
-      ).aggregations?.top_service.buckets[0]?.error_groups.value;
+      // The service with the most groups only, as the `terms` aggregation of size 1 did.
+      const errorGroupsCount = firstRow(
+        await telemetryClient.esqlRead(
+          fromApmIndices(indices.error)
+            .pipe`WHERE processor.event == "error" AND @timestamp >= NOW() - 1 day`
+            .pipe`STATS error_groups = COUNT_DISTINCT(error.grouping_key) BY service.name`
+            .pipe`SORT error_groups DESC, service.name ASC`.pipe`LIMIT 1`
+        )
+      ).error_groups;
 
-      const transactionGroupsCount = (
-        await telemetryClient.search({
-          index: indices.transaction,
-          track_total_hits: false,
-          size: 0,
-          timeout,
-          query: {
-            bool: {
-              filter: [{ term: { [PROCESSOR_EVENT]: ProcessorEvent.transaction } }, range1d],
-            },
-          },
-          aggs: {
-            top_service: {
-              terms: {
-                field: SERVICE_NAME,
-                order: {
-                  transaction_groups: 'desc',
-                },
-                size: 1,
-              },
-              aggs: {
-                transaction_groups: {
-                  cardinality: {
-                    field: TRANSACTION_NAME,
-                  },
-                },
-              },
-            },
-          },
-        })
-      ).aggregations?.top_service.buckets[0]?.transaction_groups.value;
+      const transactionGroupsCount = firstRow(
+        await telemetryClient.esqlRead(
+          fromApmIndices(indices.transaction)
+            .pipe`WHERE processor.event == "transaction" AND @timestamp >= NOW() - 1 day`
+            .pipe`STATS transaction_groups = COUNT_DISTINCT(transaction.name) BY service.name`
+            .pipe`SORT transaction_groups DESC, service.name ASC`.pipe`LIMIT 1`
+        )
+      ).transaction_groups;
 
-      const tracesPerDayCount = (
-        await telemetryClient.search({
-          index: indices.transaction,
-          query: {
-            bool: {
-              filter: [{ term: { [PROCESSOR_EVENT]: ProcessorEvent.transaction } }, range1d],
-              must_not: {
-                exists: { field: PARENT_ID },
-              },
-            },
-          },
-          track_total_hits: true,
-          size: 0,
-          timeout,
-        })
-      ).hits.total.value;
+      const tracesPerDayCount = firstRow(
+        await telemetryClient.esqlRead(
+          fromApmIndices(indices.transaction)
+            .pipe`WHERE processor.event == "transaction" AND @timestamp >= NOW() - 1 day AND parent.id IS NULL`
+            .pipe`STATS traces = COUNT(*)`
+        )
+      ).traces;
 
-      const servicesAndEnvironmentsCount = await telemetryClient.search({
-        index: [indices.transaction, indices.error, indices.metric],
-        track_total_hits: false,
-        size: 0,
-        timeout,
-        query: {
-          bool: {
-            filter: [range1d],
-          },
-        },
-        aggs: {
-          service_name: {
-            cardinality: {
-              field: SERVICE_NAME,
-            },
-          },
-          service_environments: {
-            cardinality: {
-              field: SERVICE_ENVIRONMENT,
-            },
-          },
-        },
-      });
+      const servicesAndEnvironmentsCount = firstRow(
+        await telemetryClient.esqlRead(
+          fromApmIndices([indices.transaction, indices.error, indices.metric])
+            .pipe`WHERE @timestamp >= NOW() - 1 day`
+            .pipe`STATS service_name = COUNT_DISTINCT(service.name), service_environments = COUNT_DISTINCT(service.environment)`
+        )
+      );
 
-      const spanDestinationServiceResourceCount = (
-        await telemetryClient.search({
-          index: indices.transaction,
-          track_total_hits: false,
-          size: 0,
-          timeout,
-          query: {
-            bool: {
-              filter: [{ term: { [PROCESSOR_EVENT]: ProcessorEvent.span } }, range1d],
-            },
-          },
-          aggs: {
-            span_destination_service_resource: {
-              cardinality: {
-                field: SPAN_DESTINATION_SERVICE_RESOURCE,
-              },
-            },
-          },
-        })
-      ).aggregations?.span_destination_service_resource.value;
+      // Reads the transaction index for span documents, as before, so this is expected to be 0.
+      const spanDestinationServiceResourceCount = firstRow(
+        await telemetryClient.esqlRead(
+          fromApmIndices(indices.transaction)
+            .pipe`WHERE processor.event == "span" AND @timestamp >= NOW() - 1 day`
+            .pipe`STATS span_destination_service_resource = COUNT_DISTINCT(span.destination.service.resource)`
+        )
+      ).span_destination_service_resource;
 
       return {
         counts: {
           max_error_groups_per_service: {
-            '1d': errorGroupsCount || 0,
+            '1d': asNumber(errorGroupsCount),
           },
           max_transaction_groups_per_service: {
-            '1d': transactionGroupsCount || 0,
+            '1d': asNumber(transactionGroupsCount),
           },
           traces: {
-            '1d': tracesPerDayCount || 0,
+            '1d': asNumber(tracesPerDayCount),
           },
           services: {
-            '1d': servicesAndEnvironmentsCount.aggregations?.service_name.value || 0,
+            '1d': asNumber(servicesAndEnvironmentsCount.service_name),
           },
           environments: {
-            '1d': servicesAndEnvironmentsCount.aggregations?.service_environments.value || 0,
+            '1d': asNumber(servicesAndEnvironmentsCount.service_environments),
           },
           span_destination_service_resource: {
-            '1d': spanDestinationServiceResourceCount || 0,
+            '1d': asNumber(spanDestinationServiceResourceCount),
           },
         },
       };
@@ -1506,56 +1279,20 @@ export const tasks: TelemetryTask[] = [
   {
     name: 'cardinality',
     executor: async ({ indices, telemetryClient }) => {
-      const allAgentsCardinalityResponse = await telemetryClient.search({
-        index: [indices.transaction],
-        track_total_hits: false,
-        size: 0,
-        timeout,
-        query: {
-          bool: {
-            filter: [range1d],
-          },
-        },
-        aggs: {
-          [TRANSACTION_NAME]: {
-            cardinality: {
-              field: TRANSACTION_NAME,
-            },
-          },
-          [USER_AGENT_ORIGINAL]: {
-            cardinality: {
-              field: USER_AGENT_ORIGINAL,
-            },
-          },
-        },
-      });
+      const allAgentsCardinality = firstRow(
+        await telemetryClient.esqlRead(
+          fromApmIndices([indices.transaction]).pipe`WHERE @timestamp >= NOW() - 1 day`
+            .pipe`STATS transaction_name = COUNT_DISTINCT(transaction.name), user_agent_original = COUNT_DISTINCT(user_agent.original)`
+        )
+      );
 
-      const rumAgentCardinalityResponse = await telemetryClient.search({
-        index: [indices.transaction],
-        track_total_hits: false,
-        size: 0,
-        timeout,
-        query: {
-          bool: {
-            filter: [range1d, { terms: { [AGENT_NAME]: RUM_AGENT_NAMES } }],
-          },
-        },
-        aggs: {
-          [CLIENT_GEO_COUNTRY_ISO_CODE]: {
-            cardinality: { field: CLIENT_GEO_COUNTRY_ISO_CODE },
-          },
-          [TRANSACTION_NAME]: {
-            cardinality: {
-              field: TRANSACTION_NAME,
-            },
-          },
-          [USER_AGENT_ORIGINAL]: {
-            cardinality: {
-              field: USER_AGENT_ORIGINAL,
-            },
-          },
-        },
-      });
+      const rumAgentCardinality = firstRow(
+        await telemetryClient.esqlRead(
+          fromApmIndices([indices.transaction]).pipe`WHERE @timestamp >= NOW() - 1 day`
+            .pipe`STATS country_iso_code = COUNT_DISTINCT(client.geo.country_iso_code), transaction_name = COUNT_DISTINCT(transaction.name), user_agent_original = COUNT_DISTINCT(user_agent.original)`,
+          { terms: { [AGENT_NAME]: RUM_AGENT_NAMES } }
+        )
+      );
 
       return {
         cardinality: {
@@ -1563,8 +1300,7 @@ export const tasks: TelemetryTask[] = [
             geo: {
               country_iso_code: {
                 rum: {
-                  '1d': rumAgentCardinalityResponse.aggregations?.[CLIENT_GEO_COUNTRY_ISO_CODE]
-                    .value,
+                  '1d': asNumber(rumAgentCardinality.country_iso_code),
                 },
               },
             },
@@ -1572,20 +1308,20 @@ export const tasks: TelemetryTask[] = [
           transaction: {
             name: {
               all_agents: {
-                '1d': allAgentsCardinalityResponse.aggregations?.[TRANSACTION_NAME].value,
+                '1d': asNumber(allAgentsCardinality.transaction_name),
               },
               rum: {
-                '1d': rumAgentCardinalityResponse.aggregations?.[TRANSACTION_NAME].value,
+                '1d': asNumber(rumAgentCardinality.transaction_name),
               },
             },
           },
           user_agent: {
             original: {
               all_agents: {
-                '1d': allAgentsCardinalityResponse.aggregations?.[USER_AGENT_ORIGINAL].value,
+                '1d': asNumber(allAgentsCardinality.user_agent_original),
               },
               rum: {
-                '1d': rumAgentCardinalityResponse.aggregations?.[USER_AGENT_ORIGINAL].value,
+                '1d': asNumber(rumAgentCardinality.user_agent_original),
               },
             },
           },
