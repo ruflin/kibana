@@ -7,16 +7,19 @@
 
 import type {
   EqlSearchRequest,
+  EsqlQueryRequest,
   FieldCapsRequest,
   FieldCapsResponse,
+  QueryDslQueryContainer,
   SearchSearchRequestBody,
   MsearchMultisearchHeader,
   TermsEnumRequest,
   TermsEnumResponse,
 } from '@elastic/elasticsearch/lib/api/types';
 import type { SearchRequest as ESSearchRequest } from '@elastic/elasticsearch/lib/api/types';
+import type { ComposerQuery } from '@elastic/esql';
 import type { ElasticsearchClient, KibanaRequest } from '@kbn/core/server';
-import type { InferSearchResponseOf } from '@kbn/es-types';
+import type { ESQLSearchResponse, InferSearchResponseOf } from '@kbn/es-types';
 import { ProcessorEvent } from '@kbn/apm-types-shared';
 import { compact, omit } from 'lodash';
 import type { ValuesType } from 'utility-types';
@@ -31,6 +34,7 @@ import { cancelEsRequestOnAbort } from '../cancel_es_request_on_abort';
 import { callAsyncWithDebug } from '../call_async_with_debug';
 import type { ProcessorEventOfDocumentType } from '../document_type';
 import { getRequestBase, processorEventsToIndex } from './get_request_base';
+import { isEsqlUnknownIndexError } from './esql_unknown_index';
 import { getDataTierFilterCombined } from '../../tier_filter';
 
 export type APMEventESSearchRequest = Omit<ESSearchRequest, 'index'> & {
@@ -49,6 +53,15 @@ export type APMLogEventESSearchRequest = Omit<ESSearchRequest, 'index'> & {
 type APMEventWrapper<T> = Omit<T, 'index'> & {
   apm: { events: ProcessorEvent[] };
 };
+
+export interface APMEventEsqlRequest {
+  apm: { events: ProcessorEvent[] } | { sources: ApmDataSource[] };
+  /** Builds the query over the resolved index patterns, e.g. `(index) => esql.from(index, [...])`. */
+  query: (index: string[]) => ComposerQuery;
+  /** Query DSL filter for clauses that cannot be a plain `WHERE` (multi-valued or flattened fields). */
+  filter?: QueryDslQueryContainer;
+  skipProcessorEventFilter?: boolean;
+}
 
 export type APMEventTermsEnumRequest = APMEventWrapper<TermsEnumRequest>;
 type APMEventEqlSearchRequest = APMEventWrapper<EqlSearchRequest>;
@@ -353,6 +366,58 @@ export class APMEventClient {
       params: requestParams,
       cb: (opts) => this.esClient.termsEnum(requestParams, opts),
     });
+  }
+
+  /**
+   * ES|QL read over the indices of `params.apm`. Index resolution, the processor-event filter,
+   * tier exclusion and project routing match {@link search}; its Query DSL filters go to the
+   * request `filter`. Resolves to `undefined` when no index matches.
+   *
+   * Not carried over from `search`: `expand_wildcards: hidden` (ES|QL FROM skips hidden indices),
+   * `ignore_throttled` and `preference`.
+   */
+  async esql(
+    operationName: string,
+    params: APMEventEsqlRequest
+  ): Promise<ESQLSearchResponse | undefined> {
+    const { index, filters } = getRequestBase({
+      apm: params.apm,
+      indices: this.indices,
+      skipProcessorEventFilter: params.skipProcessorEventFilter,
+    });
+
+    if (this.excludedDataTiers.length > 0) {
+      filters.push(...excludeTiersQuery(this.excludedDataTiers));
+    }
+
+    const { filter: _composerFilter, ...composed } = params.query(index).toRequest();
+
+    const requestParams = {
+      ...(composed as unknown as EsqlQueryRequest),
+      filter: {
+        bool: {
+          filter: compact([...filters, params.filter]) as QueryDslQueryContainer[],
+        },
+      },
+      ...(this.projectRouting ? { project_routing: this.projectRouting } : {}),
+    };
+
+    try {
+      return await this.callAsyncWithDebug({
+        cb: (opts) =>
+          this.esClient.esql.query(requestParams, opts) as unknown as Promise<{
+            body: ESQLSearchResponse;
+          }>,
+        operationName,
+        params: requestParams,
+        requestType: 'esql',
+      });
+    } catch (error) {
+      if (isEsqlUnknownIndexError(error)) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   getIndicesFromProcessorEvent(processorEvent: ProcessorEvent) {
