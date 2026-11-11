@@ -5,6 +5,8 @@
  * 2.0.
  */
 
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import type { BoundInferenceClient } from '@kbn/inference-common';
 import { executeAsReasoningAgent } from '@kbn/inference-prompt-utils';
@@ -79,22 +81,22 @@ export async function partitionStream({
     // - There are simply no samples in the time range (no_samples)
     // We do this by checking if at least one doc exists without exclusions
     if (enabledChildConditions.length > 0) {
-      const countResponse = await esClient.count({
-        index: definition.name,
-        query: {
-          bool: {
-            filter: [
-              {
-                range: {
-                  '@timestamp': { gte: start, lte: end, format: 'epoch_millis' },
-                },
-              },
-            ],
+      const countQuery = esql.from([definition.name]).pipe`STATS count = COUNT(*)`;
+      const countResponse = (await esClient.esql.query({
+        ...countQuery.toRequest(),
+        // The epoch_millis range stays a request filter: it is a date `format`, not a `WHERE` predicate.
+        filter: {
+          range: {
+            '@timestamp': { gte: start, lte: end, format: 'epoch_millis' },
           },
         },
-      });
+      } as unknown as EsqlQueryRequest)) as unknown as {
+        columns: Array<{ name: string }>;
+        values: unknown[][];
+      };
 
-      const hasAnyDocsWithoutExclusion = countResponse.count > 0;
+      const countColumn = countResponse.columns.findIndex((column) => column.name === 'count');
+      const hasAnyDocsWithoutExclusion = Number(countResponse.values[0]?.[countColumn] ?? 0) > 0;
 
       return {
         partitions: [],

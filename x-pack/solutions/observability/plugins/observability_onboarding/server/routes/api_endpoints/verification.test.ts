@@ -51,7 +51,7 @@ describe('verification handler', () => {
   const { handler } = apiEndpointsRouteRepository[verificationEndpoint];
 
   const getApiKey = jest.fn();
-  const search = jest.fn();
+  const query = jest.fn();
 
   const createResources = ({
     apiKeyId = 'key-id',
@@ -66,7 +66,7 @@ describe('verification handler', () => {
           elasticsearch: {
             client: {
               asCurrentUser: { security: { getApiKey } },
-              asInternalUser: { search },
+              asInternalUser: { esql: { query } },
             },
           },
           featureFlags: {
@@ -84,7 +84,7 @@ describe('verification handler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     getApiKey.mockResolvedValue({ api_keys: [{ id: 'key-id' }] });
-    search.mockResolvedValue({ hits: { hits: [] } });
+    query.mockResolvedValue({ columns: [], values: [] });
   });
 
   it('returns 404 when the ingest receipts flag is off', async () => {
@@ -92,7 +92,7 @@ describe('verification handler', () => {
       output: { statusCode: 404 },
     });
     expect(getApiKey).not.toHaveBeenCalled();
-    expect(search).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
   });
 
   it('returns 404 without searching when the caller owns no active key with that id', async () => {
@@ -101,7 +101,7 @@ describe('verification handler', () => {
     await expect(handler(createResources())).rejects.toMatchObject({
       output: { statusCode: 404 },
     });
-    expect(search).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
   });
 
   it('returns 404 when Elasticsearch does not know the id at all', async () => {
@@ -110,14 +110,14 @@ describe('verification handler', () => {
     await expect(handler(createResources())).rejects.toMatchObject({
       output: { statusCode: 404 },
     });
-    expect(search).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
   });
 
   it('propagates ownership check failures other than a missing id', async () => {
     getApiKey.mockRejectedValue(createEsResponseError(503, { error: 'unavailable' }));
 
     await expect(handler(createResources())).rejects.toMatchObject({ statusCode: 503 });
-    expect(search).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
   });
 
   it('checks ownership with the current user before reading receipts', async () => {
@@ -127,10 +127,9 @@ describe('verification handler', () => {
   });
 
   it('reports a receipt with where it came in when the search matches', async () => {
-    search.mockResolvedValue({
-      hits: {
-        hits: [{ _id: 'receipt-id', _source: { ingestPath: '/v1/metrics', signal: 'metrics' } }],
-      },
+    query.mockResolvedValue({
+      columns: [{ name: 'ingestPath' }, { name: 'signal' }],
+      values: [['/v1/metrics', 'metrics']],
     });
 
     await expect(handler(createResources())).resolves.toEqual({
@@ -141,8 +140,9 @@ describe('verification handler', () => {
   });
 
   it('reports a receipt without a signal for endpoints that have none', async () => {
-    search.mockResolvedValue({
-      hits: { hits: [{ _id: 'receipt-id', _source: { ingestPath: '/_bulk' } }] },
+    query.mockResolvedValue({
+      columns: [{ name: 'ingestPath' }, { name: 'signal' }],
+      values: [['/_bulk', null]],
     });
 
     await expect(handler(createResources())).resolves.toEqual({
@@ -157,38 +157,37 @@ describe('verification handler', () => {
   });
 
   it('tolerates a missing receipts stream instead of failing the request', async () => {
-    await handler(createResources());
-
-    expect(search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        index: INGEST_RECEIPTS_DATA_STREAM,
-        ignore_unavailable: true,
+    query.mockRejectedValue(
+      new errors.ResponseError({
+        statusCode: 400,
+        body: {
+          error: {
+            type: 'verification_exception',
+            reason:
+              'Found 1 problem\nline 1:6: Unknown index [.kibana-observability-onboarding-receipts]',
+          },
+        },
+        headers: {},
+        warnings: [],
+        meta: {} as never,
       })
     );
+
+    await expect(handler(createResources())).resolves.toEqual({ received: false });
   });
 
   it('reads the newest receipt for the API key id within the recency window', async () => {
     await handler(createResources());
 
-    expect(search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        size: 1,
-        _source: ['ingestPath', 'signal'],
-        sort: [{ '@timestamp': { order: 'desc' } }],
-        query: {
-          bool: {
-            filter: [
-              { term: { apiKeyId: 'key-id' } },
-              { range: { '@timestamp': { gte: 'now-15m' } } },
-            ],
-          },
-        },
-      })
-    );
+    expect(query).toHaveBeenCalledWith({
+      query: `FROM ${INGEST_RECEIPTS_DATA_STREAM} | WHERE apiKeyId == ?apiKeyId | SORT @timestamp DESC NULLS LAST | KEEP ingestPath, signal | LIMIT 1`,
+      params: [{ apiKeyId: 'key-id' }],
+      filter: { range: { '@timestamp': { gte: 'now-15m' } } },
+    });
   });
 
   it('propagates search failures other than a missing stream', async () => {
-    search.mockRejectedValue(new Error('search_phase_execution_exception'));
+    query.mockRejectedValue(new Error('search_phase_execution_exception'));
 
     await expect(handler(createResources())).rejects.toThrow('search_phase_execution_exception');
   });

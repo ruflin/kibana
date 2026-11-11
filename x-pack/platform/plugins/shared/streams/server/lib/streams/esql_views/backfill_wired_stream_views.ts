@@ -16,6 +16,7 @@ import {
 } from '@kbn/streams-schema';
 import { processInDepthOrder } from '../helpers/process_in_depth_order';
 import { createStreamsStorageClient } from '../storage/streams_storage_client';
+import { readStreamDefinitions } from '../storage/read_stream_definitions';
 import { getEsqlView, upsertEsqlView } from './manage_esql_views';
 
 async function enabledRootStreamsMissingViews({
@@ -126,15 +127,9 @@ export async function backfillWiredStreamViews({
     return;
   }
 
-  const streamsSearchResponse = await storageClient.search({
-    size: 10000,
-    sort: [{ name: 'asc' }],
-    track_total_hits: false,
-  });
-
-  const wiredStreams = streamsSearchResponse.hits.hits
-    .map((hit) => hit._source)
-    .filter((def): def is Streams.WiredStream.Definition => Streams.WiredStream.Definition.is(def));
+  const wiredStreams = (await readStreamDefinitions(storageClient)).filter(
+    (def): def is Streams.WiredStream.Definition => Streams.WiredStream.Definition.is(def)
+  );
 
   if (wiredStreams.length === 0) {
     logger.debug('No wired streams found in storage, nothing to backfill.');

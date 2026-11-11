@@ -11,6 +11,7 @@ import type { Streams } from '@kbn/streams-schema';
 import type { StreamsPluginStartDependencies } from '../../../types';
 import { registerStreamsUsageCollector } from './streams_usage_collector';
 import { createStreamsStorageClient } from '../../streams/storage/streams_storage_client';
+import { readStreamDefinitions } from '../../streams/storage/read_stream_definitions';
 import type { StreamsUsageReader } from './streams_usage_collector';
 
 /**
@@ -47,36 +48,8 @@ export class StatsTelemetryService {
 
     return {
       async readAllManagedStreams(): Promise<Streams.all.Definition[]> {
-        const results: Streams.all.Definition[] = [];
-        const pageSize = 2000; // To avoid ES circuit_breaker_exception
-        let from = 0;
-        while (true) {
-          const resp = await storageClient.search({
-            from,
-            size: pageSize,
-            track_total_hits: false,
-            query: { match_all: {} },
-          });
-
-          const hits = resp.hits.hits.filter(
-            ({ _source: definition }) => !('group' in definition) // Filter out old Group streams
-          ) as Array<{ _source?: Streams.all.Definition }>;
-          if (hits.length === 0) {
-            break;
-          }
-
-          for (const { _source } of hits) {
-            if (_source) {
-              results.push(_source);
-            }
-          }
-
-          if (hits.length < pageSize) {
-            break;
-          }
-          from += pageSize;
-        }
-        return results;
+        const definitions = await readStreamDefinitions(storageClient);
+        return definitions.filter((definition) => !('group' in definition)); // Filter out old Group streams
       },
     };
   }

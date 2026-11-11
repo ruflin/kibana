@@ -14,13 +14,13 @@ import { getFlattenedObject } from '@kbn/std';
 import type { StreamsRepositoryClient } from '@kbn/streams-plugin/public/api';
 import { fromObservable } from 'xstate';
 import type { DataPublicPluginStart } from '@kbn/data-plugin/public';
-import type { Filter, Query } from '@kbn/es-query';
 import { getESQLResults } from '@kbn/esql-utils';
-import { convertQueryToESQLExpression } from '@kbn/esql-utils';
-import { convertFiltersToESQLExpression } from '@kbn/esql-utils';
 import { Observable } from 'rxjs';
 import { esqlResultToPlainObjects } from '../../../../../../util/esql_result_to_plain_objects';
 import { resolveDraftSampleSource } from './data_collector_actor';
+import { buildKqlWhereClause } from './kql_where_clause';
+
+export { buildKqlWhereClause };
 import type {
   EnrichmentDataSourceWithUIAttributes,
   PipelineProcessorsUiDefinition,
@@ -82,26 +82,6 @@ export function deduplicateDocuments(
   }
 
   return [...existingDocs, ...newDocs];
-}
-
-export function buildKqlWhereClause(dataSource: EnrichmentDataSourceWithUIAttributes): string {
-  if (dataSource.type !== 'kql-samples') return '';
-
-  const clauses: string[] = [];
-
-  const queryExpr = convertQueryToESQLExpression(dataSource.query as Query | undefined);
-  if (queryExpr) {
-    clauses.push(queryExpr);
-  }
-
-  if (dataSource.filters && dataSource.filters.length > 0) {
-    const { esqlExpression } = convertFiltersToESQLExpression(dataSource.filters as Filter[]);
-    if (esqlExpression) {
-      clauses.push(esqlExpression);
-    }
-  }
-
-  return clauses.join(' AND ');
 }
 
 interface FetchMoreQueryResult {

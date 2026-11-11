@@ -21,6 +21,7 @@ import {
   STREAMS_DIAGNOSE_STREAM_TOOL_ID as DIAGNOSE_STREAM,
 } from '../tool_ids';
 import { translateNlToEsDsl } from './nl_to_es_dsl';
+import { fetchLatestHits } from '../../../lib/streams/helpers/esql';
 import { classifyError } from '../../utils/error_utils';
 
 const DEFAULT_SIZE = 10;
@@ -122,20 +123,20 @@ export const createQueryDocumentsTool = ({
       const definition = await streamsClient.getStream(name);
       const definitionFieldTypes = getDefinitionFieldTypes(definition);
 
-      const [fieldCapsResponse, sampleDocs, model] = await Promise.all([
+      const [fieldCapsResponse, sampleHits, model] = await Promise.all([
         esClient.fieldCaps({ index: targetIndex, fields: ['*'], ignore_unavailable: true }),
-        esClient.search({
+        fetchLatestHits({
+          esClient,
           index: targetIndex,
-          sort: [{ '@timestamp': { order: 'desc' as const } }],
           size: 50,
-          ignore_unavailable: true,
+          ignoreMissingIndex: true,
         }),
         modelProvider.getDefaultModel(),
       ]);
 
       const fieldEntries = classifyFields({
         fieldCapsFields: fieldCapsResponse.fields,
-        sampleHits: sampleDocs.hits.hits,
+        sampleHits,
         definitionFieldTypes,
       });
 
@@ -298,7 +299,7 @@ export const classifyFields = ({
     string,
     Record<string, { type?: string; aggregatable?: boolean; metadata_field?: boolean }>
   >;
-  sampleHits: Array<SearchHit<unknown>>;
+  sampleHits: Array<Pick<SearchHit<unknown>, '_source'>>;
   definitionFieldTypes: Map<string, string>;
 }): FieldEntry[] => {
   const fieldEntries: FieldEntry[] = [];
@@ -358,7 +359,7 @@ export const computeSearchSize = (translated: {
 };
 
 export const flattenAndTruncateDocs = (
-  hits: Array<SearchHit<unknown>>,
+  hits: Array<Pick<SearchHit<unknown>, '_source'>>,
   maxStringLength = MAX_STRING_LENGTH
 ): Array<Record<string, unknown>> => {
   return hits.map((hit) => {

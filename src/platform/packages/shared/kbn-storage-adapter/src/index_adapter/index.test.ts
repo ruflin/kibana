@@ -203,13 +203,40 @@ describe('StorageIndexAdapter - transport options forwarding', () => {
   it('forwards transport options to esClient.delete', async () => {
     const adapter = new StorageIndexAdapter(esClient, loggerMock, storageSettings);
     const client = adapter.getClient();
+    addEsqlQueryMock(
+      esClient,
+      jest.fn().mockResolvedValue({
+        columns: [{ name: '_index', type: 'keyword' }],
+        values: [['test_index-000001']],
+      })
+    );
 
     await client.delete({ id: 'doc1' }, transportOptions);
 
     expect(esClient.delete).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'doc1' }),
+      expect.objectContaining({ id: 'doc1', index: 'test_index-000001' }),
       transportOptions
     );
+  });
+
+  it('looks the document up by _id with ES|QL and reports not_found when no row matches', async () => {
+    const adapter = new StorageIndexAdapter(esClient, loggerMock, storageSettings);
+    const client = adapter.getClient();
+    const esqlQuery = jest.fn().mockResolvedValue({ columns: [], values: [] });
+    addEsqlQueryMock(esClient, esqlQuery);
+
+    await expect(client.delete({ id: 'doc1' })).resolves.toEqual({
+      acknowledged: true,
+      result: 'not_found',
+    });
+
+    expect(esqlQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: 'FROM test_index METADATA _id, _index | WHERE _id == ?id | KEEP _index | LIMIT 1',
+        params: [{ id: 'doc1' }],
+      })
+    );
+    expect(esClient.delete).not.toHaveBeenCalled();
   });
 
   it('forwards transport options through get to esClient.search', async () => {

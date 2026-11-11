@@ -7,7 +7,6 @@
 
 import { getFlattenedObject } from '@kbn/std';
 import type { Streams } from '@kbn/streams-schema';
-import type { SearchResponse } from '@elastic/elasticsearch/lib/api/types';
 import { collectFieldsWithGeoPoints } from './normalize_geo_points';
 
 export const UNMAPPED_SAMPLE_SIZE = 500;
@@ -20,14 +19,14 @@ export const UNMAPPED_SAMPLE_SIZE = 500;
 export const getUnmappedFields = ({
   definition,
   ancestors,
-  sampleDocs,
+  sampleHits,
 }: {
   definition: Streams.all.Definition;
   ancestors: Streams.WiredStream.Definition[];
-  sampleDocs: SearchResponse;
+  sampleHits: Array<{ _source?: unknown }>;
 }): string[] => {
   const sourceFields = new Set<string>();
-  for (const hit of sampleDocs.hits.hits) {
+  for (const hit of sampleHits) {
     for (const field of Object.keys(getFlattenedObject(hit._source as Record<string, unknown>))) {
       sourceFields.add(field);
     }

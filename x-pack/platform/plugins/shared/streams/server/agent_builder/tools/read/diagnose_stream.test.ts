@@ -350,7 +350,17 @@ describe('createDiagnoseStreamTool handler', () => {
         scopedClusterClient.asSecondaryAuthUser.indices.stats,
         statsResponse
       );
-      mockEsMethodResolvedValue(esClient.esql.query, { columns: [], values: [] });
+      // The degraded doc count is an ES|QL per-index count of documents with an _ignored value.
+      esClient.esql.query.mockImplementation((async ({ query }: { query: string }) =>
+        query.includes('_ignored')
+          ? {
+              columns: [
+                { name: 'doc_count', type: 'long' },
+                { name: 'index_name', type: 'keyword' },
+              ],
+              values: degradedDocs > 0 ? [[degradedDocs, backingIndex]] : [],
+            }
+          : { columns: [], values: [] }) as never);
       mockEsMethodResolvedValue(
         esClient.indices.getFieldMapping,
         fieldMappingResponse ?? { [backingIndex]: { mappings: {} } }
@@ -361,17 +371,6 @@ describe('createDiagnoseStreamTool handler', () => {
         if (index?.includes('::failures')) {
           return mockSearchResponse({
             aggregations: { error_groups: { buckets: [] } },
-          });
-        }
-        if (params?.aggs && typeof params.aggs === 'object' && 'per_index' in params.aggs) {
-          return mockSearchResponse({
-            aggregations: {
-              per_index: {
-                buckets: {
-                  [backingIndex]: { doc_count: degradedDocs },
-                },
-              },
-            },
           });
         }
         if (params?.aggs && typeof params.aggs === 'object' && 'degraded_fields' in params.aggs) {
@@ -649,7 +648,16 @@ describe('createDiagnoseStreamTool handler', () => {
         scopedClusterClient.asSecondaryAuthUser.indices.stats,
         statsResponse
       );
-      mockEsMethodResolvedValue(esClient.esql.query, { columns: [], values: [] });
+      esClient.esql.query.mockImplementation((async ({ query }: { query: string }) =>
+        query.includes('_ignored')
+          ? {
+              columns: [
+                { name: 'doc_count', type: 'long' },
+                { name: 'index_name', type: 'keyword' },
+              ],
+              values: [[100, backingIndex]],
+            }
+          : { columns: [], values: [] }) as never);
 
       let callCount = 0;
       esClient.search.mockImplementation(async (params?: SearchRequest) => {
@@ -657,13 +665,6 @@ describe('createDiagnoseStreamTool handler', () => {
         if (index?.includes('::failures')) {
           return mockSearchResponse({
             aggregations: { error_groups: { buckets: [] } },
-          });
-        }
-        if (params?.aggs && typeof params.aggs === 'object' && 'per_index' in params.aggs) {
-          return mockSearchResponse({
-            aggregations: {
-              per_index: { buckets: { [backingIndex]: { doc_count: 100 } } },
-            },
           });
         }
         if (params?.aggs && typeof params.aggs === 'object' && 'degraded_fields' in params.aggs) {

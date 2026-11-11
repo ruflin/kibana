@@ -5,14 +5,12 @@
  * 2.0.
  */
 
-import type {
-  IndicesStatsIndicesStats,
-  SearchRequest,
-  QueryDslQueryContainer,
-} from '@elastic/elasticsearch/lib/api/types';
+import type { IndicesStatsIndicesStats } from '@elastic/elasticsearch/lib/api/types';
+import { esql, type ComposerQuery } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type { ESQLSearchResponse } from '@kbn/es-types';
 import type { StreamDocsStat } from '../../../../common';
+import { getColumnIndex, runEsqlQuery } from '../../../lib/streams/helpers/esql';
 import type { StreamsClient } from '../../../lib/streams/client';
 import {
   getAllBackingIndicesByStream,
@@ -21,6 +19,49 @@ import {
   getLastBackingIndexByStream,
   processAsyncInChunks,
 } from './utils';
+
+/**
+ * Counts documents per index in a single ES|QL query: the `STATS` replaces a `filters` aggregation
+ * keyed by `_index`. Indices without a matching document are absent from the result. With
+ * `ignoreMissingIndex`, a missing index gives no counts, like the DSL `ignore_unavailable` option.
+ */
+const countDocsPerIndex = async ({
+  esClient,
+  indices,
+  metadata = [],
+  filterDocs,
+  ignoreMissingIndex = false,
+}: {
+  esClient: ElasticsearchClient;
+  indices: string[];
+  /** Metadata fields, besides `_index`, that `filterDocs` reads. */
+  metadata?: string[];
+  filterDocs: (query: ComposerQuery) => ComposerQuery;
+  ignoreMissingIndex?: boolean;
+}): Promise<Map<string, number>> => {
+  const response = await runEsqlQuery({
+    esClient,
+    query: filterDocs(esql.from(indices, ['_index', ...metadata]))
+      .pipe`STATS doc_count = COUNT(*) BY index_name = _index`.limit(indices.length),
+    ignoreMissingIndex,
+  });
+
+  const counts = new Map<string, number>();
+  if (!response) return counts;
+
+  const indexCol = getColumnIndex(response, 'index_name');
+  const countCol = getColumnIndex(response, 'doc_count');
+  if (indexCol === -1 || countCol === -1) return counts;
+
+  for (const row of response.values) {
+    const indexName = row[indexCol];
+    const docCount = Number(row[countCol] ?? 0);
+    if (typeof indexName === 'string' && Number.isFinite(docCount)) {
+      counts.set(indexName, docCount);
+    }
+  }
+  return counts;
+};
 
 /**
  * Fetches total document counts for one or all streams.
@@ -124,7 +165,7 @@ export async function getDocCountsForStreams(options: {
  * For each stream we:
  * 1) resolve the data stream and its backing indices via indices.getDataStream
  * 2) pick the last backing index
- * 3) run a search against that index with an _ignored exists query
+ * 3) count the documents with an `_ignored` value per index with an ES|QL query
  */
 export async function getDegradedDocCountsForStreams(options: {
   esClient: ElasticsearchClient;
@@ -158,53 +199,19 @@ export async function getDegradedDocCountsForStreams(options: {
 
   const results: StreamDocsStat[] = [];
 
-  const chunkResponses = await processAsyncInChunks<
-    string,
-    { indices: string[]; buckets: Record<string, { doc_count: number }> }
-  >({
+  const chunkResponses = await processAsyncInChunks<string, Map<string, number>>({
     items: allIndices,
-    processChunk: async (indicesInChunk) => {
-      // Build a filters aggregation keyed by index name so we get per-index counts in a single search.
-      const filters: Record<string, QueryDslQueryContainer> = {};
-      for (const index of indicesInChunk) {
-        filters[index] = {
-          term: {
-            _index: index,
-          },
-        };
-      }
-
-      const response = await esClient.search<SearchRequest>({
-        index: indicesInChunk,
-        size: 0,
-        track_total_hits: false,
-        query: {
-          exists: {
-            field: '_ignored',
-          },
-        },
-        aggs: {
-          per_index: {
-            filters: {
-              filters,
-            },
-          },
-        },
-      });
-
-      const buckets =
-        // @ts-expect-error Aggregations are not strongly typed here
-        response.aggregations?.per_index?.buckets ?? {};
-
-      return { indices: indicesInChunk, buckets };
-    },
+    processChunk: (indicesInChunk) =>
+      countDocsPerIndex({
+        esClient,
+        indices: indicesInChunk,
+        metadata: ['_ignored'],
+        filterDocs: (query) => query.where`_ignored IS NOT NULL`,
+      }),
   });
 
-  for (const { indices, buckets } of chunkResponses) {
-    for (const index of indices) {
-      const bucket = buckets[index];
-      const docCount: number = bucket?.doc_count ?? 0;
-
+  for (const counts of chunkResponses) {
+    for (const [index, docCount] of counts) {
       if (docCount <= 0) {
         continue;
       }
@@ -266,61 +273,25 @@ export async function getIngestionDocCountsForStreams(options: {
     return [];
   }
 
-  interface PerIndexAggs {
-    per_index: { buckets: Record<string, { doc_count: number }> };
-  }
+  const startIso = new Date(start).toISOString();
+  const endIso = new Date(end).toISOString();
 
-  const chunkResponses = await processAsyncInChunks<
-    string,
-    { indices: string[]; buckets: Record<string, { doc_count: number }> }
-  >({
+  const chunkResponses = await processAsyncInChunks<string, Map<string, number>>({
     items: allIndices,
-    processChunk: async (indicesInChunk) => {
-      // Build a filters aggregation keyed by index name so we get per-index counts in a single search.
-      const filters: Record<string, QueryDslQueryContainer> = {};
-      for (const index of indicesInChunk) {
-        filters[index] = {
-          term: {
-            _index: index,
-          },
-        };
-      }
-
-      const response = await esClient.search<unknown, PerIndexAggs>({
-        index: indicesInChunk,
-        ignore_unavailable: true,
-        size: 0,
-        track_total_hits: false,
-        query: {
-          range: {
-            '@timestamp': {
-              gte: start,
-              lte: end,
-              format: 'epoch_millis',
-            },
-          },
-        },
-        aggs: {
-          per_index: {
-            filters: {
-              filters,
-            },
-          },
-        },
-      });
-
-      const buckets = response.aggregations?.per_index?.buckets ?? {};
-
-      return { indices: indicesInChunk, buckets };
-    },
+    processChunk: (indicesInChunk) =>
+      countDocsPerIndex({
+        esClient,
+        indices: indicesInChunk,
+        filterDocs: (query) =>
+          query.where`@timestamp >= ${{ startIso }} AND @timestamp <= ${{ endIso }}`,
+        ignoreMissingIndex: true,
+      }),
   });
 
   const countsByStream = new Map<string, number>();
 
-  for (const { indices, buckets } of chunkResponses) {
-    for (const index of indices) {
-      const docCount = buckets[index]?.doc_count ?? 0;
-
+  for (const counts of chunkResponses) {
+    for (const [index, docCount] of counts) {
       if (docCount <= 0) {
         continue;
       }

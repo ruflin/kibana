@@ -35,8 +35,12 @@ describe('partitionStream', () => {
   } as unknown as Logger;
 
   const mockEsClient = {
-    count: jest.fn(),
+    esql: { query: jest.fn() },
   } as unknown as ElasticsearchClient;
+  const countResponse = (count: number) => ({
+    columns: [{ name: 'count', type: 'long' }],
+    values: [[count]],
+  });
   const mockInferenceClient = {} as BoundInferenceClient;
   const mockSignal = new AbortController().signal;
 
@@ -136,7 +140,7 @@ describe('partitionStream', () => {
         },
       ]);
 
-      (mockEsClient.count as jest.Mock).mockResolvedValueOnce({ count: 0 });
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValueOnce(countResponse(0));
 
       const result = await partitionStream({
         ...defaultParams,
@@ -153,11 +157,19 @@ describe('partitionStream', () => {
           excludeConditions: [{ field: 'service.name', eq: 'api' }],
         })
       );
-      expect(mockEsClient.count).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: 'logs.test',
-        })
-      );
+      expect(mockEsClient.esql.query).toHaveBeenCalledWith({
+        query: 'FROM logs.test | STATS count = COUNT(*)',
+        params: [],
+        filter: {
+          range: {
+            '@timestamp': {
+              gte: defaultParams.start,
+              lte: defaultParams.end,
+              format: 'epoch_millis',
+            },
+          },
+        },
+      });
       expect(mockExecuteAsReasoningAgent).not.toHaveBeenCalled();
     });
   });
@@ -180,7 +192,7 @@ describe('partitionStream', () => {
         },
       ]);
 
-      (mockEsClient.count as jest.Mock).mockResolvedValueOnce({ count: 100 });
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValueOnce(countResponse(100));
 
       const result = await partitionStream({
         ...defaultParams,
@@ -192,7 +204,7 @@ describe('partitionStream', () => {
         reason: 'all_data_partitioned',
       });
       expect(mockClusterLogs).toHaveBeenCalledTimes(1);
-      expect(mockEsClient.count).toHaveBeenCalledTimes(1);
+      expect(mockEsClient.esql.query).toHaveBeenCalledTimes(1);
       expect(mockExecuteAsReasoningAgent).not.toHaveBeenCalled();
     });
 
@@ -218,7 +230,7 @@ describe('partitionStream', () => {
         },
       ]);
 
-      (mockEsClient.count as jest.Mock).mockResolvedValueOnce({ count: 50 });
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValueOnce(countResponse(50));
 
       const result = await partitionStream({
         ...defaultParams,
@@ -254,7 +266,7 @@ describe('partitionStream', () => {
         },
       ]);
 
-      (mockEsClient.count as jest.Mock).mockResolvedValueOnce({ count: 100 });
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValueOnce(countResponse(100));
 
       const result = await partitionStream({
         ...defaultParams,

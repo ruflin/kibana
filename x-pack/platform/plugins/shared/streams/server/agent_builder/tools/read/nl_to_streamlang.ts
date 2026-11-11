@@ -16,6 +16,7 @@ import { ACTION_METADATA_MAP, validateStreamlang } from '@kbn/streamlang';
 import { getFlattenedObject } from '@kbn/std';
 import { omit } from 'lodash';
 import type { StreamsClient } from '../../../lib/streams/client';
+import { fetchLatestHits } from '../../../lib/streams/helpers/esql';
 import { getStreamConvention } from '../../utils/convention_utils';
 import { extractJson } from './nl_to_es_dsl';
 import { flattenAndTruncateDocs } from './query_documents';
@@ -322,13 +323,13 @@ const fetchSampleDocuments = async (
   streamName: string,
   size: number
 ): Promise<Array<Record<string, unknown>>> => {
-  const response = await esClient.search({
+  const hits = await fetchLatestHits({
+    esClient,
     index: streamName,
-    sort: [{ '@timestamp': { order: 'desc' as const } }],
     size,
-    ignore_unavailable: true,
+    ignoreMissingIndex: true,
   });
-  return flattenAndTruncateDocs(response.hits.hits);
+  return flattenAndTruncateDocs(hits);
 };
 
 const resolveSamples = async (

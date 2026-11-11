@@ -16,6 +16,7 @@ import {
   throwHasDataSearchError,
 } from '../../lib/handle_has_data_search_error';
 import { resolveProbe } from './resolve_has_data_probes';
+import { hasDocuments } from '../../lib/esql';
 import type { ElasticAgentVersionInfo } from '../../../common/types';
 import { getFallbackESUrl } from '../../lib/get_fallback_urls';
 import { createObservabilityOnboardingServerRoute } from '../create_observability_onboarding_server_route';
@@ -137,14 +138,9 @@ const hasKubernetesDataRoute = createObservabilityOnboardingServerRoute({
     const { elasticsearch } = await resources.context.core;
 
     try {
-      const commonSearchParams = {
-        ignore_unavailable: true,
-        allow_partial_search_results: true,
-        size: 0 as const,
-        terminate_after: 1,
-      };
-
       // Classic data streams: use indexed onboarding ID fields (fast inverted-index lookups).
+      // The onboarding ID can be in any of three fields, which may be unmapped, multi-valued or of
+      // different types across indices, so the match stays a request filter (Query DSL).
       const indexedQuery: estypes.QueryDslQueryContainer = {
         bool: {
           filter: [
@@ -162,16 +158,16 @@ const hasKubernetesDataRoute = createObservabilityOnboardingServerRoute({
         },
       };
 
-      const searches: Array<Promise<estypes.SearchResponse>> = [
-        elasticsearch.client.asCurrentUser.search({
-          index: ['logs-*'],
-          ...commonSearchParams,
-          query: indexedQuery,
+      const searches: Array<Promise<boolean>> = [
+        hasDocuments({
+          esClient: elasticsearch.client.asCurrentUser,
+          indices: ['logs-*'],
+          filter: indexedQuery,
         }),
-        elasticsearch.client.asCurrentUser.search({
-          index: ['metrics-*'],
-          ...commonSearchParams,
-          query: indexedQuery,
+        hasDocuments({
+          esClient: elasticsearch.client.asCurrentUser,
+          indices: ['metrics-*'],
+          filter: indexedQuery,
         }),
       ];
 

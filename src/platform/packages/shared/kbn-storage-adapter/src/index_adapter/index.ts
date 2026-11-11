@@ -626,32 +626,23 @@ export class StorageIndexAdapter<
     transportOptions
   ): Promise<StorageClientDeleteResponse> => {
     this.logger.debug(`Deleting document with id ${id}`);
-    const searchResponse = await this.search({
-      track_total_hits: false,
-      size: 1,
-      query: {
-        bool: {
-          filter: [
-            {
-              term: {
-                _id: id,
-              },
-            },
-          ],
-        },
-      },
+    // Resolve which backing index holds the document, so the delete targets it directly.
+    const lookup = await this.esql({
+      pipeline: esql`WHERE _id == ${{ id }} | KEEP _index | LIMIT 1`,
+      metadata: ['_id', '_index'],
+      migrateSource: false,
     });
+    const indexColumn = lookup.columns.findIndex((column) => column.name === '_index');
+    const documentIndex = indexColumn === -1 ? undefined : lookup.values[0]?.[indexColumn];
 
-    const document = searchResponse.hits.hits[0];
-
-    if (document) {
+    if (typeof documentIndex === 'string') {
       await wrapEsCall(
         this.esClient.delete(
           {
             ...request,
             refresh,
             id,
-            index: document._index,
+            index: documentIndex,
           },
           ...optionalTransportArgs(transportOptions)
         )

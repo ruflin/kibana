@@ -20,6 +20,7 @@ import type {
 } from './stream_active_record/stream_active_record';
 import { streamFromDefinition } from './stream_active_record/stream_from_definition';
 import type { StateDependencies, StreamChange } from './types';
+import { readStreamDefinitions } from '../storage/read_stream_definitions';
 import { ConcurrentAccessError } from './errors/concurrent_access_error';
 import { InsufficientPermissionsError } from '../errors/insufficient_permissions_error';
 import { getErrorMessage } from '../errors/parse_error';
@@ -127,15 +128,11 @@ export class State {
 
   static async currentState(dependencies: StateDependencies): Promise<State> {
     try {
-      const streamsSearchResponse = await dependencies.storageClient.search({
-        size: 10000,
-        sort: [{ name: 'asc' }],
-        track_total_hits: false,
-      });
+      const definitions = await readStreamDefinitions(dependencies.storageClient);
 
-      const streams = streamsSearchResponse.hits.hits
-        .filter(({ _source: definition }) => !('group' in definition)) // Filter out old Group streams
-        .map(({ _source: definition }) => streamFromDefinition(definition, dependencies));
+      const streams = definitions
+        .filter((definition) => !('group' in definition)) // Filter out old Group streams
+        .map((definition) => streamFromDefinition(definition, dependencies));
 
       return new State(streams, dependencies);
     } catch (error) {
