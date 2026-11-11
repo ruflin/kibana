@@ -30,6 +30,10 @@ describe('CleanUpTempSummary', () => {
   beforeEach(() => {
     jest.useFakeTimers().setSystemTime(new Date('2025-02-10T15:00:00.000Z'));
     esClientMock = elasticsearchServiceMock.createElasticsearchClient();
+    esClientMock.esql.query.mockResolvedValue({
+      columns: [{ name: '_index', type: 'keyword' }],
+      values: [['.slo-observability.summary-temp']],
+    });
     service = new CleanUpTempSummary(
       esClientMock,
       loggingSystemMock.createLogger(),
@@ -42,18 +46,16 @@ describe('CleanUpTempSummary', () => {
   });
 
   it('returns early if there is no temporary documents', async () => {
-    esClientMock.count.mockResolvedValueOnce({
-      count: 0,
-      _shards: {
-        total: 1,
-        successful: 1,
-        skipped: 0,
-        failed: 0,
-      },
+    esClientMock.esql.query.mockResolvedValueOnce({
+      columns: [{ name: '_index', type: 'keyword' }],
+      values: [],
     });
 
     await service.execute();
 
+    expect(esClientMock.esql.query.mock.calls[0][0].query).toBe(
+      'FROM .slo-observability.summary-v3.6.temp | LIMIT 1'
+    );
     expect(esClientMock.search).not.toHaveBeenCalled();
     expect(esClientMock.deleteByQuery).not.toHaveBeenCalled();
   });

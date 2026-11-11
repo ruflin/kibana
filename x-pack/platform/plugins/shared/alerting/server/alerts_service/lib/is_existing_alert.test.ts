@@ -11,6 +11,8 @@ describe('isExistingAlert', () => {
   test('searches with the correct params', async () => {
     const logger = loggingSystemMock.createLogger();
     const clusterClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
+    clusterClient.esql.query.mockResolvedValueOnce({ columns: [], values: [] });
+
     await isExistingAlert({
       logger,
       esClient: clusterClient,
@@ -19,31 +21,23 @@ describe('isExistingAlert', () => {
       ruleId: 'test-rule-id',
     });
 
-    expect(clusterClient.search).toHaveBeenCalledWith({
-      index: ['test-index'],
-      allow_no_indices: true,
-      size: 0,
-      query: {
-        bool: {
-          must: [{ term: { ['kibana.alert.rule.uuid']: 'test-rule-id' } }],
-          filter: [{ term: { ['kibana.alert.instance.id']: 'test-alert-id' } }],
-        },
+    expect(clusterClient.esql.query).toHaveBeenCalledWith(
+      {
+        query:
+          'FROM test-index | WHERE kibana.alert.rule.uuid == ?ruleId AND kibana.alert.instance.id == ?alertId | LIMIT 1',
+        params: [{ ruleId: 'test-rule-id' }, { alertId: 'test-alert-id' }],
       },
-    });
+      expect.anything()
+    );
   });
 
   test('returns true is the alert exists', async () => {
     const logger = loggingSystemMock.createLogger();
     const clusterClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
 
-    clusterClient.search.mockResponseOnce({
-      hits: {
-        total: 2,
-        hits: [],
-      },
-      took: 0,
-      timed_out: false,
-      _shards: { total: 0, successful: 0, skipped: 0, failed: 0 },
+    clusterClient.esql.query.mockResolvedValueOnce({
+      columns: [{ name: '_index', type: 'keyword' }],
+      values: [['test-index']],
     });
 
     const result = await isExistingAlert({
@@ -61,15 +55,7 @@ describe('isExistingAlert', () => {
     const logger = loggingSystemMock.createLogger();
     const clusterClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
 
-    clusterClient.search.mockResponseOnce({
-      hits: {
-        total: 0,
-        hits: [],
-      },
-      took: 0,
-      timed_out: false,
-      _shards: { total: 0, successful: 0, skipped: 0, failed: 0 },
-    });
+    clusterClient.esql.query.mockResolvedValueOnce({ columns: [], values: [] });
 
     const result = await isExistingAlert({
       logger,
@@ -86,7 +72,7 @@ describe('isExistingAlert', () => {
     const logger = loggingSystemMock.createLogger();
     const clusterClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
 
-    clusterClient.search.mockRejectedValueOnce(new Error('Test error'));
+    clusterClient.esql.query.mockRejectedValueOnce(new Error('Test error'));
 
     const result = await isExistingAlert({
       logger,

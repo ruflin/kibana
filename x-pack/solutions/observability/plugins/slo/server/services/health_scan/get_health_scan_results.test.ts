@@ -69,17 +69,14 @@ function createMockSearchHitsResponse(docs: HealthDocument[], total: number, sor
   };
 }
 
-function createMockSummaryAggResponse(total: number, problematic: number) {
+function createMockSummaryResponse(total: number, problematic: number) {
   return {
-    took: 1,
-    timed_out: false,
-    _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-    hits: { total: { value: total, relation: 'eq' }, max_score: null, hits: [] },
-    aggregations: {
-      latest_timestamp: { value: 1705312800000, value_as_string: '2026-01-15T10:00:00.000Z' },
-      processed: { value: total },
-      problematic: { doc_count: problematic },
-    },
+    columns: [
+      { name: 'latestTimestamp', type: 'date' },
+      { name: 'processed', type: 'long' },
+      { name: 'problematic', type: 'long' },
+    ],
+    values: [['2026-01-15T10:00:00.000Z', total, problematic]],
   };
 }
 
@@ -113,12 +110,12 @@ describe('getHealthScanResults', () => {
       );
       const cursor = ['2026-01-15T10:00:00.000Z', 'scan-123', 'default', true, 'slo-4'];
 
-      scopedClusterClient.asInternalUser.search.mockImplementation(async (params: any) => {
-        if (params?.size === 0) {
-          return createMockSummaryAggResponse(30, 30) as any;
-        }
-        return createMockSearchHitsResponse(docs, 30, cursor) as any;
-      });
+      scopedClusterClient.asInternalUser.esql.query.mockResolvedValue(
+        createMockSummaryResponse(30, 30) as any
+      );
+      scopedClusterClient.asInternalUser.search.mockResolvedValue(
+        createMockSearchHitsResponse(docs, 30, cursor) as any
+      );
 
       const result = await getHealthScanResults(
         { scanId: TEST_SCAN_ID, size, problematic: true },
@@ -138,12 +135,12 @@ describe('getHealthScanResults', () => {
         })
       );
 
-      scopedClusterClient.asInternalUser.search.mockImplementation(async (params: any) => {
-        if (params?.size === 0) {
-          return createMockSummaryAggResponse(3, 3) as any;
-        }
-        return createMockSearchHitsResponse(docs, 3) as any;
-      });
+      scopedClusterClient.asInternalUser.esql.query.mockResolvedValue(
+        createMockSummaryResponse(3, 3) as any
+      );
+      scopedClusterClient.asInternalUser.search.mockResolvedValue(
+        createMockSearchHitsResponse(docs, 3) as any
+      );
 
       const result = await getHealthScanResults(
         { scanId: TEST_SCAN_ID, size, problematic: true },
@@ -161,12 +158,12 @@ describe('getHealthScanResults', () => {
         createMockHealthDoc({ slo: { id: 'slo-25', name: 'SLO 25', revision: 1, enabled: true } }),
       ];
 
-      scopedClusterClient.asInternalUser.search.mockImplementation(async (params: any) => {
-        if (params?.size === 0) {
-          return createMockSummaryAggResponse(30, 30) as any;
-        }
-        return createMockSearchHitsResponse(docs, 30) as any;
-      });
+      scopedClusterClient.asInternalUser.esql.query.mockResolvedValue(
+        createMockSummaryResponse(30, 30) as any
+      );
+      scopedClusterClient.asInternalUser.search.mockResolvedValue(
+        createMockSearchHitsResponse(docs, 30) as any
+      );
 
       await getHealthScanResults(
         {
@@ -187,12 +184,12 @@ describe('getHealthScanResults', () => {
     it('ignores invalid searchAfter and does not pass search_after', async () => {
       const docs = [createMockHealthDoc()];
 
-      scopedClusterClient.asInternalUser.search.mockImplementation(async (params: any) => {
-        if (params?.size === 0) {
-          return createMockSummaryAggResponse(1, 1) as any;
-        }
-        return createMockSearchHitsResponse(docs, 1) as any;
-      });
+      scopedClusterClient.asInternalUser.esql.query.mockResolvedValue(
+        createMockSummaryResponse(1, 1) as any
+      );
+      scopedClusterClient.asInternalUser.search.mockResolvedValue(
+        createMockSearchHitsResponse(docs, 1) as any
+      );
 
       await getHealthScanResults(
         {
@@ -213,12 +210,12 @@ describe('getHealthScanResults', () => {
 
   describe('size validation', () => {
     beforeEach(() => {
-      scopedClusterClient.asInternalUser.search.mockImplementation(async (params: any) => {
-        if (params?.size === 0) {
-          return createMockSummaryAggResponse(0, 0) as any;
-        }
-        return createMockSearchHitsResponse([], 0) as any;
-      });
+      scopedClusterClient.asInternalUser.esql.query.mockResolvedValue(
+        createMockSummaryResponse(0, 0) as any
+      );
+      scopedClusterClient.asInternalUser.search.mockResolvedValue(
+        createMockSearchHitsResponse([], 0) as any
+      );
     });
 
     it('throws when size is 0', async () => {
@@ -246,12 +243,12 @@ describe('getHealthScanResults', () => {
 
   describe('space filtering', () => {
     beforeEach(() => {
-      scopedClusterClient.asInternalUser.search.mockImplementation(async (params: any) => {
-        if (params?.size === 0) {
-          return createMockSummaryAggResponse(10, 2) as any;
-        }
-        return createMockSearchHitsResponse([createMockHealthDoc()], 1) as any;
-      });
+      scopedClusterClient.asInternalUser.esql.query.mockResolvedValue(
+        createMockSummaryResponse(10, 2) as any
+      );
+      scopedClusterClient.asInternalUser.search.mockResolvedValue(
+        createMockSearchHitsResponse([createMockHealthDoc()], 1) as any
+      );
     });
 
     it('always includes a spaceId filter in the scan results query', async () => {
@@ -267,11 +264,11 @@ describe('getHealthScanResults', () => {
     it('always includes a spaceId filter in the summary query', async () => {
       await getHealthScanResults({ scanId: TEST_SCAN_ID }, deps);
 
-      const summaryCall = scopedClusterClient.asInternalUser.search.mock.calls.find(
-        (call: any) => call[0]?.size === 0
+      const summaryRequest = scopedClusterClient.asInternalUser.esql.query.mock.calls[0][0];
+      expect(summaryRequest.query).toContain('spaceId IN (?spaceIds)');
+      expect(summaryRequest.params).toEqual(
+        expect.arrayContaining([{ spaceIds: ['default'] }, { scanId: TEST_SCAN_ID }])
       );
-      const filter = summaryCall?.[0]?.query?.bool?.filter;
-      expect(filter).toEqual(expect.arrayContaining([{ terms: { spaceId: ['default'] } }]));
     });
 
     it('filters by multiple space IDs when provided', async () => {
@@ -286,12 +283,33 @@ describe('getHealthScanResults', () => {
         expect.arrayContaining([{ terms: { spaceId: ['space-a', 'space-b'] } }])
       );
 
-      const summaryCall = scopedClusterClient.asInternalUser.search.mock.calls.find(
-        (call: any) => call[0]?.size === 0
+      const summaryRequest = scopedClusterClient.asInternalUser.esql.query.mock.calls[0][0];
+      expect(summaryRequest.params).toEqual(
+        expect.arrayContaining([{ spaceIds: ['space-a', 'space-b'] }])
       );
-      const summaryFilter = summaryCall?.[0]?.query?.bool?.filter;
-      expect(summaryFilter).toEqual(
-        expect.arrayContaining([{ terms: { spaceId: ['space-a', 'space-b'] } }])
+    });
+  });
+
+  describe('scan summary', () => {
+    it('reads the latest timestamp, processed and problematic counts with ES|QL', async () => {
+      scopedClusterClient.asInternalUser.search.mockResolvedValue(
+        createMockSearchHitsResponse([createMockHealthDoc()], 1) as any
+      );
+      scopedClusterClient.asInternalUser.esql.query.mockResolvedValue(
+        createMockSummaryResponse(10, 2) as any
+      );
+
+      const result = await getHealthScanResults({ scanId: TEST_SCAN_ID }, deps);
+
+      expect(scopedClusterClient.asInternalUser.esql.query.mock.calls[0][0].query).toBe(
+        'FROM .slo-observability.health-v3.6 | WHERE scanId == ?scanId AND (spaceId IN (?spaceIds)) | STATS latestTimestamp = MAX(@timestamp), processed = COUNT(scanId), problematic = COUNT(*) WHERE health.isProblematic == TRUE'
+      );
+      expect(result.scan).toEqual(
+        expect.objectContaining({
+          latestTimestamp: '2026-01-15T10:00:00.000Z',
+          total: 10,
+          problematic: 2,
+        })
       );
     });
   });

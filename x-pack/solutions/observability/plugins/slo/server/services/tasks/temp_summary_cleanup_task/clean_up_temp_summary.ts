@@ -5,12 +5,14 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import type { AggregationsCompositeAggregateKey } from '@elastic/elasticsearch/lib/api/types';
 import {
   SUMMARY_DESTINATION_INDEX_PATTERN,
   SUMMARY_TEMP_INDEX_NAME,
 } from '../../../../common/constants';
+import { runEsqlRows } from '../../utils/esql_read';
 
 interface AggBucketKey extends AggregationsCompositeAggregateKey {
   spaceId: string;
@@ -57,11 +59,12 @@ export class CleanUpTempSummary {
   }
 
   private async shouldOpenCircuitBreaker() {
-    const results = await this.esClient.count(
-      { index: SUMMARY_TEMP_INDEX_NAME, terminate_after: 1 },
-      { signal: this.signal }
-    );
-    return results.count === 0;
+    const rows = await runEsqlRows({
+      esClient: this.esClient,
+      signal: this.signal,
+      query: esql.from([SUMMARY_TEMP_INDEX_NAME]).limit(1),
+    });
+    return rows.length === 0;
   }
 
   private async findDuplicateTemporaryDocuments(searchAfterKey: AggBucketKey | undefined) {

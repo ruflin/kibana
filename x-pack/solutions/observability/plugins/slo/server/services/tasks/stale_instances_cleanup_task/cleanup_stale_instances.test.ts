@@ -73,6 +73,9 @@ const createMockTaskResponse = (completed: boolean, runningTimeInNanos?: number)
     },
   } as TasksGetResponse);
 
+const STALE_DOCS = { columns: [{ name: '_index', type: 'keyword' }], values: [['summary']] } as any;
+const NO_DOCS = { columns: [{ name: '_index', type: 'keyword' }], values: [] } as any;
+
 describe('cleanupStaleInstances', () => {
   let esClient: ElasticsearchClientMock;
   let soClient: jest.Mocked<SavedObjectsClientContract>;
@@ -185,7 +188,7 @@ describe('cleanupStaleInstances', () => {
           },
         ]) as any
       );
-      esClient.count.mockResolvedValueOnce({ count: 10 } as any);
+      esClient.esql.query.mockResolvedValueOnce(STALE_DOCS);
       esClient.deleteByQuery.mockResolvedValueOnce({ task: 'delete-task-1' } as any);
 
       const result = await cleanupStaleInstances(
@@ -212,7 +215,7 @@ describe('cleanupStaleInstances', () => {
           }))
         ) as any
       );
-      esClient.count.mockResolvedValueOnce({ count: 0 } as any);
+      esClient.esql.query.mockResolvedValueOnce(NO_DOCS);
 
       // Second batch: has stale documents
       esClient.search.mockResolvedValueOnce(
@@ -226,7 +229,7 @@ describe('cleanupStaleInstances', () => {
           },
         ]) as any
       );
-      esClient.count.mockResolvedValueOnce({ count: 5 } as any);
+      esClient.esql.query.mockResolvedValueOnce(STALE_DOCS);
       esClient.deleteByQuery.mockResolvedValueOnce({ task: 'delete-task-2' } as any);
 
       const result = await cleanupStaleInstances(
@@ -258,7 +261,7 @@ describe('cleanupStaleInstances', () => {
           },
         ]) as any
       );
-      esClient.count.mockResolvedValueOnce({ count: 3 } as any);
+      esClient.esql.query.mockResolvedValueOnce(STALE_DOCS);
       esClient.deleteByQuery.mockResolvedValueOnce({ task: 'delete-task-3' } as any);
 
       const result = await cleanupStaleInstances(
@@ -289,7 +292,7 @@ describe('cleanupStaleInstances', () => {
             }))
           ) as any
         );
-        esClient.count.mockResolvedValueOnce({ count: 0 } as any);
+        esClient.esql.query.mockResolvedValueOnce(NO_DOCS);
       }
 
       const result = await cleanupStaleInstances(
@@ -350,7 +353,7 @@ describe('cleanupStaleInstances', () => {
         { esClient, soClient: soClient as any, logger, signal }
       );
 
-      expect(esClient.count).not.toHaveBeenCalled();
+      expect(esClient.esql.query).not.toHaveBeenCalled();
       expect(esClient.deleteByQuery).not.toHaveBeenCalled();
       expect(result.nextState).toEqual({});
     });
@@ -368,7 +371,7 @@ describe('cleanupStaleInstances', () => {
         { esClient, soClient: soClient as any, logger, signal }
       );
 
-      expect(esClient.count).not.toHaveBeenCalled();
+      expect(esClient.esql.query).not.toHaveBeenCalled();
       expect(result.nextState).toEqual({});
     });
 
@@ -384,7 +387,7 @@ describe('cleanupStaleInstances', () => {
           },
         ]) as any
       );
-      esClient.count.mockResolvedValueOnce({ count: 1 } as any);
+      esClient.esql.query.mockResolvedValueOnce(STALE_DOCS);
       esClient.deleteByQuery.mockResolvedValueOnce({ task: 'task-1' } as any);
 
       await cleanupStaleInstances({}, { esClient, soClient: soClient as any, logger, signal });
@@ -414,6 +417,42 @@ describe('cleanupStaleInstances', () => {
       );
     });
 
+    it('should check for stale documents with ES|QL using the delete query as filter', async () => {
+      esClient.search.mockResolvedValueOnce(
+        createMockSpaceAggregationResponse([{ key: { spaceId: 'space-1' } }])
+      );
+      soClient.bulkGet.mockResolvedValueOnce(
+        createMockSettingsResponse([
+          {
+            id: sloSettingsObjectId('space-1'),
+            attributes: { staleInstancesCleanupEnabled: true, staleThresholdInHours: 48 },
+          },
+        ]) as any
+      );
+      esClient.esql.query.mockResolvedValueOnce(NO_DOCS);
+
+      await cleanupStaleInstances({}, { esClient, soClient: soClient as any, logger, signal });
+
+      const [request, options] = esClient.esql.query.mock.calls[0];
+      expect(request.query).toBe('FROM .slo-observability.summary-v3* | LIMIT 1');
+      expect(request.filter).toEqual({
+        bool: {
+          should: [
+            {
+              bool: {
+                filter: [
+                  { terms: { spaceId: ['space-1'] } },
+                  { range: { summaryUpdatedAt: { lt: 'now-48h' } } },
+                ],
+              },
+            },
+          ],
+          minimum_should_match: 1,
+        },
+      });
+      expect(options).toEqual({ signal });
+    });
+
     it('should process spaces with different threshold hours', async () => {
       esClient.search.mockResolvedValueOnce(
         createMockSpaceAggregationResponse([
@@ -438,7 +477,7 @@ describe('cleanupStaleInstances', () => {
           },
         ]) as any
       );
-      esClient.count.mockResolvedValueOnce({ count: 5 } as any);
+      esClient.esql.query.mockResolvedValueOnce(STALE_DOCS);
       esClient.deleteByQuery.mockResolvedValueOnce({ task: 'task-1' } as any);
 
       await cleanupStaleInstances({}, { esClient, soClient: soClient as any, logger, signal });
@@ -501,7 +540,7 @@ describe('cleanupStaleInstances', () => {
           },
         ]) as any
       );
-      esClient.count.mockResolvedValueOnce({ count: 0 } as any);
+      esClient.esql.query.mockResolvedValueOnce(NO_DOCS);
 
       const result = await cleanupStaleInstances(
         {},
@@ -524,7 +563,7 @@ describe('cleanupStaleInstances', () => {
           },
         ]) as any
       );
-      esClient.count.mockResolvedValueOnce({ count: 100 } as any);
+      esClient.esql.query.mockResolvedValueOnce(STALE_DOCS);
       esClient.deleteByQuery.mockResolvedValueOnce({ task: 'delete-task-xyz' } as any);
 
       const result = await cleanupStaleInstances(
@@ -576,7 +615,7 @@ describe('cleanupStaleInstances', () => {
           },
         ]) as any
       );
-      esClient.count.mockResolvedValueOnce({ count: 50 } as any);
+      esClient.esql.query.mockResolvedValueOnce(STALE_DOCS);
       esClient.deleteByQuery.mockResolvedValueOnce({ task: 'async-delete-task' } as any);
 
       const result = await cleanupStaleInstances(

@@ -5,14 +5,15 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { CoreSetup, IRouter } from '@kbn/core/server';
 import {
   ALERT_EVALUATION_TIME_RANGE,
   ALERT_RULE_PARAMETERS,
   ALERT_RULE_UUID,
-  ALERT_UUID,
 } from '@kbn/rule-data-utils';
 import type { GetAlertIndicesAlias, ILicenseState } from '../../../../lib';
+import { runEsqlRows } from '../../../../lib/esql_read';
 import { verifyAccessAndContext } from '../../../lib';
 import type { AlertingRequestHandlerContext, RuleTypeRegistry } from '../../../../types';
 import { BASE_ALERTING_API_PATH } from '../../../../types';
@@ -97,16 +98,20 @@ export const ruleQueryInspectorRoute = (
           const [{ elasticsearch }] = await core.getStartServices();
           const esClient = elasticsearch.client.asScoped(req).asCurrentUser;
 
-          const searchResult = await esClient.search({
-            index: alertIndex,
-            size: 1,
-            query: { term: { [ALERT_UUID]: alertId } },
-            _source: [ALERT_RULE_UUID, ALERT_RULE_PARAMETERS, ALERT_EVALUATION_TIME_RANGE],
-          });
+          const alertSources = alertIndex.split(',').filter((source) => source.length > 0);
+          // `_source` keeps `rule.parameters` and the evaluation time range as stored; ES|QL cannot
+          // return those field types as columns.
+          const [alertRow] =
+            alertSources.length === 0
+              ? []
+              : await runEsqlRows({
+                  esClient,
+                  query: esql.from(alertSources, ['_source']).pipe`WHERE kibana.alert.uuid == ${{
+                    alertId,
+                  }}`.limit(1),
+                });
 
-          const alertDoc = searchResult.hits.hits[0]?._source as
-            | Record<string, unknown>
-            | undefined;
+          const alertDoc = alertRow?._source as Record<string, unknown> | undefined;
 
           if (!alertDoc) {
             return res.notFound({

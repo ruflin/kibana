@@ -11,7 +11,6 @@ import { taskManagerMock } from '@kbn/task-manager-plugin/server/mocks';
 import { AlertDeletionClient } from '../alert_deletion_client';
 import { ruleTypeRegistryMock } from '../../rule_type_registry.mock';
 import { elasticsearchServiceMock } from '@kbn/core/server/mocks';
-import { TIMESTAMP } from '@kbn/rule-data-utils';
 import type { KibanaRequest } from '@kbn/core/server';
 import type { SpacesServiceStart } from '@kbn/spaces-plugin/server/spaces_service';
 
@@ -66,120 +65,51 @@ describe('getLastRun', () => {
     });
   });
 
+  const expectedQuery = (spaceId: string) => [
+    {
+      query:
+        'FROM .kibana-event-log* | WHERE event.action == ?action AND event.provider == ?provider | SORT @timestamp DESC NULLS LAST | LIMIT 1 | KEEP @timestamp',
+      params: [{ action: 'delete-alerts' }, { provider: 'alerting' }],
+      filter: { term: { 'kibana.space_ids': spaceId } },
+    },
+    expect.anything(),
+  ];
+
   test('should return last run time if available', async () => {
     getSpaceId.mockReturnValueOnce('space1');
-    esClient.search.mockResolvedValueOnce({
-      took: 10,
-      timed_out: false,
-      _shards: { failed: 0, successful: 1, total: 1, skipped: 0 },
-      hits: {
-        total: { relation: 'eq', value: 1 },
-        hits: [
-          {
-            _id: '123',
-            _index: '.kibana-event-log',
-            _source: {
-              '@timestamp': '2025-03-25T15:20:44.704Z',
-              event: {
-                provider: 'alerting',
-                action: 'delete-alerts',
-                outcome: 'success',
-                start: '2025-03-25T15:20:44.704Z',
-                end: '2025-03-25T15:20:44.764Z',
-                duration: '60000000',
-              },
-              message: 'Alert deletion task deleted 1 alerts',
-              kibana: {
-                alert: {
-                  deletion: {
-                    num_deleted: 1,
-                  },
-                },
-                space_ids: ['space1'],
-                server_uuid: '00000000-2785-441b-ae8c-186a1936b17d',
-                version: '9.1.0',
-              },
-              ecs: {
-                version: '1.8.0',
-              },
-            },
-          },
-        ],
-      },
+    esClient.esql.query.mockResolvedValueOnce({
+      columns: [{ name: '@timestamp', type: 'date' }],
+      values: [['2025-03-25T15:20:44.704Z']],
     });
 
     const lastRunDate = await alertDeletionClient.getLastRun(fakeRequest);
 
-    expect(esClient.search).toHaveBeenCalledWith({
-      index: '.kibana-event-log*',
-      query: {
-        bool: {
-          filter: [
-            { term: { 'event.action': 'delete-alerts' } },
-            { term: { 'event.provider': 'alerting' } },
-            { term: { 'kibana.space_ids': 'space1' } },
-          ],
-        },
-      },
-      size: 1,
-      sort: [{ [TIMESTAMP]: 'desc' }],
-    });
+    expect(esClient.esql.query).toHaveBeenCalledWith(...expectedQuery('space1'));
     expect(lastRunDate).toEqual('2025-03-25T15:20:44.704Z');
   });
 
   test('should return undefined if not available', async () => {
     getSpaceId.mockReturnValueOnce('default');
-    esClient.search.mockResolvedValueOnce({
-      took: 10,
-      timed_out: false,
-      _shards: { failed: 0, successful: 1, total: 1, skipped: 0 },
-      hits: {
-        total: { relation: 'eq', value: 0 },
-        hits: [],
-      },
+    esClient.esql.query.mockResolvedValueOnce({
+      columns: [{ name: '@timestamp', type: 'date' }],
+      values: [],
     });
 
     const lastRunDate = await alertDeletionClient.getLastRun(fakeRequest);
 
-    expect(esClient.search).toHaveBeenCalledWith({
-      index: '.kibana-event-log*',
-      query: {
-        bool: {
-          filter: [
-            { term: { 'event.action': 'delete-alerts' } },
-            { term: { 'event.provider': 'alerting' } },
-            { term: { 'kibana.space_ids': 'default' } },
-          ],
-        },
-      },
-      size: 1,
-      sort: [{ [TIMESTAMP]: 'desc' }],
-    });
+    expect(esClient.esql.query).toHaveBeenCalledWith(...expectedQuery('default'));
     expect(lastRunDate).toBeUndefined();
   });
 
   test('logs and returns undefined if search errors', async () => {
     getSpaceId.mockReturnValueOnce('default');
-    esClient.search.mockImplementationOnce(() => {
+    esClient.esql.query.mockImplementationOnce(() => {
       throw new Error('search failed');
     });
 
     await alertDeletionClient.getLastRun(fakeRequest);
 
-    expect(esClient.search).toHaveBeenCalledWith({
-      index: '.kibana-event-log*',
-      query: {
-        bool: {
-          filter: [
-            { term: { 'event.action': 'delete-alerts' } },
-            { term: { 'event.provider': 'alerting' } },
-            { term: { 'kibana.space_ids': 'default' } },
-          ],
-        },
-      },
-      size: 1,
-      sort: [{ [TIMESTAMP]: 'desc' }],
-    });
+    expect(esClient.esql.query).toHaveBeenCalledWith(...expectedQuery('default'));
     expect(logger.error).toHaveBeenCalledWith('Error getting last run date: search failed');
   });
 });

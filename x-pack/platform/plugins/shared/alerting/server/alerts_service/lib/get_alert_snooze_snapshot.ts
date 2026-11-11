@@ -5,14 +5,11 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 import type { Logger } from '@kbn/logging';
-import {
-  ALERT_INSTANCE_ID,
-  ALERT_RULE_UUID,
-  ALERT_STATUS,
-  ALERT_STATUS_ACTIVE,
-} from '@kbn/rule-data-utils';
+import { ALERT_STATUS_ACTIVE } from '@kbn/rule-data-utils';
+import { runEsqlRows } from '../../lib/esql_read';
 
 export interface GetAlertSnoozeSnapshotParams {
   indices: string[];
@@ -35,29 +32,25 @@ export async function getAlertSnoozeSnapshot({
   esClient,
 }: GetAlertSnoozeSnapshotParamsWithDeps): Promise<Record<string, unknown> | null> {
   try {
-    const response = await esClient.search({
-      index: indices,
-      allow_no_indices: true,
-      size: 1,
-      _source: fields,
-      query: {
-        bool: {
-          must: [
-            { term: { [ALERT_RULE_UUID]: ruleId } },
-            { term: { [ALERT_STATUS]: ALERT_STATUS_ACTIVE } },
-          ],
-          filter: [{ term: { [ALERT_INSTANCE_ID]: alertId } }],
-        },
-      },
+    if (indices.length === 0) {
+      return null;
+    }
+    // `_source` keeps the requested fields as stored, including the ones missing from the mappings.
+    const [row] = await runEsqlRows({
+      esClient,
+      query: esql.from(indices, ['_source']).pipe`WHERE kibana.alert.rule.uuid == ${{
+        ruleId,
+      }} AND kibana.alert.status == ${{
+        status: ALERT_STATUS_ACTIVE,
+      }} AND kibana.alert.instance.id == ${{ alertId }}`.limit(1),
     });
 
-    const hit = response.hits.hits[0];
-    if (!hit) {
+    if (!row) {
       return null;
     }
 
     // Alert documents use flat dot-notation keys in _source
-    const source = (hit._source ?? {}) as Record<string, unknown>;
+    const source = (row._source ?? {}) as Record<string, unknown>;
     return fields.reduce<Record<string, unknown>>((snapshot, field) => {
       const value = source[field];
       snapshot[field] = value !== undefined ? value : null;

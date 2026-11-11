@@ -4,6 +4,7 @@
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
+import { esql } from '@elastic/esql';
 import { isNonLocalIndexName } from '@kbn/es-query';
 import { ALL_VALUE } from '@kbn/slo-schema';
 import type { CollectorFetchContext } from '@kbn/usage-collection-plugin/server';
@@ -11,6 +12,7 @@ import type { StoredSLODefinition } from '../../domain/models';
 import { SO_SLO_TYPE } from '../../saved_objects';
 import type { Usage } from './type';
 import { SUMMARY_DESTINATION_INDEX_PATTERN } from '../../../common/constants';
+import { runEsqlRows } from '../../services/utils/esql_read';
 
 export const fetcher = async (context: CollectorFetchContext) => {
   const finder = context.soClient.createPointInTimeFinder<StoredSLODefinition>({
@@ -18,20 +20,13 @@ export const fetcher = async (context: CollectorFetchContext) => {
     perPage: 100,
   });
 
-  const totalInstances = await context.esClient.count({
-    index: SUMMARY_DESTINATION_INDEX_PATTERN,
-    query: {
-      bool: {
-        filter: [
-          {
-            term: {
-              isTempDoc: false,
-            },
-          },
-        ],
-      },
-    },
+  const [instancesRow] = await runEsqlRows({
+    esClient: context.esClient,
+    ignoreUnknownIndex: true,
+    query: esql.from([SUMMARY_DESTINATION_INDEX_PATTERN]).pipe`WHERE isTempDoc == false`
+      .pipe`STATS total = COUNT(*)`,
   });
+  const totalInstances = Number(instancesRow?.total ?? 0);
 
   let usage: Usage['slo'] = {
     total: 0,
@@ -41,7 +36,7 @@ export const fetcher = async (context: CollectorFetchContext) => {
       total_with_groups: 0,
     },
     instances: {
-      total: totalInstances?.count ?? 0,
+      total: totalInstances,
     },
     by_status: {
       enabled: 0,

@@ -185,44 +185,40 @@ describe('composite_slo_summary_index', () => {
 
   describe('fetchCompositeSloSummariesFromIndex', () => {
     it('searches by spaceId-prefixed ids + spaceId filter and maps found sources by composite id', async () => {
-      const search = jest.fn().mockResolvedValue({
-        hits: {
-          hits: [
+      const query = jest.fn().mockResolvedValue({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: 'unsupported' },
+        ],
+        values: [
+          [
+            'default:comp-a',
             {
-              _id: 'default:comp-a',
-              _source: {
-                ...baseDoc,
-                summary: {
-                  sliValue: 0.99,
-                  status: 'HEALTHY',
-                  errorBudget: { initial: 0.01, consumed: 0, remaining: 1, isEstimated: false },
-                  fiveMinuteBurnRate: 0,
-                  oneHourBurnRate: 0,
-                  oneDayBurnRate: 0,
-                },
+              ...baseDoc,
+              summary: {
+                sliValue: 0.99,
+                status: 'HEALTHY',
+                errorBudget: { initial: 0.01, consumed: 0, remaining: 1, isEstimated: false },
+                fiveMinuteBurnRate: 0,
+                oneHourBurnRate: 0,
+                oneDayBurnRate: 0,
               },
             },
           ],
-        },
+        ],
       });
-      const esClient = { search } as unknown as import('@kbn/core/server').ElasticsearchClient;
+      const esClient = {
+        esql: { query },
+      } as unknown as import('@kbn/core/server').ElasticsearchClient;
 
       const map = await fetchCompositeSloSummariesFromIndex(esClient, 'default', [
         'comp-a',
         'comp-b',
       ]);
 
-      expect(search).toHaveBeenCalledWith({
-        index: COMPOSITE_SUMMARY_INDEX_NAME,
-        size: 2,
-        query: {
-          bool: {
-            filter: [
-              { ids: { values: ['default:comp-a', 'default:comp-b'] } },
-              { term: { spaceId: 'default' } },
-            ],
-          },
-        },
+      expect(query.mock.calls[0][0]).toEqual({
+        query: `FROM ${COMPOSITE_SUMMARY_INDEX_NAME} METADATA _id, _source | WHERE (_id IN (?docIds)) AND spaceId == ?spaceId | LIMIT 2`,
+        params: [{ docIds: ['default:comp-a', 'default:comp-b'] }, { spaceId: 'default' }],
       });
       expect(map.size).toBe(1);
       expect(map.get('comp-a')?.summary.sliValue).toBe(0.99);
@@ -230,12 +226,14 @@ describe('composite_slo_summary_index', () => {
     });
 
     it('returns empty map when no ids are provided', async () => {
-      const search = jest.fn();
-      const esClient = { search } as unknown as import('@kbn/core/server').ElasticsearchClient;
+      const query = jest.fn();
+      const esClient = {
+        esql: { query },
+      } as unknown as import('@kbn/core/server').ElasticsearchClient;
 
       const map = await fetchCompositeSloSummariesFromIndex(esClient, 'default', []);
 
-      expect(search).not.toHaveBeenCalled();
+      expect(query).not.toHaveBeenCalled();
       expect(map.size).toBe(0);
     });
   });
