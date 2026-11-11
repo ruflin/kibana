@@ -6,6 +6,8 @@
  */
 
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
+import { esqlRows, runEsqlRead } from '../lib/esql_read';
 import {
   WIKI_AI_INDEX_DEST,
   WIKI_ENTITY_TYPES,
@@ -302,29 +304,26 @@ export const createWikiPageStore = ({
     storedId.startsWith(`${spaceId}:`) ? storedId.slice(spaceId.length + 1) : storedId;
 
   const listAllRaw = async (): Promise<WikiPageSummary[]> => {
-    const response = await esClient.search<WikiKiSource>(
-      {
-        index: destValue,
-        ignore_unavailable: true,
-        allow_no_indices: true,
-        size: MAX_LIST_SIZE,
-        track_total_hits: false,
-        // `attributes` is a flattened field, so its leaves are keywords and need no mapping change.
-        query: {
-          bool: {
-            filter: [{ term: { tags: WIKI_TAG } }, { term: { [SPACE_ID_FIELD]: spaceId } }],
-          },
+    const response = await runEsqlRead({
+      esClient,
+      query: esql.from([destValue], ['_id', '_source']).pipe`SORT @timestamp DESC NULLS LAST`.limit(
+        MAX_LIST_SIZE
+      ),
+      // `tags` is multi-valued and `attributes.space_id` is a flattened subfield: both stay exact
+      // as the request filter rather than a WHERE.
+      filter: {
+        bool: {
+          filter: [{ term: { tags: WIKI_TAG } }, { term: { [SPACE_ID_FIELD]: spaceId } }],
         },
-        sort: [{ '@timestamp': { order: 'desc', unmapped_type: 'date' } }],
       },
-      { signal }
-    );
+      signal,
+    });
 
-    return response.hits.hits.flatMap((hit) => {
-      if (hit._id === undefined || hit._source === undefined) {
+    return esqlRows(response).flatMap((row) => {
+      if (typeof row._id !== 'string' || row._source === null || typeof row._source !== 'object') {
         return [];
       }
-      const summary = toSummary(toPageId(hit._id), hit._source);
+      const summary = toSummary(toPageId(row._id), row._source as WikiKiSource);
       return summary ? [summary] : [];
     });
   };

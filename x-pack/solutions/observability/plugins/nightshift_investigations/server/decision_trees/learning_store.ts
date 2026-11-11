@@ -6,6 +6,7 @@
  */
 
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 import {
   normalizeSymptomSlug,
   symptomSlugFromTreeId,
@@ -18,6 +19,7 @@ import type {
   ToolLearningCategory,
 } from '@kbn/nightshift-decision-trees';
 import { DECISION_TREE_AI_INDEX_DEST, DECISION_TREE_TAG } from '../../common/decision_trees';
+import { esqlSources, runEsqlRead } from '../lib/esql_read';
 
 const MAX_LEARNINGS = 200;
 const SPACE_ID_FIELD = 'attributes.space_id';
@@ -218,27 +220,17 @@ export const createLearningStore = ({
     },
 
     list: async () => {
-      const response = await esClient.search<DecisionTreeLearningSource>(
-        {
-          index: DECISION_TREE_AI_INDEX_DEST,
-          ignore_unavailable: true,
-          allow_no_indices: true,
-          size: MAX_LEARNINGS,
-          track_total_hits: false,
-          query: {
-            bool: {
-              filter: [
-                { term: { type: 'decision_tree_learning' } },
-                { term: { [SPACE_ID_FIELD]: spaceId } },
-              ],
-            },
-          },
-          sort: [{ '@timestamp': { order: 'desc', unmapped_type: 'date' } }],
+      const response = await runEsqlRead({
+        esClient,
+        query: esql.from([DECISION_TREE_AI_INDEX_DEST], ['_source']).pipe`WHERE type == ${esql.str(
+          'decision_tree_learning'
+        )}`.pipe`SORT @timestamp DESC NULLS LAST`.limit(MAX_LEARNINGS),
+        filter: {
+          bool: { filter: [{ term: { [SPACE_ID_FIELD]: spaceId } }] },
         },
-        { signal }
-      );
-
-      return response.hits.hits.flatMap((hit) => (hit._source ? [toRecord(hit._source)] : []));
+        signal,
+      });
+      return esqlSources<DecisionTreeLearningSource>(response).map(toRecord);
     },
   };
 };
