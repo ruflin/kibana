@@ -5,13 +5,15 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { rangeQuery } from '@kbn/observability-plugin/server';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type { APMIndices } from '@kbn/apm-sources-access-plugin/server';
 import { KIND } from '@kbn/apm-types/es_fields';
 import type { ServiceSchemaType } from '@kbn/apm-types';
-import { PROCESSOR_EVENT, SERVICE_NAME } from '../../../common/es_fields/apm';
+import { PROCESSOR_EVENT } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
+import { esqlRows, runEsqlRead } from '../../lib/helpers/esql_read';
 
 export async function getServiceSchemaType({
   esClient,
@@ -35,29 +37,28 @@ export async function getServiceSchemaType({
     .join(',');
   if (!index) return { schema: 'unknown' };
 
-  const baseFilter = [
-    { term: { [SERVICE_NAME]: serviceName } },
-    ...rangeQuery(start, end),
-    ...environmentQuery(environment),
-  ];
+  // The ES|QL query only needs the service name; the range and environment stay in the request
+  // `filter` because they are Query DSL helpers shared with the rest of the plugin.
+  const filter = {
+    bool: { filter: [...rangeQuery(start, end), ...environmentQuery(environment)] },
+  };
+  const sources = index.split(',');
 
-  const [ecsResponse, otelResponse] = await Promise.all([
-    esClient.search({
-      index,
-      size: 0,
-      terminate_after: 1,
-      query: { bool: { filter: [...baseFilter, { exists: { field: PROCESSOR_EVENT } }] } },
-    }),
-    esClient.search({
-      index,
-      size: 0,
-      terminate_after: 1,
-      query: { bool: { filter: [...baseFilter, { exists: { field: KIND } }] } },
-    }),
-  ]);
+  // `processor.event` and `kind` are mapped in only some of the indices, so unmapped fields are
+  // read as null instead of failing the query.
+  const exists = async (field: string) => {
+    const response = await runEsqlRead({
+      esClient,
+      query: esql.from(sources).addSetCommand('unmapped_fields', 'nullify')
+        .pipe`WHERE service.name == ${{ serviceName }} AND ${esql.dpar(field)} IS NOT NULL`.limit(
+        1
+      ),
+      filter,
+    });
+    return esqlRows(response).length > 0;
+  };
 
-  const hasEcs = (ecsResponse.hits.total as { value: number }).value > 0;
-  const hasOtel = (otelResponse.hits.total as { value: number }).value > 0;
+  const [hasEcs, hasOtel] = await Promise.all([exists(PROCESSOR_EVENT), exists(KIND)]);
 
   if (hasEcs) return { schema: 'ecs' };
   if (hasOtel) return { schema: 'otel' };

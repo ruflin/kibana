@@ -6,30 +6,18 @@
  */
 
 import { uniq } from 'lodash';
-import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type { APMIndices } from '@kbn/apm-sources-access-plugin/server';
 import { rangeQuery } from '@kbn/observability-plugin/server';
-import { KIND } from '@kbn/apm-types/es_fields';
-import {
-  PROCESSOR_EVENT,
-  RESOURCE_ATTRIBUTES_DEPLOYMENT_ENVIRONMENT_NAME,
-  SERVICE_ENVIRONMENT,
-  SERVICE_NAME,
-} from '../../../common/es_fields/apm';
 import { ENVIRONMENT_NOT_DEFINED } from '../../../common/environment_filter_values';
 import type { Environment } from '../../../common/environment_rt';
-import { ENVIRONMENT_FIELDS } from '../../../common/utils/environment_query';
+import { esqlRows, runEsqlRead } from '../../lib/helpers/esql_read';
 
-interface EnvironmentAggregations {
-  environments: estypes.AggregationsStringTermsAggregate;
-  otel_environments: estypes.AggregationsStringTermsAggregate;
-  missing_environments: estypes.AggregationsFilterAggregate;
-}
-
-function getBucketKeys({ buckets }: estypes.AggregationsStringTermsAggregate): string[] {
-  return Array.isArray(buckets) ? buckets.map(({ key }) => String(key)) : [];
-}
+const toStrings = (value: unknown): string[] =>
+  (Array.isArray(value) ? value : [value]).filter(
+    (item): item is string => typeof item === 'string'
+  );
 
 /**
  * Returns environments for a service across both APM-processed and unprocessed
@@ -56,65 +44,30 @@ export async function getUnifiedEnvironments({
   const index = [indices.transaction, indices.span].filter(Boolean).join(',');
   if (!index) return [];
 
-  const response = await esClient.search<never, EnvironmentAggregations>({
-    index,
-    size: 0,
-    track_total_hits: false,
-    query: {
-      bool: {
-        filter: [{ term: { [SERVICE_NAME]: serviceName } }, ...rangeQuery(start, end)],
-        should: [
-          // APM-processed: transactions are the authoritative environment source
-          {
-            bool: {
-              filter: [{ term: { [PROCESSOR_EVENT]: 'transaction' } }],
-            },
-          },
-          // Unprocessed OTel: server/consumer spans without processor.event
-          {
-            bool: {
-              filter: [{ terms: { [KIND]: ['Server', 'Consumer'] } }],
-              must_not: [{ exists: { field: PROCESSOR_EVENT } }],
-            },
-          },
-        ],
-        minimum_should_match: 1,
-      },
-    },
-    aggs: {
-      environments: {
-        terms: {
-          field: SERVICE_ENVIRONMENT,
-          size,
-          order: { _key: 'asc' as const },
-        },
-      },
-      otel_environments: {
-        terms: {
-          field: RESOURCE_ATTRIBUTES_DEPLOYMENT_ENVIRONMENT_NAME,
-          size,
-          order: { _key: 'asc' as const },
-        },
-      },
-      missing_environments: {
-        filter: {
-          bool: {
-            must_not: ENVIRONMENT_FIELDS.map((field) => ({ exists: { field } })),
-          },
-        },
-      },
-    },
+  // One row: the distinct values of both environment fields and the number of documents with
+  // neither. The DSL `terms` aggregations returned the first `size` keys in ascending order.
+  // Unmapped fields read as null: the OTel fields are not mapped in the APM-only indices.
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from(index.split(',')).addSetCommand('unmapped_fields', 'nullify')
+      .pipe`WHERE service.name == ${{ serviceName }}`
+      .pipe`WHERE processor.event == "transaction" OR (kind IN ("Server", "Consumer") AND processor.event IS NULL)`
+      .pipe`STATS environments = VALUES(service.environment), otel_environments = VALUES(resource.attributes.deployment.environment.name), missing_environments = COUNT(*) WHERE service.environment IS NULL AND resource.attributes.deployment.environment.name IS NULL`,
+    filter: { bool: { filter: rangeQuery(start, end) } },
   });
 
-  const { aggregations } = response;
-  if (!aggregations) return [];
+  const row = esqlRows(response)[0];
+  if (!row) return [];
+
+  const byKey = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const topKeys = (value: unknown) => toStrings(value).sort(byKey).slice(0, size);
 
   const environments = uniq([
-    ...getBucketKeys(aggregations.environments),
-    ...getBucketKeys(aggregations.otel_environments),
+    ...topKeys(row.environments),
+    ...topKeys(row.otel_environments),
   ]).sort() as Environment[];
 
-  if (aggregations.missing_environments.doc_count > 0) {
+  if (Number(row.missing_environments) > 0) {
     environments.push(ENVIRONMENT_NOT_DEFINED.value as Environment);
   }
 
