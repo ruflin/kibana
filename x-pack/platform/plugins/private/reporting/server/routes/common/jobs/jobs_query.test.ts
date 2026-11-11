@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { errors } from '@elastic/elasticsearch';
 import { set } from '@kbn/safer-lodash-set';
 
 import type { ElasticsearchClient, KibanaRequest } from '@kbn/core/server';
@@ -119,25 +120,40 @@ describe('jobsQuery', () => {
 
   describe('count', () => {
     beforeEach(() => {
-      client.count.mockResponse({ count: 10 } as Awaited<ReturnType<ElasticsearchClient['count']>>);
+      client.esql.query.mockResolvedValue({
+        columns: [{ name: 'total', type: 'long' }],
+        values: [[10]],
+      } as unknown as Awaited<ReturnType<ElasticsearchClient['esql']['query']>>);
     });
 
     it('should pass parameters in the request body', async () => {
       await jobsQuery.count(mockUser);
 
-      expect(client.count).toHaveBeenCalledWith(
-        expect.objectContaining({
-          query: set(
-            {},
-            'constant_score.filter.bool.must',
-            expect.arrayContaining([{ term: { created_by: 'somebody' } }])
-          ),
-        })
-      );
+      expect(client.esql.query).toHaveBeenCalledWith({
+        query:
+          'FROM .reporting-*, .kibana-reporting* | WHERE created_by == ?username | STATS total = COUNT(*)',
+        params: [{ username: 'somebody' }],
+      });
     });
 
     it('should return reports number', async () => {
       await expect(jobsQuery.count(mockUser)).resolves.toBe(10);
+    });
+
+    it('should return 0 when no reporting index exists', async () => {
+      client.esql.query.mockRejectedValue(
+        new errors.ResponseError({
+          statusCode: 400,
+          body: {
+            error: { type: 'verification_exception', reason: 'Found 1 problem\nUnknown index [x]' },
+          },
+          headers: {},
+          warnings: [],
+          meta: {} as never,
+        })
+      );
+
+      await expect(jobsQuery.count(mockUser)).resolves.toBe(0);
     });
   });
 

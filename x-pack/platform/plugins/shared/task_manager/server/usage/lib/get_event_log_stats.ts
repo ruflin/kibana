@@ -5,18 +5,63 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import type { ComposerQuery } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import { EVENT_LOG_ACTIONS, EVENT_LOG_PROVIDER } from '../../constants';
-import { EVENT_LOG_INDEX, MAX_TASK_TYPE_BUCKETS, TELEMETRY_WINDOW } from '../constants';
-import type { EventLogStatsAggregations, EventLogStatsResults, TermsBucket } from './types';
+import { EVENT_LOG_INDEX, MAX_TASK_TYPE_BUCKETS } from '../constants';
+import type { EventLogStatsResults } from './types';
 
 const NS_PER_MS = 1000000;
+const TELEMETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export const nanosToMillis = (nanos?: number | null): number | null =>
   nanos != null ? Math.round(nanos / NS_PER_MS) : null;
 
-const bucketsToArray = (buckets: TermsBucket[] = []) =>
-  buckets.map(({ key: name, doc_count: value }) => ({ name, value }));
+interface EsqlRows {
+  columns: Array<{ name: string }>;
+  values: unknown[][];
+}
+
+/**
+ * ES|QL reports a missing index as a 400 `verification_exception` ("Unknown index [<name>]"),
+ * where the search used `ignore_unavailable`.
+ */
+const isEsqlUnknownIndexError = (error: unknown): boolean => {
+  const { statusCode, body } = (error ?? {}) as {
+    statusCode?: number;
+    body?: { error?: { type?: string; reason?: string } };
+  };
+  return (
+    statusCode === 400 &&
+    body?.error?.type === 'verification_exception' &&
+    typeof body.error.reason === 'string' &&
+    body.error.reason.includes('Unknown index')
+  );
+};
+
+const runEsql = async (
+  esClient: ElasticsearchClient,
+  query: ComposerQuery,
+  signal: AbortSignal
+): Promise<Array<Record<string, unknown>>> => {
+  const { query: text, params } = query.toRequest();
+  try {
+    const { columns, values } = (await esClient.esql.query(
+      { query: text, ...(params && params.length > 0 ? { params } : {}) } as EsqlQueryRequest,
+      { signal }
+    )) as unknown as EsqlRows;
+    return values.map((row) =>
+      Object.fromEntries(columns.map(({ name }, index) => [name, row[index]]))
+    );
+  } catch (error) {
+    if (isEsqlUnknownIndexError(error)) return [];
+    throw error;
+  }
+};
+
+const asNumber = (value: unknown): number | null => (typeof value === 'number' ? value : null);
 
 /**
  * Aggregates cluster-wide task execution volume and schedule delay from the event log.
@@ -24,58 +69,60 @@ const bucketsToArray = (buckets: TermsBucket[] = []) =>
  * `task-run-start` is used rather than `task-run` because it is emitted once per execution even
  * when the task never completes (crash, cancellation), which makes it the truer measure of how
  * many task runs were actually started.
+ *
+ * Both queries cover the same fixed window, so the by-type breakdown reconciles with the total.
  */
 export async function getEventLogStats(
   esClient: ElasticsearchClient,
   signal: AbortSignal
 ): Promise<EventLogStatsResults> {
-  const response = await esClient.search(
-    {
-      index: EVENT_LOG_INDEX,
-      size: 0,
-      track_total_hits: true,
-      ignore_unavailable: true,
-      query: {
-        bool: {
-          filter: [
-            { term: { 'event.provider': EVENT_LOG_PROVIDER } },
-            { term: { 'event.action': EVENT_LOG_ACTIONS.taskRunStart } },
-            { range: { '@timestamp': { gte: TELEMETRY_WINDOW } } },
-          ],
-        },
-      },
-      aggs: {
-        by_task_type: {
-          terms: { field: 'kibana.task.type', size: MAX_TASK_TYPE_BUCKETS },
-        },
-        delay_percentiles: {
-          percentiles: {
-            field: 'kibana.task.schedule_delay',
-            percents: [50, 75, 95, 99],
-          },
-        },
-      },
-    },
-    { signal }
-  );
+  const until = new Date();
+  const params = {
+    provider: EVENT_LOG_PROVIDER,
+    action: EVENT_LOG_ACTIONS.taskRunStart,
+    since: new Date(until.getTime() - TELEMETRY_WINDOW_MS).toISOString(),
+    until: until.toISOString(),
+  };
+  const events = () =>
+    esql.from([EVENT_LOG_INDEX]).pipe`WHERE event.provider == ${{ provider: params.provider }}
+      AND event.action == ${{ action: params.action }}
+      AND @timestamp >= TO_DATETIME(${{ since: params.since }})
+      AND @timestamp <= TO_DATETIME(${{ until: params.until }})`;
 
-  const total =
-    typeof response.hits.total === 'number' ? response.hits.total : response.hits.total?.value ?? 0;
+  const [[totals], byType] = await Promise.all([
+    runEsql(
+      esClient,
+      events()
+        .pipe`STATS total = COUNT(*), typed = COUNT(kibana.task.type), p50 = PERCENTILE(kibana.task.schedule_delay, 50), p75 = PERCENTILE(kibana.task.schedule_delay, 75), p95 = PERCENTILE(kibana.task.schedule_delay, 95), p99 = PERCENTILE(kibana.task.schedule_delay, 99)`,
+      signal
+    ),
+    runEsql(
+      esClient,
+      events().pipe`WHERE kibana.task.type IS NOT NULL`
+        .pipe`STATS runs = COUNT(*) BY kibana.task.type`
+        .pipe`SORT runs DESC, kibana.task.type ASC`.limit(MAX_TASK_TYPE_BUCKETS),
+      signal
+    ),
+  ]);
 
-  const aggregations = response.aggregations as EventLogStatsAggregations | undefined;
-  const percentiles = aggregations?.delay_percentiles.values;
+  const taskRunsByType = byType.map((row) => ({
+    name: String(row['kibana.task.type']),
+    value: asNumber(row.runs) ?? 0,
+  }));
+  const typedRuns = asNumber(totals?.typed) ?? 0;
+  const listedRuns = taskRunsByType.reduce((sum, { value }) => sum + value, 0);
 
   return {
-    total_task_runs_24hr: total,
-    task_runs_by_type_24hr: bucketsToArray(aggregations?.by_task_type.buckets),
+    total_task_runs_24hr: asNumber(totals?.total) ?? 0,
+    task_runs_by_type_24hr: taskRunsByType,
     // Kibana registers far more task types than MAX_TASK_TYPE_BUCKETS, so the breakdown can be
     // truncated. Reporting the remainder keeps it reconcilable against total_task_runs_24hr.
-    task_runs_other_24hr: aggregations?.by_task_type.sum_other_doc_count ?? 0,
+    task_runs_other_24hr: Math.max(0, typedRuns - listedRuns),
     schedule_delay_ms_24hr: {
-      p50: nanosToMillis(percentiles?.['50.0']),
-      p75: nanosToMillis(percentiles?.['75.0']),
-      p95: nanosToMillis(percentiles?.['95.0']),
-      p99: nanosToMillis(percentiles?.['99.0']),
+      p50: nanosToMillis(asNumber(totals?.p50)),
+      p75: nanosToMillis(asNumber(totals?.p75)),
+      p95: nanosToMillis(asNumber(totals?.p95)),
+      p99: nanosToMillis(asNumber(totals?.p99)),
     },
   };
 }

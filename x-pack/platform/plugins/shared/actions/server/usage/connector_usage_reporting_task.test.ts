@@ -9,6 +9,7 @@ import fs from 'fs';
 import axios from 'axios';
 import { loggingSystemMock } from '@kbn/core/server/mocks';
 import { coreMock } from '@kbn/core/server/mocks';
+import type { ElasticsearchClientMock } from '@kbn/core/server/mocks';
 import type {
   TaskManagerSetupContract,
   TaskManagerStartContract,
@@ -24,7 +25,6 @@ import {
 } from './connector_usage_reporting_task';
 import type { CoreSetup, ElasticsearchClient } from '@kbn/core/server';
 import type { ActionsPluginsStart } from '../plugin';
-import type { SearchResponse } from '@elastic/elasticsearch/lib/api/types';
 
 jest.mock('axios');
 const mockedAxiosPost = jest.spyOn(axios, 'post');
@@ -40,7 +40,7 @@ describe('ConnectorUsageReportingTask', () => {
   const logger = loggingSystemMock.createLogger();
   const { createSetup } = coreMock;
   const { createSetup: taskManagerSetupMock, createStart: taskManagerStartMock } = taskManagerMock;
-  let mockEsClient: jest.Mocked<ElasticsearchClient>;
+  let mockEsClient: ElasticsearchClientMock;
   let mockCore: CoreSetup<ActionsPluginsStart>;
   let mockTaskManagerSetup: jest.Mocked<TaskManagerSetupContract>;
   let mockTaskManagerStart: jest.Mocked<TaskManagerStartContract>;
@@ -50,7 +50,7 @@ describe('ConnectorUsageReportingTask', () => {
     mockTaskManagerStart = taskManagerStartMock();
     mockCore = createSetup();
     mockEsClient = (await mockCore.getStartServices())[0].elasticsearch.client
-      .asInternalUser as jest.Mocked<ElasticsearchClient>;
+      .asInternalUser as ElasticsearchClientMock;
   });
 
   afterEach(() => {
@@ -338,9 +338,10 @@ describe('ConnectorUsageReportingTask', () => {
 
   it('runs the task', async () => {
     readFileSpy.mockImplementationOnce(() => '---CA CERTIFICATE---');
-    mockEsClient.search.mockResolvedValueOnce({
-      aggregations: { total_usage: 215 },
-    } as SearchResponse<unknown, unknown>);
+    mockEsClient.esql.query.mockResolvedValueOnce({
+      columns: [{ name: 'total_usage', type: 'double' }],
+      values: [[215]],
+    } as unknown as Awaited<ReturnType<ElasticsearchClient['esql']['query']>>);
 
     mockedAxiosPost.mockResolvedValueOnce(200);
 
@@ -365,7 +366,7 @@ describe('ConnectorUsageReportingTask', () => {
         },
         usage: {
           period_seconds: 43200,
-          quantity: 0,
+          quantity: 215,
           type: 'connector_request_body_bytes',
         },
         usage_timestamp: nowStr,
@@ -386,9 +387,59 @@ describe('ConnectorUsageReportingTask', () => {
     });
   });
 
+  it('sums the request body bytes of the connector executions in the reporting window', async () => {
+    readFileSpy.mockImplementationOnce(() => '---CA CERTIFICATE---');
+    mockEsClient.esql.query.mockResolvedValueOnce({
+      columns: [{ name: 'total_usage', type: 'double' }],
+      values: [[215]],
+    } as unknown as Awaited<ReturnType<ElasticsearchClient['esql']['query']>>);
+    mockedAxiosPost.mockResolvedValueOnce(200);
+
+    const lastReportedUsageDate = new Date('2024-01-01T00:00:00.000Z');
+    const taskRunner = await createTaskRunner({
+      lastReportedUsageDate,
+      projectId: 'test-project',
+      url: 'usage-api',
+    });
+    await taskRunner.run();
+
+    const [request] = mockEsClient.esql.query.mock.calls[0];
+    expect(request).toEqual({
+      query:
+        'FROM test-index | WHERE event.action == "execute" AND event.provider == "actions" AND kibana.action.execution.usage.request_body_bytes IS NOT NULL AND @timestamp > TO_DATETIME(?fromDate) AND @timestamp <= TO_DATETIME(?toDate) | STATS total_usage = SUM(TO_DOUBLE(kibana.action.execution.usage.request_body_bytes))',
+      params: [{ fromDate: '2024-01-01T00:00:00.000Z' }, { toDate: nowStr }],
+    });
+  });
+
+  it('reports no usage when no event log index exists yet', async () => {
+    readFileSpy.mockImplementationOnce(() => '---CA CERTIFICATE---');
+    mockEsClient.esql.query.mockRejectedValueOnce(
+      Object.assign(new Error('verification_exception'), {
+        statusCode: 400,
+        body: {
+          error: { type: 'verification_exception', reason: 'Found 1 problem\nUnknown index [x]' },
+        },
+      })
+    );
+    mockedAxiosPost.mockResolvedValueOnce(200);
+
+    const taskRunner = await createTaskRunner({
+      lastReportedUsageDate: new Date('2024-01-01T00:00:00.000Z'),
+      projectId: 'test-project',
+      url: 'usage-api',
+    });
+    await taskRunner.run();
+
+    expect(mockedAxiosPost).toHaveBeenCalledWith(
+      'usage-api',
+      [expect.objectContaining({ usage: expect.objectContaining({ quantity: 0 }) })],
+      expect.anything()
+    );
+  });
+
   it('re-runs the task when search for records fails', async () => {
     readFileSpy.mockImplementationOnce(() => '---CA CERTIFICATE---');
-    mockEsClient.search.mockRejectedValue(new Error('500'));
+    mockEsClient.esql.query.mockRejectedValue(new Error('500'));
 
     mockedAxiosPost.mockResolvedValueOnce(200);
 
@@ -413,9 +464,10 @@ describe('ConnectorUsageReportingTask', () => {
 
   it('re-runs the task when it fails to push the usage record', async () => {
     readFileSpy.mockImplementationOnce(() => '---CA CERTIFICATE---');
-    mockEsClient.search.mockResolvedValueOnce({
-      aggregations: { total_usage: 215 },
-    } as SearchResponse<unknown, unknown>);
+    mockEsClient.esql.query.mockResolvedValueOnce({
+      columns: [{ name: 'total_usage', type: 'double' }],
+      values: [[215]],
+    } as unknown as Awaited<ReturnType<ElasticsearchClient['esql']['query']>>);
 
     mockedAxiosPost.mockRejectedValueOnce(500);
 
@@ -440,9 +492,10 @@ describe('ConnectorUsageReportingTask', () => {
 
   it('stops retrying after 5 attempts', async () => {
     readFileSpy.mockImplementationOnce(() => '---CA CERTIFICATE---');
-    mockEsClient.search.mockResolvedValueOnce({
-      aggregations: { total_usage: 215 },
-    } as SearchResponse<unknown, unknown>);
+    mockEsClient.esql.query.mockResolvedValueOnce({
+      columns: [{ name: 'total_usage', type: 'double' }],
+      values: [[215]],
+    } as unknown as Awaited<ReturnType<ElasticsearchClient['esql']['query']>>);
 
     mockedAxiosPost.mockRejectedValueOnce(new Error('test-error'));
 

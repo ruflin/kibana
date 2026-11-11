@@ -5,32 +5,42 @@
  * 2.0.
  */
 
-import type { estypes } from '@elastic/elasticsearch';
+import { errors } from '@elastic/elasticsearch';
 import { elasticsearchServiceMock } from '@kbn/core/server/mocks';
 import { getEventLogStats, nanosToMillis } from './get_event_log_stats';
-import type { EventLogStatsAggregations } from './types';
-import { EVENT_LOG_INDEX, MAX_TASK_TYPE_BUCKETS } from '../constants';
+import { MAX_TASK_TYPE_BUCKETS } from '../constants';
 
 const elasticsearch = elasticsearchServiceMock.createStart();
 const esClient = elasticsearch.client.asInternalUser;
 const signal = new AbortController().signal;
 
-/**
- * The Elasticsearch aggregation response types are a broad union that cannot be constructed
- * literally, so the assembled response is cast once here while each test still supplies
- * aggregations typed against the interface the code actually reads.
- */
-const mockSearchResponse = (
-  total: estypes.SearchResponse['hits']['total'],
-  aggregations?: EventLogStatsAggregations
-) =>
-  ({
-    took: 1,
-    timed_out: false,
-    _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-    hits: { total, max_score: null, hits: [] },
-    ...(aggregations ? { aggregations } : {}),
-  } as unknown as estypes.SearchResponse);
+const TOTALS_COLUMNS = ['total', 'typed', 'p50', 'p75', 'p95', 'p99'].map((name) => ({
+  name,
+  type: 'double',
+}));
+const BY_TYPE_COLUMNS = [
+  { name: 'runs', type: 'long' },
+  { name: 'kibana.task.type', type: 'keyword' },
+];
+
+type EsqlResponse = Awaited<ReturnType<typeof esClient.esql.query>>;
+
+/** Answers the totals query and the by-type query, which run in parallel. */
+const mockEsql = ({
+  totals = [0, 0, null, null, null, null],
+  byType = [],
+}: {
+  totals?: Array<number | null>;
+  byType?: Array<[number, string]>;
+}) => {
+  esClient.esql.query.mockImplementation((async (request: { query: string }) =>
+    request.query.includes('BY kibana.task.type')
+      ? { columns: BY_TYPE_COLUMNS, values: byType }
+      : { columns: TOTALS_COLUMNS, values: [totals] }) as unknown as () => Promise<EsqlResponse>);
+};
+
+const requestedQueries = () =>
+  esClient.esql.query.mock.calls.map(([request]) => request as { query: string; params: unknown });
 
 beforeEach(() => {
   jest.resetAllMocks();
@@ -60,83 +70,52 @@ describe('nanosToMillis', () => {
 
 describe('getEventLogStats', () => {
   it('queries the event log for task-run-start events in the last 24h', async () => {
-    esClient.search.mockResponseOnce(
-      mockSearchResponse(
-        { value: 0, relation: 'eq' },
-        {
-          by_task_type: { buckets: [], sum_other_doc_count: 0 },
-          delay_percentiles: { values: {} },
-        }
-      )
-    );
+    mockEsql({});
 
     await getEventLogStats(esClient, signal);
 
-    expect(esClient.search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        index: EVENT_LOG_INDEX,
-        size: 0,
-        track_total_hits: true,
-        ignore_unavailable: true,
-        query: {
-          bool: {
-            filter: [
-              { term: { 'event.provider': 'taskManager' } },
-              { term: { 'event.action': 'task-run-start' } },
-              { range: { '@timestamp': { gte: 'now-24h' } } },
-            ],
-          },
-        },
-        aggs: {
-          by_task_type: {
-            terms: { field: 'kibana.task.type', size: MAX_TASK_TYPE_BUCKETS },
-          },
-          delay_percentiles: {
-            percentiles: {
-              field: 'kibana.task.schedule_delay',
-              percents: [50, 75, 95, 99],
-            },
-          },
-        },
-      }),
-      { signal }
+    const [totalsRequest, byTypeRequest] = requestedQueries();
+    expect(totalsRequest.query).toContain('FROM .kibana-event-log-*');
+    expect(totalsRequest.query).toContain(
+      'WHERE event.provider == ?provider AND event.action == ?action AND @timestamp >= TO_DATETIME(?since) AND @timestamp <= TO_DATETIME(?until)'
     );
+    expect(totalsRequest.query).toContain(
+      'STATS total = COUNT(*), typed = COUNT(kibana.task.type), p50 = PERCENTILE(kibana.task.schedule_delay, 50), p75 = PERCENTILE(kibana.task.schedule_delay, 75), p95 = PERCENTILE(kibana.task.schedule_delay, 95), p99 = PERCENTILE(kibana.task.schedule_delay, 99)'
+    );
+    expect(byTypeRequest.query).toContain('STATS runs = COUNT(*) BY kibana.task.type');
+    expect(byTypeRequest.query).toContain(`LIMIT ${MAX_TASK_TYPE_BUCKETS}`);
+
+    const { provider, action, since, until } = Object.assign(
+      {},
+      ...(totalsRequest.params as Array<Record<string, string>>)
+    );
+    expect(provider).toBe('taskManager');
+    expect(action).toBe('task-run-start');
+    expect(new Date(until).getTime() - new Date(since).getTime()).toBe(24 * 60 * 60 * 1000);
+    // both queries cover the same window, so the breakdown reconciles with the total
+    expect(byTypeRequest.params).toEqual(totalsRequest.params);
   });
 
   it("forwards the task's abort signal so a timeout cancels the aggregation", async () => {
     const abortController = new AbortController();
-    esClient.search.mockResponseOnce(mockSearchResponse({ value: 0, relation: 'eq' }));
+    mockEsql({});
 
     await getEventLogStats(esClient, abortController.signal);
 
-    expect(esClient.search).toHaveBeenCalledWith(expect.anything(), {
-      signal: abortController.signal,
-    });
+    expect(esClient.esql.query).toHaveBeenCalledTimes(2);
+    esClient.esql.query.mock.calls.forEach(([, options]) =>
+      expect(options).toEqual({ signal: abortController.signal })
+    );
   });
 
   it('returns totals, by-type counts and delay percentiles converted to ms', async () => {
-    esClient.search.mockResponseOnce(
-      mockSearchResponse(
-        { value: 150, relation: 'eq' },
-        {
-          by_task_type: {
-            buckets: [
-              { key: 'alerting:.index-threshold', doc_count: 100 },
-              { key: 'actions:.server-log', doc_count: 50 },
-            ],
-            sum_other_doc_count: 0,
-          },
-          delay_percentiles: {
-            values: {
-              '50.0': 100000000,
-              '75.0': 250000000,
-              '95.0': 1200000000,
-              '99.0': 5000000000,
-            },
-          },
-        }
-      )
-    );
+    mockEsql({
+      totals: [150, 150, 100000000, 250000000, 1200000000, 5000000000],
+      byType: [
+        [100, 'alerting:.index-threshold'],
+        [50, 'actions:.server-log'],
+      ],
+    });
 
     const result = await getEventLogStats(esClient, signal);
 
@@ -152,18 +131,10 @@ describe('getEventLogStats', () => {
   });
 
   it('reports the runs excluded from a truncated by-type breakdown', async () => {
-    esClient.search.mockResponseOnce(
-      mockSearchResponse(
-        { value: 500, relation: 'eq' },
-        {
-          by_task_type: {
-            buckets: [{ key: 'alerting:.index-threshold', doc_count: 300 }],
-            sum_other_doc_count: 200,
-          },
-          delay_percentiles: { values: {} },
-        }
-      )
-    );
+    mockEsql({
+      totals: [500, 500, null, null, null, null],
+      byType: [[300, 'alerting:.index-threshold']],
+    });
 
     const result = await getEventLogStats(esClient, signal);
 
@@ -176,8 +147,19 @@ describe('getEventLogStats', () => {
     expect(breakdownTotal + result.task_runs_other_24hr!).toBe(result.total_task_runs_24hr);
   });
 
-  it('returns defaults when aggregations are undefined', async () => {
-    esClient.search.mockResponseOnce(mockSearchResponse({ value: 0, relation: 'eq' }));
+  it('does not count runs without a task type as truncated runs', async () => {
+    mockEsql({
+      totals: [10, 8, null, null, null, null],
+      byType: [[8, 'alerting:.index-threshold']],
+    });
+
+    const result = await getEventLogStats(esClient, signal);
+
+    expect(result.task_runs_other_24hr).toBe(0);
+  });
+
+  it('returns defaults when the event log has no matching events', async () => {
+    mockEsql({});
 
     const result = await getEventLogStats(esClient, signal);
 
@@ -190,20 +172,10 @@ describe('getEventLogStats', () => {
   });
 
   it('returns null percentiles when the event log has no schedule_delay values', async () => {
-    esClient.search.mockResponseOnce(
-      mockSearchResponse(
-        { value: 3, relation: 'eq' },
-        {
-          by_task_type: {
-            buckets: [{ key: 'task_manager:snapshot_telemetry', doc_count: 3 }],
-            sum_other_doc_count: 0,
-          },
-          delay_percentiles: {
-            values: { '50.0': null, '75.0': null, '95.0': null, '99.0': null },
-          },
-        }
-      )
-    );
+    mockEsql({
+      totals: [3, 3, null, null, null, null],
+      byType: [[3, 'task_manager:snapshot_telemetry']],
+    });
 
     const result = await getEventLogStats(esClient, signal);
 
@@ -211,21 +183,27 @@ describe('getEventLogStats', () => {
     expect(result.schedule_delay_ms_24hr).toEqual({ p50: null, p75: null, p95: null, p99: null });
   });
 
-  it('handles the numeric hits.total format', async () => {
-    esClient.search.mockResponseOnce(
-      mockSearchResponse(5, {
-        by_task_type: { buckets: [], sum_other_doc_count: 0 },
-        delay_percentiles: { values: {} },
+  it('returns defaults when the event log index does not exist', async () => {
+    esClient.esql.query.mockRejectedValue(
+      new errors.ResponseError({
+        statusCode: 400,
+        body: {
+          error: { type: 'verification_exception', reason: 'Found 1 problem\nUnknown index [x]' },
+        },
+        headers: {},
+        warnings: [],
+        meta: {} as never,
       })
     );
 
     const result = await getEventLogStats(esClient, signal);
 
-    expect(result.total_task_runs_24hr).toBe(5);
+    expect(result.total_task_runs_24hr).toBe(0);
+    expect(result.task_runs_by_type_24hr).toEqual([]);
   });
 
   it('propagates elasticsearch errors to the caller', async () => {
-    esClient.search.mockRejectedValueOnce(new Error('index_not_found_exception'));
+    esClient.esql.query.mockRejectedValue(new Error('index_not_found_exception'));
 
     await expect(getEventLogStats(esClient, signal)).rejects.toThrow('index_not_found_exception');
   });

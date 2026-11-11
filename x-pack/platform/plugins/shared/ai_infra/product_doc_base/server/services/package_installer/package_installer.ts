@@ -9,6 +9,7 @@ import type { Logger } from '@kbn/logging';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type { ResourceType } from '@kbn/product-doc-common';
 import Semver from 'semver';
+import { esql } from '@elastic/esql';
 import { getSafePath } from '@kbn/fs';
 import {
   getArtifactName,
@@ -43,6 +44,12 @@ import {
   purgeArtifactsFolder,
 } from './utils';
 import { majorMinor, latestVersion } from './utils/semver';
+
+// Index names the ES|QL parser reads without quotes. Anything else is quoted, so that an index name
+// can never end the `FROM` command.
+const UNQUOTED_SOURCE = /^[A-Za-z0-9._*:-]+$/;
+const toEsqlSource = (source: string): string =>
+  UNQUOTED_SOURCE.test(source) ? source : `"${source.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 import {
   validateArtifactArchive,
   validateOpenApiArtifactArchive,
@@ -904,8 +911,13 @@ export class PackageInstaller {
       const exists = await this.esClient.indices.exists({ index: indexName });
       if (!exists) return { status: 'uninstalled' };
 
-      const countResponse = await this.esClient.count({ index: indexName });
-      if (countResponse.count === 0) return { status: 'uninstalled' };
+      // The index name can carry the inference id, so it is quoted unless it is a plain name.
+      const { query } = esql.from([toEsqlSource(indexName)])
+        .pipe`STATS total = COUNT(*)`.toRequest();
+      const countResponse = (await this.esClient.esql.query({ query })) as unknown as {
+        values: unknown[][];
+      };
+      if (countResponse.values[0]?.[0] === 0) return { status: 'uninstalled' };
 
       // Unknown version (legacy install), but installed.
       return { status: 'installed', latestVersion: repoLatestVersion };

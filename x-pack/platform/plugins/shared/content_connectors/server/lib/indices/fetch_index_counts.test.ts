@@ -12,7 +12,11 @@ import { fetchIndexCounts } from './fetch_index_counts';
 describe('fetchIndexCounts lib function', () => {
   const mockClient = {
     asCurrentUser: {
-      count: jest.fn().mockReturnValue({ count: 100 }),
+      esql: {
+        query: jest
+          .fn()
+          .mockReturnValue({ columns: [{ name: 'total', type: 'long' }], values: [[100]] }),
+      },
     },
   };
 
@@ -26,5 +30,21 @@ describe('fetchIndexCounts lib function', () => {
       index2: 100,
       index3: 100,
     });
+  });
+
+  it('counts each index with its own query', async () => {
+    await fetchIndexCounts(mockClient as unknown as IScopedClusterClient, ['index2']);
+
+    expect(mockClient.asCurrentUser.esql.query).toHaveBeenCalledWith({
+      query: 'FROM index2 | STATS total = COUNT(*)',
+    });
+  });
+
+  it('returns a zero count for an index that breaks without failing the others', async () => {
+    mockClient.asCurrentUser.esql.query.mockRejectedValueOnce(new Error('index closed'));
+
+    await expect(
+      fetchIndexCounts(mockClient as unknown as IScopedClusterClient, ['broken', 'index2'])
+    ).resolves.toEqual({ broken: 0, index2: 100 });
   });
 });

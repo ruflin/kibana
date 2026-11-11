@@ -29,6 +29,7 @@ import type { StartDeps } from './types';
 import { checkFileUploadPrivileges } from './check_privileges';
 import { previewIndexTimeRange } from './preview_index_time_range';
 import { previewTikaContents } from './preview_tika_contents';
+import { countDocuments, isEsqlUnknownIndexError } from './utils/esql_count';
 
 function getRequestAbortedSignal(request: KibanaRequest): AbortSignal {
   const controller = new AbortController();
@@ -616,13 +617,19 @@ export function fileUploadRoutes(coreSetup: CoreSetup<StartDeps, unknown>, logge
           const { index, expectedCount } = request.body;
           const esClient = (await context.core).elasticsearch.client;
 
-          const { count } = await esClient.asCurrentUser.count({ index });
+          const count = await countDocuments(esClient.asCurrentUser, index);
           const isSearchable = count >= expectedCount;
 
           return response.ok({
             body: { isSearchable, count },
           });
         } catch (e) {
+          // The count API answered a missing index with a 404, and ES|QL answers with a 400.
+          if (isEsqlUnknownIndexError(e)) {
+            return response.notFound({
+              body: { message: (e as { body: { error: { reason: string } } }).body.error.reason },
+            });
+          }
           return response.customError(wrapError(e));
         }
       }

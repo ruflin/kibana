@@ -9,6 +9,7 @@ import type {
   IndicesStatsIndicesStats,
   IndicesStatsShardStats,
 } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { IScopedClusterClient, Logger } from '@kbn/core/server';
 import { VECTOR_COUNT_ENABLED } from '../../common/constants';
 import type { DataPanelAccess, NewIndexDetails } from '../../common/types';
@@ -86,6 +87,12 @@ export interface MonitorPrivileges {
  * `expand_wildcards: ['open']` the pattern resolves to regular user indices and the backing
  * indices of user-created data streams only.
  */
+// Index names the ES|QL parser reads without quotes. Anything else is quoted, so that an index name
+// can never end the `FROM` command.
+const UNQUOTED_SOURCE = /^[A-Za-z0-9._*:-]+$/;
+const toEsqlSource = (source: string): string =>
+  UNQUOTED_SOURCE.test(source) ? source : `"${source.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+
 const USER_INDICES_PATTERN = ['*', '-.*', '-traces-agent_builder.otel-*'];
 
 /**
@@ -373,7 +380,13 @@ export const fetchNewIndex = async (
     }
 
     const { name, createdAt } = newest;
-    const { count } = await client.asCurrentUser.count({ index: name });
+    // `COUNT(*)` of a single index, whose name can be any valid index name, so it is quoted unless it
+    // is a plain name. `_cat/indices` already limited it to an open index, so there is no missing index.
+    const { query } = esql.from([toEsqlSource(name)]).pipe`STATS total = COUNT(*)`.toRequest();
+    const { values } = (await client.asCurrentUser.esql.query({
+      query,
+    })) as unknown as { values: unknown[][] };
+    const count = typeof values[0]?.[0] === 'number' ? values[0][0] : 0;
 
     return {
       indexName: name,
