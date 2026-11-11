@@ -5,7 +5,8 @@
  * 2.0.
  */
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
-import { termQuery, kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import type {
   AwsLambdaArchitecture,
   AWSLambdaPriceFactor,
@@ -24,8 +25,9 @@ import {
 } from '../../../../common/es_fields/apm';
 import { RollupInterval } from '../../../../common/rollup';
 import { environmentQuery } from '../../../../common/utils/environment_query';
+import { esqlRows } from '../../../lib/helpers/esql_read';
+import { boolFilter, fromApmIndex } from '../../../lib/helpers/esql_apm';
 import type { APMEventClient } from '../../../lib/helpers/create_es_client/create_apm_event_client';
-import { computeUsageAvgScript } from './get_compute_usage_chart';
 import { calcEstimatedCost, calcMemoryUsedRate, convertComputeUsageToGbSec } from './helper';
 
 async function getServerlessTransactionThroughput({
@@ -45,7 +47,7 @@ async function getServerlessTransactionThroughput({
   serverlessId?: string;
   apmEventClient: APMEventClient;
 }) {
-  const params = {
+  const response = await apmEventClient.esql('get_serverless_transaction_throughout', {
     apm: {
       sources: [
         {
@@ -54,24 +56,21 @@ async function getServerlessTransactionThroughput({
         },
       ],
     },
-    track_total_hits: true,
-    size: 0,
-    query: {
-      bool: {
-        filter: [
-          ...termQuery(SERVICE_NAME, serviceName),
-          ...rangeQuery(start, end),
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-          ...termQuery(FAAS_ID, serverlessId),
-        ],
-      },
+    query: (index) => {
+      let query = fromApmIndex(index).pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ serviceName }}`;
+      if (serverlessId) {
+        query = query.pipe`WHERE ${esql.col(FAAS_ID)} == ${{ serverlessId }}`;
+      }
+      return query.pipe`STATS transaction_count = COUNT(*)`.limit(1);
     },
-  };
+    filter: boolFilter(
+      ...rangeQuery(start, end),
+      ...environmentQuery(environment),
+      ...kqlQuery(kuery)
+    ),
+  });
 
-  const response = await apmEventClient.search('get_serverless_transaction_throughout', params);
-
-  return response.hits.total.value;
+  return Number(esqlRows(response)[0]?.transaction_count ?? 0);
 }
 
 export async function getServerlessSummary({
@@ -95,43 +94,37 @@ export async function getServerlessSummary({
   awsLambdaPriceFactor?: AWSLambdaPriceFactor;
   awsLambdaRequestCostPerMillion?: number;
 }): Promise<ServerlessSummaryResponse> {
-  const params = {
-    apm: {
-      events: [ProcessorEvent.metric],
-    },
-    track_total_hits: false,
-    size: 0,
-    query: {
-      bool: {
-        filter: [
-          ...termQuery(METRICSET_NAME, 'app'),
-          { term: { [SERVICE_NAME]: serviceName } },
-          ...rangeQuery(start, end),
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-          ...termQuery(FAAS_ID, serverlessId),
-        ],
-      },
-    },
-    aggs: {
-      totalFunctions: { cardinality: { field: FAAS_ID } },
-      faasDurationAvg: { avg: { field: FAAS_DURATION } },
-      faasBilledDurationAvg: { avg: { field: FAAS_BILLED_DURATION } },
-      avgTotalMemory: { avg: { field: METRIC_SYSTEM_TOTAL_MEMORY } },
-      avgFreeMemory: { avg: { field: METRIC_SYSTEM_FREE_MEMORY } },
-      countInvocations: { value_count: { field: FAAS_BILLED_DURATION } },
-      avgComputeUsageBytesMs: computeUsageAvgScript,
-      sample: {
-        top_metrics: {
-          metrics: [{ field: HOST_ARCHITECTURE }],
-          sort: [{ '@timestamp': { order: 'desc' as const } }],
-        },
-      },
-    },
-  };
-
   const [response, transactionThroughput] = await Promise.all([
-    apmEventClient.search('get_serverless_summary', params),
+    apmEventClient.esql('get_serverless_summary', {
+      apm: {
+        events: [ProcessorEvent.metric],
+      },
+      // The compute usage is the average of the memory times the billed duration, where a
+      // missing value counts as 0.
+      query: (index) => {
+        let query = fromApmIndex(index).pipe`WHERE ${esql.col(METRICSET_NAME)} == ${{
+          metricset: 'app',
+        }}`.pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ serviceName }}`;
+        if (serverlessId) {
+          query = query.pipe`WHERE ${esql.col(FAAS_ID)} == ${{ serverlessId }}`;
+        }
+        return query.pipe`STATS total_functions = COUNT_DISTINCT(${esql.col(FAAS_ID)}),
+            faas_duration_avg = AVG(${esql.col(FAAS_DURATION)}),
+            faas_billed_duration_avg = AVG(${esql.col(FAAS_BILLED_DURATION)}),
+            avg_total_memory = AVG(${esql.col(METRIC_SYSTEM_TOTAL_MEMORY)}),
+            avg_free_memory = AVG(${esql.col(METRIC_SYSTEM_FREE_MEMORY)}),
+            count_invocations = COUNT(${esql.col(FAAS_BILLED_DURATION)}),
+            avg_compute_usage_bytes_ms = AVG(TO_DOUBLE(COALESCE(${esql.col(
+              METRIC_SYSTEM_TOTAL_MEMORY
+            )}, 0)) * COALESCE(${esql.col(FAAS_BILLED_DURATION)}, 0)),
+            architecture = LAST(${esql.col(HOST_ARCHITECTURE)}, @timestamp)`.limit(1);
+      },
+      filter: boolFilter(
+        ...rangeQuery(start, end),
+        ...environmentQuery(environment),
+        ...kqlQuery(kuery)
+      ),
+    }),
     getServerlessTransactionThroughput({
       end,
       environment,
@@ -143,24 +136,26 @@ export async function getServerlessSummary({
     }),
   ]);
 
+  const summary = esqlRows(response)[0];
+  const numberOrNull = (value: unknown) => (typeof value === 'number' ? value : null);
+
   return {
     memoryUsageAvgRate: calcMemoryUsedRate({
-      memoryFree: response.aggregations?.avgFreeMemory?.value,
-      memoryTotal: response.aggregations?.avgTotalMemory?.value,
+      memoryFree: numberOrNull(summary?.avg_free_memory),
+      memoryTotal: numberOrNull(summary?.avg_total_memory),
     }),
-    serverlessFunctionsTotal: response.aggregations?.totalFunctions?.value,
-    serverlessDurationAvg: response.aggregations?.faasDurationAvg?.value,
-    billedDurationAvg: response.aggregations?.faasBilledDurationAvg?.value,
+    serverlessFunctionsTotal: numberOrNull(summary?.total_functions) ?? undefined,
+    serverlessDurationAvg: numberOrNull(summary?.faas_duration_avg),
+    billedDurationAvg: numberOrNull(summary?.faas_billed_duration_avg),
     estimatedCost: calcEstimatedCost({
       awsLambdaPriceFactor,
       awsLambdaRequestCostPerMillion,
-      architecture: response.aggregations?.sample?.top?.[0]?.metrics?.[HOST_ARCHITECTURE] as
-        | AwsLambdaArchitecture
-        | undefined,
+      architecture:
+        (summary?.architecture as AwsLambdaArchitecture | null | undefined) ?? undefined,
       transactionThroughput,
       computeUsageGbSec: convertComputeUsageToGbSec({
-        computeUsageBytesMs: response.aggregations?.avgComputeUsageBytesMs.value,
-        countInvocations: response.aggregations?.countInvocations.value,
+        computeUsageBytesMs: numberOrNull(summary?.avg_compute_usage_bytes_ms),
+        countInvocations: numberOrNull(summary?.count_invocations),
       }),
     }),
   };

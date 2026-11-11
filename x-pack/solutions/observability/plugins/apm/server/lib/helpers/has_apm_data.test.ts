@@ -9,43 +9,46 @@ import { ProcessorEvent } from '@kbn/apm-types-shared';
 import type { APMEventClient } from './create_es_client/create_apm_event_client';
 import { hasApmData } from './has_apm_data';
 
-const makeHits = (value: number) => ({ hits: { total: { value } } });
+const makeHits = (value: number) => ({
+  columns: [{ name: '@timestamp', type: 'date' }],
+  values: value > 0 ? [['2024-01-01T00:00:00.000Z']] : [],
+});
 
 const OPERATION = 'observability_overview_has_apm_data';
 
 describe('hasApmData', () => {
   it('returns true immediately when phase 1 finds data (no phase 2 call)', async () => {
-    const search = jest.fn().mockResolvedValue(makeHits(1));
-    const apmEventClient = { search } as unknown as APMEventClient;
+    const esql = jest.fn().mockResolvedValue(makeHits(1));
+    const apmEventClient = { esql } as unknown as APMEventClient;
 
     expect(await hasApmData(apmEventClient, OPERATION)).toBe(true);
-    expect(search).toHaveBeenCalledTimes(1);
+    expect(esql).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to phase 2 when phase 1 finds nothing', async () => {
-    const search = jest.fn().mockResolvedValueOnce(makeHits(0)).mockResolvedValueOnce(makeHits(1));
-    const apmEventClient = { search } as unknown as APMEventClient;
+    const esql = jest.fn().mockResolvedValueOnce(makeHits(0)).mockResolvedValueOnce(makeHits(1));
+    const apmEventClient = { esql } as unknown as APMEventClient;
 
     expect(await hasApmData(apmEventClient, OPERATION)).toBe(true);
-    expect(search).toHaveBeenCalledTimes(2);
+    expect(esql).toHaveBeenCalledTimes(2);
   });
 
   it('returns false when both phases find nothing', async () => {
-    const search = jest.fn().mockResolvedValue(makeHits(0));
-    const apmEventClient = { search } as unknown as APMEventClient;
+    const esql = jest.fn().mockResolvedValue(makeHits(0));
+    const apmEventClient = { esql } as unknown as APMEventClient;
 
     expect(await hasApmData(apmEventClient, OPERATION)).toBe(false);
-    expect(search).toHaveBeenCalledTimes(2);
+    expect(esql).toHaveBeenCalledTimes(2);
   });
 
   it('phase 1 carries an @timestamp range and cold/frozen tier exclusion', async () => {
-    const search = jest.fn().mockResolvedValue(makeHits(0));
-    const apmEventClient = { search } as unknown as APMEventClient;
+    const esql = jest.fn().mockResolvedValue(makeHits(0));
+    const apmEventClient = { esql } as unknown as APMEventClient;
 
     await hasApmData(apmEventClient, OPERATION);
 
-    const [, phase1Params] = search.mock.calls[0];
-    expect(phase1Params.query?.bool?.filter).toEqual(
+    const [, phase1Params] = esql.mock.calls[0];
+    expect(phase1Params.filter?.bool?.filter).toEqual(
       expect.arrayContaining([
         { range: { '@timestamp': { gte: 'now-24h/h' } } },
         expect.objectContaining({
@@ -58,18 +61,18 @@ describe('hasApmData', () => {
   });
 
   it('phase 2 carries no query (unbounded)', async () => {
-    const search = jest.fn().mockResolvedValue(makeHits(0));
-    const apmEventClient = { search } as unknown as APMEventClient;
+    const esql = jest.fn().mockResolvedValue(makeHits(0));
+    const apmEventClient = { esql } as unknown as APMEventClient;
 
     await hasApmData(apmEventClient, OPERATION);
 
-    const [, phase2Params] = search.mock.calls[1];
-    expect(phase2Params.query).toBeUndefined();
+    const [, phase2Params] = esql.mock.calls[1];
+    expect(phase2Params.filter).toBeUndefined();
   });
 
   it('targets all three processor events in both phases', async () => {
-    const search = jest.fn().mockResolvedValue(makeHits(0));
-    const apmEventClient = { search } as unknown as APMEventClient;
+    const esql = jest.fn().mockResolvedValue(makeHits(0));
+    const apmEventClient = { esql } as unknown as APMEventClient;
 
     await hasApmData(apmEventClient, OPERATION);
 
@@ -78,19 +81,16 @@ describe('hasApmData', () => {
       ProcessorEvent.error,
       ProcessorEvent.metric,
     ]);
-    expect(search.mock.calls[0][1].apm.events).toEqual(expectedEvents);
-    expect(search.mock.calls[1][1].apm.events).toEqual(expectedEvents);
+    expect(esql.mock.calls[0][1].apm.events).toEqual(expectedEvents);
+    expect(esql.mock.calls[1][1].apm.events).toEqual(expectedEvents);
   });
 
   it('forwards the caller operation name to every request', async () => {
-    const search = jest.fn().mockResolvedValue(makeHits(0));
-    const apmEventClient = { search } as unknown as APMEventClient;
+    const esql = jest.fn().mockResolvedValue(makeHits(0));
+    const apmEventClient = { esql } as unknown as APMEventClient;
 
     await hasApmData(apmEventClient, OPERATION);
 
-    expect(search.mock.calls.map(([operationName]) => operationName)).toEqual([
-      OPERATION,
-      OPERATION,
-    ]);
+    expect(esql.mock.calls.map(([operationName]) => operationName)).toEqual([OPERATION, OPERATION]);
   });
 });

@@ -7,7 +7,8 @@
 
 import { getBucketSize } from '../../../common/utils/get_bucket_size';
 
-export function getMetricsDateHistogramParams({
+/** The bucket size of a metrics chart: never below the configured interval, the resolution of metric data. */
+export function getMetricsBucketSizeInSeconds({
   start,
   end,
   metricsInterval,
@@ -17,11 +18,23 @@ export function getMetricsDateHistogramParams({
   metricsInterval: number;
 }) {
   const { bucketSize } = getBucketSize({ start, end });
+  return Math.max(bucketSize, metricsInterval);
+}
+
+export function getMetricsDateHistogramParams({
+  start,
+  end,
+  metricsInterval,
+}: {
+  start: number;
+  end: number;
+  metricsInterval: number;
+}) {
   return {
     field: '@timestamp',
 
     // ensure minimum bucket size of configured interval since this is the default resolution for metric data
-    fixed_interval: `${Math.max(bucketSize, metricsInterval)}s`,
+    fixed_interval: `${getMetricsBucketSizeInSeconds({ start, end, metricsInterval })}s`,
 
     min_doc_count: 0,
     extended_bounds: { min: start, max: end },

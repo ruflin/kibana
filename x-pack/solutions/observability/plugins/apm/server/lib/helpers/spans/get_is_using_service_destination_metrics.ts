@@ -16,6 +16,7 @@ import {
   SPAN_NAME,
 } from '../../../../common/es_fields/apm';
 import type { APMEventClient } from '../create_es_client/create_apm_event_client';
+import { boolFilter, hasEsqlDocuments } from '../esql_apm';
 
 export function getProcessorEventForServiceDestinationStatistics(
   searchServiceDestinationMetrics: boolean
@@ -50,40 +51,33 @@ export async function getIsUsingServiceDestinationMetrics({
   start: number;
   end: number;
 }) {
-  async function getServiceDestinationMetricsCount(query?: QueryDslQueryContainer) {
-    const response = await apmEventClient.search('get_service_destination_metrics_count', {
+  async function hasServiceDestinationMetrics(query?: QueryDslQueryContainer) {
+    return hasEsqlDocuments({
+      apmEventClient,
+      operationName: 'get_service_destination_metrics_count',
       apm: {
         events: [getProcessorEventForServiceDestinationStatistics(true)],
       },
-      track_total_hits: 1,
-      size: 0,
-      terminate_after: 1,
-      query: {
-        bool: {
-          filter: [
-            ...rangeQuery(start, end),
-            ...kqlQuery(kuery),
-            ...getDocumentTypeFilterForServiceDestinationStatistics(true),
-            ...(query ? [query] : []),
-          ],
-        },
-      },
+      filter: boolFilter(
+        ...rangeQuery(start, end),
+        ...kqlQuery(kuery),
+        ...getDocumentTypeFilterForServiceDestinationStatistics(true),
+        ...(query ? [query] : [])
+      ),
     });
-
-    return response.hits.total.value;
   }
 
   if (!useSpanName) {
     // if span.name is not required,
     // use service destination metrics if there is at least one service destination metric
     // for the given time range
-    return (await getServiceDestinationMetricsCount()) > 0;
+    return hasServiceDestinationMetrics();
   }
 
-  const [anyServiceDestinationMetricsCount, serviceDestinationMetricsWithoutSpanNameCount] =
+  const [hasAnyServiceDestinationMetrics, hasServiceDestinationMetricsWithoutSpanName] =
     await Promise.all([
-      getServiceDestinationMetricsCount(),
-      getServiceDestinationMetricsCount({
+      hasServiceDestinationMetrics(),
+      hasServiceDestinationMetrics({
         bool: { must_not: [{ exists: { field: SPAN_NAME } }] },
       }),
     ]);
@@ -92,7 +86,7 @@ export async function getIsUsingServiceDestinationMetrics({
     // use service destination metrics, IF:
     // - there is at least ONE service destination metric for the given time range
     // - AND, there is NO service destination metric WITHOUT span.name for the given time range
-    anyServiceDestinationMetricsCount > 0 && serviceDestinationMetricsWithoutSpanNameCount === 0
+    hasAnyServiceDestinationMetrics && !hasServiceDestinationMetricsWithoutSpanName
   );
 }
 

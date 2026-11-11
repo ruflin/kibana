@@ -15,6 +15,8 @@ import {
   SERVICE_NAME,
 } from '@kbn/apm-types/es_fields';
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
+import type { ESQLSearchResponse } from '@kbn/es-types';
 import type { TimeRangeMetadata } from '../../../common';
 import {
   RollupInterval,
@@ -36,6 +38,23 @@ export interface HostServicesRequest {
 
 const suitableTypes = [ApmDocumentType.TransactionMetric, ApmDocumentType.ErrorEvent];
 
+/** The services of a response with the timestamp and the agent name of their latest document. */
+function toServices(response: ESQLSearchResponse | undefined) {
+  if (!response) {
+    return [];
+  }
+  const column = (name: string) => response.columns.findIndex((col) => col.name === name);
+  const serviceNameIndex = column(SERVICE_NAME);
+  const latestTimestampIndex = column('latest_timestamp');
+  const agentNameIndex = column('agent_name');
+
+  return response.values.map((row) => ({
+    serviceName: row[serviceNameIndex] as string,
+    latestTimestamp: row[latestTimestampIndex] as string,
+    agentName: (row[agentNameIndex] as string | null) ?? null,
+  }));
+}
+
 export function createGetHostServices({ apmEventClient }: ApmDataAccessServicesParams) {
   return async ({ start, end, size = MAX_SIZE, filters, documentSources }: HostServicesRequest) => {
     const sourcesToUse = getPreferredBucketSizeAndDataSource({
@@ -43,14 +62,7 @@ export function createGetHostServices({ apmEventClient }: ApmDataAccessServicesP
       bucketSizeInSeconds: getBucketSize({ start, end, numBuckets: 50 }).bucketSize,
     });
 
-    const commonFiltersList: QueryDslQueryContainer[] = [
-      ...rangeQuery(start, end),
-      {
-        exists: {
-          field: SERVICE_NAME,
-        },
-      },
-    ];
+    const commonFiltersList: QueryDslQueryContainer[] = [...rangeQuery(start, end)];
 
     if (filters[HOST_NAME]) {
       commonFiltersList.push({
@@ -63,8 +75,21 @@ export function createGetHostServices({ apmEventClient }: ApmDataAccessServicesP
         },
       });
     }
+
+    // The services with their latest agent name, most documents first, like a terms aggregation
+    // with a top_metrics sub-aggregation.
+    const servicesQuery = (index: string[]) =>
+      esql.from(index).addSetCommand('unmapped_fields', 'nullify').pipe`WHERE ${esql.col(
+        SERVICE_NAME
+      )} IS NOT NULL`
+        .pipe`STATS doc_count = COUNT(*), latest_timestamp = MAX(@timestamp), agent_name = LAST(${esql.col(
+        AGENT_NAME
+      )}, @timestamp) BY ${esql.col(SERVICE_NAME)}`.pipe`SORT doc_count DESC, ${esql.col(
+        SERVICE_NAME
+      )} ASC`.limit(size);
+
     // get services from transaction metrics
-    const metricsQuery = await apmEventClient.search('get_apm_host_services_from_metrics', {
+    const metricsResponse = await apmEventClient.esql('get_apm_host_services_from_metrics', {
       apm: {
         sources: [
           {
@@ -73,9 +98,8 @@ export function createGetHostServices({ apmEventClient }: ApmDataAccessServicesP
           },
         ],
       },
-      track_total_hits: false,
-      size: 0,
-      query: {
+      query: servicesQuery,
+      filter: {
         bool: {
           filter: [
             {
@@ -95,29 +119,10 @@ export function createGetHostServices({ apmEventClient }: ApmDataAccessServicesP
           ],
         },
       },
-      aggs: {
-        services: {
-          terms: {
-            field: SERVICE_NAME,
-            size,
-          },
-          aggs: {
-            latestAgent: {
-              top_metrics: {
-                metrics: [{ field: AGENT_NAME }],
-                sort: {
-                  '@timestamp': 'desc',
-                },
-                size: 1,
-              },
-            },
-          },
-        },
-      },
     });
 
     // get services from logs
-    const logsQuery = await apmEventClient.search('get_apm_host_services_from_logs', {
+    const logsResponse = await apmEventClient.esql('get_apm_host_services_from_logs', {
       apm: {
         sources: [
           {
@@ -126,42 +131,16 @@ export function createGetHostServices({ apmEventClient }: ApmDataAccessServicesP
           },
         ],
       },
-      track_total_hits: false,
-      size: 0,
-      query: {
+      query: servicesQuery,
+      filter: {
         bool: {
           filter: commonFiltersList,
         },
       },
-      aggs: {
-        services: {
-          terms: {
-            field: SERVICE_NAME,
-            size,
-          },
-          aggs: {
-            latestAgent: {
-              top_metrics: {
-                metrics: [{ field: AGENT_NAME }],
-                sort: {
-                  '@timestamp': 'desc',
-                },
-                size: 1,
-              },
-            },
-          },
-        },
-      },
     });
 
-    const servicesListBucketsFromMetrics = metricsQuery.aggregations?.services.buckets || [];
-    const servicesListBucketsFromLogs = logsQuery.aggregations?.services.buckets || [];
-    const serviceMap = [...servicesListBucketsFromMetrics, ...servicesListBucketsFromLogs].reduce(
-      (acc, bucket) => {
-        const serviceName = bucket.key as string;
-        const latestAgentEntry = bucket.latestAgent.top[0];
-        const latestTimestamp = latestAgentEntry.sort[0] as string;
-        const agentName = latestAgentEntry.metrics[AGENT_NAME] as string | null;
+    const serviceMap = [...toServices(metricsResponse), ...toServices(logsResponse)].reduce(
+      (acc, { serviceName, latestTimestamp, agentName }) => {
         // dedup and get the latest timestamp
         const existingService = acc.get(serviceName);
         if (!existingService || existingService.latestTimestamp < latestTimestamp) {

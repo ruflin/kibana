@@ -10,6 +10,7 @@ import { ProcessorEvent } from '@kbn/apm-types-shared';
 import { AT_TIMESTAMP } from '@kbn/apm-types/es_fields';
 import type { DataTier } from '@kbn/observability-shared-plugin/common';
 import type { APMEventClient } from './create_es_client/create_apm_event_client';
+import { boolFilter, hasEsqlDocuments } from './esql_apm';
 
 /** Rounded date math, so the probe is eligible for the ES shard request cache. */
 const RECENT_WINDOW = 'now-24h/h';
@@ -23,35 +24,26 @@ const PROCESSOR_EVENTS = [ProcessorEvent.transaction, ProcessorEvent.error, Proc
  * Tiers are excluded rather than included so clusters without tier roles still
  * match. See the PR description for why each clause is needed.
  */
-const RECENT_DATA_QUERY: estypes.QueryDslQueryContainer = {
-  bool: {
-    filter: [
-      { range: { [AT_TIMESTAMP]: { gte: RECENT_WINDOW } } },
-      { bool: { must_not: [{ terms: { _tier: EXCLUDED_TIERS } }] } },
-    ],
-  },
-};
+const RECENT_DATA_FILTER: estypes.QueryDslQueryContainer = boolFilter(
+  { range: { [AT_TIMESTAMP]: { gte: RECENT_WINDOW } } },
+  { bool: { must_not: [{ terms: { _tier: EXCLUDED_TIERS } }] } }
+);
 
 type HasApmDataOperation = 'has_historical_agent_data' | 'observability_overview_has_apm_data';
 
-const hasDataRequest = async (
+const hasDataRequest = (
   apmEventClient: APMEventClient,
   operationName: HasApmDataOperation,
-  query?: estypes.QueryDslQueryContainer
-): Promise<boolean> => {
+  filter?: estypes.QueryDslQueryContainer
+): Promise<boolean> =>
   // the `observability:searchExcludedDataTiers` setting will also be considered
-  // in the `search` function to exclude data tiers from the search
-  const params = {
+  // in the `esql` function to exclude data tiers from the search
+  hasEsqlDocuments({
+    apmEventClient,
+    operationName,
     apm: { events: PROCESSOR_EVENTS },
-    terminate_after: 1,
-    track_total_hits: 1,
-    size: 0,
-    query,
-  };
-
-  const response = await apmEventClient.search(operationName, params);
-  return response.hits.total.value > 0;
-};
+    filter,
+  });
 
 /**
  * Answers "does this cluster hold any APM data, ever" with a cheap recent-window
@@ -61,7 +53,7 @@ export const hasApmData = async (
   apmEventClient: APMEventClient,
   operationName: HasApmDataOperation
 ): Promise<boolean> => {
-  const hasRecentData = await hasDataRequest(apmEventClient, operationName, RECENT_DATA_QUERY);
+  const hasRecentData = await hasDataRequest(apmEventClient, operationName, RECENT_DATA_FILTER);
 
   if (hasRecentData) {
     return true;

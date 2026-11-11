@@ -5,7 +5,8 @@
  * 2.0.
  */
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
-import { kqlQuery, rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import type { ServerlessFunctionsOverviewResponse } from '@kbn/apm-api-shared';
 import {
   FAAS_BILLED_DURATION,
@@ -20,6 +21,8 @@ import {
 import { getServerlessFunctionNameFromId } from '../../../../common/serverless';
 import { environmentQuery } from '../../../../common/utils/environment_query';
 import { calcMemoryUsed } from './helper';
+import { esqlRows } from '../../../lib/helpers/esql_read';
+import { boolFilter, fromApmIndex } from '../../../lib/helpers/esql_apm';
 import type { APMEventClient } from '../../../lib/helpers/create_es_client/create_apm_event_client';
 
 export async function getServerlessFunctionsOverview({
@@ -37,57 +40,46 @@ export async function getServerlessFunctionsOverview({
   end: number;
   apmEventClient: APMEventClient;
 }): Promise<ServerlessFunctionsOverviewResponse> {
-  const params = {
+  const response = await apmEventClient.esql('ger_serverless_functions_overview', {
     apm: {
       events: [ProcessorEvent.metric],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
-      bool: {
-        filter: [
-          ...termQuery(METRICSET_NAME, 'app'),
-          { term: { [SERVICE_NAME]: serviceName } },
-          ...rangeQuery(start, end),
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-        ],
-      },
-    },
-    aggs: {
-      serverlessFunctions: {
-        terms: { field: FAAS_ID },
-        aggs: {
-          faasDurationAvg: { avg: { field: FAAS_DURATION } },
-          faasBilledDurationAvg: { avg: { field: FAAS_BILLED_DURATION } },
-          coldStartCount: { sum: { field: FAAS_COLDSTART } },
-          maxTotalMemory: { max: { field: METRIC_SYSTEM_TOTAL_MEMORY } },
-          avgTotalMemory: { avg: { field: METRIC_SYSTEM_TOTAL_MEMORY } },
-          avgFreeMemory: { avg: { field: METRIC_SYSTEM_FREE_MEMORY } },
-        },
-      },
-    },
-  };
+    // The ten functions with the most documents, like a terms aggregation. The cold starts
+    // are the documents flagged as one, as a sum over the boolean field.
+    query: (index) =>
+      fromApmIndex(index).pipe`WHERE ${esql.col(METRICSET_NAME)} == ${{ metricset: 'app' }}`
+        .pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ serviceName }}`.pipe`WHERE ${esql.col(
+        FAAS_ID
+      )} IS NOT NULL`.pipe`STATS doc_count = COUNT(*),
+          faas_duration_avg = AVG(${esql.col(FAAS_DURATION)}),
+          faas_billed_duration_avg = AVG(${esql.col(FAAS_BILLED_DURATION)}),
+          cold_start_count = COUNT(*) WHERE ${esql.col(FAAS_COLDSTART)} == TRUE,
+          max_total_memory = MAX(${esql.col(METRIC_SYSTEM_TOTAL_MEMORY)}),
+          avg_total_memory = AVG(${esql.col(METRIC_SYSTEM_TOTAL_MEMORY)}),
+          avg_free_memory = AVG(${esql.col(METRIC_SYSTEM_FREE_MEMORY)})
+          BY ${esql.col(FAAS_ID)}`.pipe`SORT doc_count DESC, ${esql.col(FAAS_ID)} ASC`.limit(10),
+    filter: boolFilter(
+      ...rangeQuery(start, end),
+      ...environmentQuery(environment),
+      ...kqlQuery(kuery)
+    ),
+  });
 
-  const response = await apmEventClient.search('ger_serverless_functions_overview', params);
+  const serverlessFunctionsOverview = esqlRows(response).map((row) => {
+    const serverlessId = row[FAAS_ID] as string;
+    return {
+      serverlessId,
+      serverlessFunctionName: getServerlessFunctionNameFromId(serverlessId),
+      serverlessDurationAvg: row.faas_duration_avg as number | null,
+      billedDurationAvg: row.faas_billed_duration_avg as number | null,
+      coldStartCount: row.cold_start_count as number,
+      avgMemoryUsed: calcMemoryUsed({
+        memoryFree: row.avg_free_memory as number | null,
+        memoryTotal: row.avg_total_memory as number | null,
+      }),
+      memorySize: row.max_total_memory as number | null,
+    };
+  });
 
-  const serverlessFunctionsOverview = response.aggregations?.serverlessFunctions?.buckets?.map(
-    (bucket) => {
-      const serverlessId = bucket.key as string;
-      return {
-        serverlessId,
-        serverlessFunctionName: getServerlessFunctionNameFromId(serverlessId),
-        serverlessDurationAvg: bucket.faasDurationAvg.value,
-        billedDurationAvg: bucket.faasBilledDurationAvg.value,
-        coldStartCount: bucket.coldStartCount.value,
-        avgMemoryUsed: calcMemoryUsed({
-          memoryFree: bucket.avgFreeMemory.value,
-          memoryTotal: bucket.avgTotalMemory.value,
-        }),
-        memorySize: bucket.maxTotalMemory.value,
-      };
-    }
-  );
-
-  return serverlessFunctionsOverview || [];
+  return serverlessFunctionsOverview;
 }

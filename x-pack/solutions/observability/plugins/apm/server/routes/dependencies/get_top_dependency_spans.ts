@@ -6,7 +6,8 @@
  */
 
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
-import { kqlQuery, rangeQuery, termQuery, termsQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import { keyBy } from 'lodash';
 import type { Logger } from '@kbn/core/server';
 import type { DependencySpan } from '@kbn/apm-api-shared';
@@ -30,6 +31,7 @@ import { EventOutcome } from '../../../common/event_outcome';
 import { environmentQuery } from '../../../common/utils/environment_query';
 import { maybe } from '../../../common/utils/maybe';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlRowsAsHits, boolFilter, fromApmIndex, keepFields } from '../../lib/helpers/esql_apm';
 import { compactMap } from '../../utils/compact_map';
 import { createApmEventFieldsAccessor } from '../../utils/create_apm_event_fields_accessor';
 
@@ -70,39 +72,34 @@ export async function getTopDependencySpans({
   // `event.outcome` is not guaranteed on OTel spans, so it is requested but not required.
   const topDedsFields = asMutableArray([...topDedsRequiredFields, EVENT_OUTCOME] as const);
 
-  const spanHits = (
-    await apmEventClient.search('get_top_dependency_spans', {
-      apm: {
-        events: [ProcessorEvent.span, ProcessorEvent.transaction],
-      },
-      track_total_hits: false,
-      size: MAX_NUM_SPANS,
-      query: {
-        bool: {
-          filter: [
-            ...rangeQuery(start, end),
-            ...environmentQuery(environment),
-            ...kqlQuery(kuery),
-            ...termQuery(SPAN_DESTINATION_SERVICE_RESOURCE, dependencyName),
-            ...termQuery(SPAN_NAME, spanName),
-            ...((sampleRangeFrom ?? 0) >= 0 && (sampleRangeTo ?? 0) > 0
-              ? [
-                  {
-                    range: {
-                      [SPAN_DURATION]: {
-                        gte: sampleRangeFrom,
-                        lte: sampleRangeTo,
-                      },
-                    },
-                  },
-                ]
-              : []),
-          ],
-        },
-      },
-      fields: topDedsFields,
-    })
-  ).hits.hits;
+  const spanResponse = await apmEventClient.esql('get_top_dependency_spans', {
+    apm: {
+      events: [ProcessorEvent.span, ProcessorEvent.transaction],
+    },
+    query: (index) => {
+      let query = fromApmIndex(index, ['_id', '_index']).pipe`WHERE ${esql.col(
+        SPAN_DESTINATION_SERVICE_RESOURCE
+      )} == ${{ dependencyName }}`;
+      if (spanName) {
+        query = query.pipe`WHERE ${esql.col(SPAN_NAME)} == ${{ spanName }}`;
+      }
+      if ((sampleRangeFrom ?? 0) >= 0 && (sampleRangeTo ?? 0) > 0) {
+        if (sampleRangeFrom !== undefined) {
+          query = query.pipe`WHERE ${esql.col(SPAN_DURATION)} >= ${{ sampleRangeFrom }}`;
+        }
+        if (sampleRangeTo !== undefined) {
+          query = query.pipe`WHERE ${esql.col(SPAN_DURATION)} <= ${{ sampleRangeTo }}`;
+        }
+      }
+      return keepFields(query, ['_id', '_index', ...topDedsFields]).limit(MAX_NUM_SPANS);
+    },
+    filter: boolFilter(
+      ...rangeQuery(start, end),
+      ...environmentQuery(environment),
+      ...kqlQuery(kuery)
+    ),
+  });
+  const spanHits = esqlRowsAsHits(spanResponse);
 
   // Span documents can be OTel-native or partial/legacy APM docs that do not always populate
   // every required field. Skipping a malformed hit keeps the whole request from failing with a 500.
@@ -121,24 +118,24 @@ export async function getTopDependencySpans({
     TRANSACTION_NAME,
   ] as const);
 
-  const transactionHits = (
-    await apmEventClient.search('get_transactions_for_dependency_spans', {
-      apm: {
-        events: [ProcessorEvent.transaction],
-      },
-      track_total_hits: false,
-      size: traceIds.length,
-      query: {
-        bool: {
-          filter: [...termsQuery(TRACE_ID, ...traceIds), { exists: { field: TRANSACTION_ID } }],
+  // No trace ids, no transactions to look up
+  const transactionResponse = traceIds.length
+    ? await apmEventClient.esql('get_transactions_for_dependency_spans', {
+        apm: {
+          events: [ProcessorEvent.transaction],
         },
-      },
-      fields: txRequiredFields,
-      sort: {
-        '@timestamp': 'desc',
-      },
-    })
-  ).hits.hits;
+        query: (index) =>
+          keepFields(
+            fromApmIndex(index, ['_id', '_index']).pipe`WHERE ${esql.col(TRACE_ID)} IN (${{
+              traceIds,
+            }}) AND ${esql.col(TRANSACTION_ID)} IS NOT NULL`.pipe`SORT ${esql.col(
+              AT_TIMESTAMP
+            )} DESC NULLS LAST`,
+            ['_id', '_index', ...txRequiredFields]
+          ).limit(traceIds.length),
+      })
+    : undefined;
+  const transactionHits = esqlRowsAsHits(transactionResponse);
 
   const txAccessor = createApmEventFieldsAccessor({
     logger,

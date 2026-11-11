@@ -2,19 +2,6 @@
 
 exports[`error distribution queries fetches an error distribution 1`] = `
 Object {
-  "aggs": Object {
-    "distribution": Object {
-      "histogram": Object {
-        "extended_bounds": Object {
-          "max": 50000,
-          "min": 0,
-        },
-        "field": "@timestamp",
-        "interval": 3333,
-        "min_doc_count": 0,
-      },
-    },
-  },
   "apm": Object {
     "sources": Array [
       Object {
@@ -23,14 +10,9 @@ Object {
       },
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
-        Object {
-          "term": Object {
-            "service.name": "serviceName",
-          },
-        },
         Object {
           "range": Object {
             "@timestamp": Object {
@@ -40,34 +22,32 @@ Object {
             },
           },
         },
-      ],
-      "must_not": Object {
-        "term": Object {
-          "error.type": "crash",
+        Object {
+          "bool": Object {
+            "must_not": Object {
+              "term": Object {
+                "error.type": "crash",
+              },
+            },
+          },
         },
-      },
+      ],
     },
   },
-  "size": 0,
-  "track_total_hits": false,
+  "params": Array [
+    Object {
+      "serviceName": "serviceName",
+    },
+    Object {
+      "bucketSize": 3333,
+    },
+  ],
+  "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`service.name\` == ?serviceName | STATS doc_count = COUNT(*) BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ?bucketSize | SORT bucket ASC | LIMIT 10000",
 }
 `;
 
 exports[`error distribution queries fetches an error distribution with a group id 1`] = `
 Object {
-  "aggs": Object {
-    "distribution": Object {
-      "histogram": Object {
-        "extended_bounds": Object {
-          "max": 50000,
-          "min": 0,
-        },
-        "field": "@timestamp",
-        "interval": 3333,
-        "min_doc_count": 0,
-      },
-    },
-  },
   "apm": Object {
     "sources": Array [
       Object {
@@ -76,14 +56,9 @@ Object {
       },
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
-        Object {
-          "term": Object {
-            "service.name": "serviceName",
-          },
-        },
         Object {
           "range": Object {
             "@timestamp": Object {
@@ -94,19 +69,28 @@ Object {
           },
         },
         Object {
-          "term": Object {
-            "error.grouping_key": "foo",
+          "bool": Object {
+            "must_not": Object {
+              "term": Object {
+                "error.type": "crash",
+              },
+            },
           },
         },
       ],
-      "must_not": Object {
-        "term": Object {
-          "error.type": "crash",
-        },
-      },
     },
   },
-  "size": 0,
-  "track_total_hits": false,
+  "params": Array [
+    Object {
+      "serviceName": "serviceName",
+    },
+    Object {
+      "groupId": "foo",
+    },
+    Object {
+      "bucketSize": 3333,
+    },
+  ],
+  "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`service.name\` == ?serviceName | WHERE \`error.grouping_key\` == ?groupId | STATS doc_count = COUNT(*) BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ?bucketSize | SORT bucket ASC | LIMIT 10000",
 }
 `;

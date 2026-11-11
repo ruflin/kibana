@@ -5,11 +5,14 @@
  * 2.0.
  */
 
-import { kqlQuery, rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import type { LatencyChartsDependencyResponse } from '@kbn/apm-api-shared';
 import { SPAN_DESTINATION_SERVICE_RESOURCE, SPAN_NAME } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
-import { getMetricsDateHistogramParams } from '../../lib/helpers/metrics';
+import { getMetricsBucketSizeInSeconds } from '../../lib/helpers/metrics';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import { boolFilter, fromApmIndex, getHistogramKeys } from '../../lib/helpers/esql_apm';
 import { getOffsetInMs } from '../../../common/utils/get_offset_in_ms';
 import {
   getDocCountFieldForServiceDestinationStatistics,
@@ -48,62 +51,63 @@ async function getLatencyChartsForDependencyForTimeRange({
     offset,
   });
 
-  const response = await apmEventClient.search('get_latency_for_dependency', {
+  const intervalInMs =
+    getMetricsBucketSizeInSeconds({
+      start: startWithOffset,
+      end: endWithOffset,
+      metricsInterval: 60,
+    }) * 1000;
+  const latencyField = getLatencyFieldForServiceDestinationStatistics(
+    searchServiceDestinationMetrics
+  );
+  const docCountField = getDocCountFieldForServiceDestinationStatistics(
+    searchServiceDestinationMetrics
+  );
+
+  const response = await apmEventClient.esql('get_latency_for_dependency', {
     apm: {
       events: [getProcessorEventForServiceDestinationStatistics(searchServiceDestinationMetrics)],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
-      bool: {
-        filter: [
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-          ...rangeQuery(startWithOffset, endWithOffset),
-          ...termQuery(SPAN_NAME, spanName || null),
-          ...getDocumentTypeFilterForServiceDestinationStatistics(searchServiceDestinationMetrics),
-          { term: { [SPAN_DESTINATION_SERVICE_RESOURCE]: dependencyName } },
-        ],
-      },
+    query: (index) => {
+      let query = fromApmIndex(index).pipe`WHERE ${esql.col(
+        SPAN_DESTINATION_SERVICE_RESOURCE
+      )} == ${{ dependencyName }}`;
+      if (spanName) {
+        query = query.pipe`WHERE ${esql.col(SPAN_NAME)} == ${{ spanName }}`;
+      }
+      // The documents of a metric are counted by their count field.
+      const latencyCount = docCountField
+        ? esql.exp`SUM(${esql.col(docCountField)})`
+        : esql.exp`COUNT(*)`;
+      return query.pipe`STATS latency_sum = SUM(${esql.col(
+        latencyField
+      )}), latency_count = ${latencyCount} BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ${{
+        intervalInMs,
+      }}`.pipe`SORT bucket ASC`.limit(10000);
     },
-    aggs: {
-      timeseries: {
-        date_histogram: getMetricsDateHistogramParams({
-          start: startWithOffset,
-          end: endWithOffset,
-          metricsInterval: 60,
-        }),
-        aggs: {
-          latency_sum: {
-            sum: {
-              field: getLatencyFieldForServiceDestinationStatistics(
-                searchServiceDestinationMetrics
-              ),
-            },
-          },
-          ...(searchServiceDestinationMetrics
-            ? {
-                latency_count: {
-                  sum: {
-                    field: getDocCountFieldForServiceDestinationStatistics(
-                      searchServiceDestinationMetrics
-                    ),
-                  },
-                },
-              }
-            : {}),
-        },
-      },
-    },
+    filter: boolFilter(
+      ...environmentQuery(environment),
+      ...kqlQuery(kuery),
+      ...rangeQuery(startWithOffset, endWithOffset),
+      ...getDocumentTypeFilterForServiceDestinationStatistics(searchServiceDestinationMetrics)
+    ),
   });
 
-  return (
-    response.aggregations?.timeseries.buckets.map((bucket) => {
+  if (!response) {
+    return [];
+  }
+
+  const rowsByBucket = new Map(esqlRows(response).map((row) => [Number(row.bucket), row]));
+
+  // A bucket without documents has a sum of 0 and a count of 0, like in a histogram aggregation.
+  return getHistogramKeys({ start: startWithOffset, end: endWithOffset, intervalInMs }).map(
+    (key) => {
+      const row = rowsByBucket.get(key);
       return {
-        x: bucket.key + offsetInMs,
-        y: (bucket.latency_sum.value ?? 0) / (bucket.latency_count?.value ?? bucket.doc_count),
+        x: key + offsetInMs,
+        y: Number(row?.latency_sum ?? 0) / Number(row?.latency_count ?? 0),
       };
-    }) ?? []
+    }
   );
 }
 

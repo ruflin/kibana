@@ -7,7 +7,7 @@ Object {
       "metric",
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
         Object {
@@ -30,9 +30,8 @@ Object {
       ],
     },
   },
-  "size": 0,
-  "terminate_after": 1,
-  "track_total_hits": 1,
+  "params": Array [],
+  "query": "FROM myIndex | KEEP @timestamp | LIMIT 1",
 }
 `;
 
@@ -43,7 +42,7 @@ Object {
       "metric",
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
         Object {
@@ -54,58 +53,51 @@ Object {
       ],
     },
   },
-  "size": 0,
-  "terminate_after": 1,
-  "track_total_hits": 1,
+  "params": Array [],
+  "query": "FROM myIndex | KEEP @timestamp | LIMIT 1",
 }
 `;
 
 exports[`getIsUsingTransactionEvents with config xpack.apm.searchAggregatedTransactions: auto should query for data twice if metrics data not found 1`] = `
 Array [
-  Array [
-    "get_has_aggregated_transactions",
-    Object {
-      "apm": Object {
-        "events": Array [
-          "metric",
-        ],
-      },
-      "query": Object {
-        "bool": Object {
-          "filter": Array [
-            Object {
-              "exists": Object {
-                "field": "transaction.duration.histogram",
-              },
-            },
-          ],
-        },
-      },
-      "size": 0,
-      "terminate_after": 1,
-      "track_total_hits": 1,
+  Object {
+    "apm": Object {
+      "events": Array [
+        "metric",
+      ],
     },
-  ],
-  Array [
-    "get_has_transactions",
-    Object {
-      "apm": Object {
-        "sources": Array [
+    "filter": Object {
+      "bool": Object {
+        "filter": Array [
           Object {
-            "documentType": "transactionEvent",
-            "rollupInterval": "none",
+            "exists": Object {
+              "field": "transaction.duration.histogram",
+            },
           },
         ],
       },
-      "query": Object {
-        "bool": Object {
-          "filter": Array [],
-        },
-      },
-      "size": 0,
-      "terminate_after": 1,
-      "track_total_hits": 1,
     },
-  ],
+    "operationName": "get_has_aggregated_transactions",
+    "params": Array [],
+    "query": "FROM myIndex | KEEP @timestamp | LIMIT 1",
+  },
+  Object {
+    "apm": Object {
+      "sources": Array [
+        Object {
+          "documentType": "transactionEvent",
+          "rollupInterval": "none",
+        },
+      ],
+    },
+    "filter": Object {
+      "bool": Object {
+        "filter": Array [],
+      },
+    },
+    "operationName": "get_has_transactions",
+    "params": Array [],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | KEEP @timestamp | LIMIT 1",
+  },
 ]
 `;

@@ -5,12 +5,15 @@
  * 2.0.
  */
 
-import { kqlQuery, rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import type { ThroughputChartsForDependencyResponse } from '@kbn/apm-api-shared';
 import { SPAN_DESTINATION_SERVICE_RESOURCE, SPAN_NAME } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
 import { getOffsetInMs } from '../../../common/utils/get_offset_in_ms';
 import { getBucketSize } from '../../../common/utils/get_bucket_size';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import { boolFilter, fromApmIndex, getHistogramKeys } from '../../lib/helpers/esql_apm';
 import {
   getDocCountFieldForServiceDestinationStatistics,
   getDocumentTypeFilterForServiceDestinationStatistics,
@@ -47,63 +50,57 @@ async function getThroughputChartsForDependencyForTimeRange({
     offset,
   });
 
-  const { intervalString } = getBucketSize({
-    start: startWithOffset,
-    end: endWithOffset,
-    minBucketSize: 60,
-  });
+  const intervalInMs =
+    getBucketSize({
+      start: startWithOffset,
+      end: endWithOffset,
+      minBucketSize: 60,
+    }).bucketSize * 1000;
+  const docCountField = getDocCountFieldForServiceDestinationStatistics(
+    searchServiceDestinationMetrics
+  );
 
-  const response = await apmEventClient.search('get_throughput_for_dependency', {
+  const response = await apmEventClient.esql('get_throughput_for_dependency', {
     apm: {
       events: [getProcessorEventForServiceDestinationStatistics(searchServiceDestinationMetrics)],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
-      bool: {
-        filter: [
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-          ...rangeQuery(startWithOffset, endWithOffset),
-          ...termQuery(SPAN_NAME, spanName || null),
-          ...getDocumentTypeFilterForServiceDestinationStatistics(searchServiceDestinationMetrics),
-          { term: { [SPAN_DESTINATION_SERVICE_RESOURCE]: dependencyName } },
-        ],
-      },
+    query: (index) => {
+      let query = fromApmIndex(index).pipe`WHERE ${esql.col(
+        SPAN_DESTINATION_SERVICE_RESOURCE
+      )} == ${{ dependencyName }}`;
+      if (spanName) {
+        query = query.pipe`WHERE ${esql.col(SPAN_NAME)} == ${{ spanName }}`;
+      }
+      // The documents of a metric are counted by their count field.
+      const count = docCountField ? esql.exp`SUM(${esql.col(docCountField)})` : esql.exp`COUNT(*)`;
+      return query.pipe`STATS total_count = ${count} BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ${{
+        intervalInMs,
+      }}`.pipe`SORT bucket ASC`.limit(10000);
     },
-    aggs: {
-      timeseries: {
-        date_histogram: {
-          field: '@timestamp',
-          fixed_interval: intervalString,
-          min_doc_count: 0,
-          extended_bounds: { min: startWithOffset, max: endWithOffset },
-        },
-        aggs: {
-          throughput: {
-            rate: {
-              ...(searchServiceDestinationMetrics
-                ? {
-                    field: getDocCountFieldForServiceDestinationStatistics(
-                      searchServiceDestinationMetrics
-                    ),
-                  }
-                : {}),
-              unit: 'minute',
-            },
-          },
-        },
-      },
-    },
+    filter: boolFilter(
+      ...environmentQuery(environment),
+      ...kqlQuery(kuery),
+      ...rangeQuery(startWithOffset, endWithOffset),
+      ...getDocumentTypeFilterForServiceDestinationStatistics(searchServiceDestinationMetrics)
+    ),
   });
 
-  return (
-    response.aggregations?.timeseries.buckets.map((bucket) => {
-      return {
-        x: bucket.key + offsetInMs,
-        y: bucket.throughput.value,
-      };
-    }) ?? []
+  if (!response) {
+    return [];
+  }
+
+  const countByBucket = new Map(
+    esqlRows(response).map((row) => [Number(row.bucket), Number(row.total_count ?? 0)])
+  );
+  const intervalInMinutes = intervalInMs / 60_000;
+
+  // The rate per minute of a bucket: its count over the minutes of the interval. The Query DSL
+  // `rate` aggregation is not available in ES|QL for data that is not a time series.
+  return getHistogramKeys({ start: startWithOffset, end: endWithOffset, intervalInMs }).map(
+    (key) => ({
+      x: key + offsetInMs,
+      y: (countByBucket.get(key) ?? 0) / intervalInMinutes,
+    })
   );
 }
 

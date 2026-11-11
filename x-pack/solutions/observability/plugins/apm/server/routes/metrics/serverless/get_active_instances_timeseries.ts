@@ -5,7 +5,8 @@
  * 2.0.
  */
 
-import { kqlQuery, rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import {
   FAAS_ID,
@@ -15,7 +16,9 @@ import {
 } from '../../../../common/es_fields/apm';
 import { environmentQuery } from '../../../../common/utils/environment_query';
 import type { Coordinate } from '../../../../typings/timeseries';
-import { getMetricsDateHistogramParams } from '../../../lib/helpers/metrics';
+import { getMetricsBucketSizeInSeconds } from '../../../lib/helpers/metrics';
+import { esqlRows } from '../../../lib/helpers/esql_read';
+import { boolFilter, fromApmIndex, getHistogramKeys } from '../../../lib/helpers/esql_apm';
 import type { APMEventClient } from '../../../lib/helpers/create_es_client/create_apm_event_client';
 import type { APMConfig } from '../../..';
 
@@ -38,51 +41,43 @@ export async function getActiveInstancesTimeseries({
   config: APMConfig;
   apmEventClient: APMEventClient;
 }): Promise<Coordinate[]> {
-  const aggs = {
-    activeInstances: {
-      cardinality: {
-        field: SERVICE_NODE_NAME,
-      },
-    },
-  };
+  const intervalInMs =
+    getMetricsBucketSizeInSeconds({ start, end, metricsInterval: config.metricsInterval }) * 1000;
 
-  const params = {
+  const response = await apmEventClient.esql('get_active_instances', {
     apm: {
       events: [ProcessorEvent.metric],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
-      bool: {
-        filter: [
-          ...termQuery(METRICSET_NAME, 'app'),
-          { term: { [SERVICE_NAME]: serviceName } },
-          ...rangeQuery(start, end),
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-          ...termQuery(FAAS_ID, serverlessId),
-        ],
-      },
+    query: (index) => {
+      let query = fromApmIndex(index).pipe`WHERE ${esql.col(METRICSET_NAME)} == ${{
+        metricset: 'app',
+      }}`.pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ serviceName }}`;
+      if (serverlessId) {
+        query = query.pipe`WHERE ${esql.col(FAAS_ID)} == ${{ serverlessId }}`;
+      }
+      return query.pipe`STATS active_instances = COUNT_DISTINCT(${esql.col(
+        SERVICE_NODE_NAME
+      )}) BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ${{ intervalInMs }}`
+        .pipe`SORT bucket ASC`.limit(10000);
     },
-    aggs: {
-      ...aggs,
-      timeseriesData: {
-        date_histogram: getMetricsDateHistogramParams({
-          start,
-          end,
-          metricsInterval: config.metricsInterval,
-        }),
-        aggs,
-      },
-    },
-  };
+    filter: boolFilter(
+      ...rangeQuery(start, end),
+      ...environmentQuery(environment),
+      ...kqlQuery(kuery)
+    ),
+  });
 
-  const { aggregations } = await apmEventClient.search('get_active_instances', params);
+  if (!response) {
+    return [];
+  }
 
-  return (
-    aggregations?.timeseriesData?.buckets?.map((timeseriesBucket) => ({
-      x: timeseriesBucket.key,
-      y: timeseriesBucket.activeInstances.value,
-    })) || []
+  const activeInstancesByBucket = new Map(
+    esqlRows(response).map((row) => [Number(row.bucket), Number(row.active_instances)])
   );
+
+  // A bucket without documents has no instances, like in a histogram aggregation.
+  return getHistogramKeys({ start, end, intervalInMs }).map((key) => ({
+    x: key,
+    y: activeInstancesByBucket.get(key) ?? 0,
+  }));
 }

@@ -11,6 +11,7 @@ import type { APMEventClient } from '../create_es_client/create_apm_event_client
 import { SearchAggregatedTransactionSetting } from '../../../../common/aggregated_transactions';
 import { ApmDocumentType } from '../../../../common/document_type';
 import { RollupInterval } from '../../../../common/rollup';
+import { boolFilter, hasEsqlDocuments } from '../esql_apm';
 import type { APMConfig } from '../../..';
 
 export async function getIsUsingTransactionEvents({
@@ -61,7 +62,9 @@ async function getHasTransactions({
   apmEventClient: APMEventClient;
   kuery: string;
 }) {
-  const response = await apmEventClient.search('get_has_transactions', {
+  return hasEsqlDocuments({
+    apmEventClient,
+    operationName: 'get_has_transactions',
     apm: {
       sources: [
         {
@@ -70,15 +73,6 @@ async function getHasTransactions({
         },
       ],
     },
-    track_total_hits: 1,
-    size: 0,
-    query: {
-      bool: {
-        filter: [...(start && end ? rangeQuery(start, end) : []), ...kqlQuery(kuery)],
-      },
-    },
-    terminate_after: 1,
+    filter: boolFilter(...(start && end ? rangeQuery(start, end) : []), ...kqlQuery(kuery)),
   });
-
-  return response.hits.total.value > 0;
 }

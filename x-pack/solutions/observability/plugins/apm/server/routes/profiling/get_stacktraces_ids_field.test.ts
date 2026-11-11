@@ -19,10 +19,14 @@ const defaultParams = {
   transactionType: 'request',
 };
 
+// The transactions that match the query: only the ones with the Elastic profiler field set
 function createMockApmEventClient(hits: Array<{ fields?: Record<string, any> }>) {
   return {
-    search: jest.fn().mockResolvedValue({
-      hits: { hits },
+    esql: jest.fn().mockResolvedValue({
+      columns: [{ name: '@timestamp', type: 'date' }],
+      values: hits
+        .filter(({ fields }) => fields?.[ELASTIC_PROFILER_STACK_TRACE_IDS]?.length)
+        .map(() => ['2024-01-01T00:00:00.000Z']),
     }),
   } as any;
 }
@@ -98,6 +102,29 @@ describe('getStacktracesIdsField', () => {
 
       const result = await getStacktracesIdsField({ apmEventClient, ...defaultParams });
       expect(result).toBe(TRANSACTION_PROFILER_STACK_TRACE_IDS);
+    });
+  });
+
+  it('asks for one transaction of the service with the elastic profiler field', async () => {
+    const apmEventClient = createMockApmEventClient([]);
+
+    await getStacktracesIdsField({
+      apmEventClient,
+      ...defaultParams,
+      transactionName: 'GET /',
+    });
+
+    const [operationName, params] = apmEventClient.esql.mock.calls[0];
+    expect(operationName).toBe('get_stacktraces_ids_field');
+    expect(params.apm).toEqual({ events: ['transaction'] });
+    expect(params.query(['myIndex']).toRequest()).toEqual({
+      query:
+        'SET unmapped_fields = "nullify"; FROM myIndex | WHERE `service.name` == ?service_name | WHERE `transaction.type` == ?transaction_type | WHERE `transaction.name` == ?transaction_name | WHERE `elastic.profiler_stack_trace_ids` IS NOT NULL | KEEP @timestamp | LIMIT 1',
+      params: [
+        { service_name: 'my-service' },
+        { transaction_type: 'request' },
+        { transaction_name: 'GET /' },
+      ],
     });
   });
 });
