@@ -47,14 +47,23 @@ describe('toWikiKiId', () => {
   });
 });
 
+/** ES|QL answer for `_id` and `_source` rows, as the page store reads them. */
+const esqlHits = (hits: Array<{ _id: string; _source: unknown }>) => ({
+  columns: [
+    { name: '_id', type: 'keyword' },
+    { name: '_source', type: 'object' },
+  ],
+  values: hits.map((hit) => [hit._id, hit._source]),
+});
+
 describe('createWikiPageStore', () => {
   const logger = loggerMock.create();
 
   it('lists wiki pages and computes stats from the unfiltered set', async () => {
     const esClient = {
-      search: jest.fn().mockResolvedValue({
-        hits: {
-          hits: [
+      esql: {
+        query: jest.fn().mockResolvedValue(
+          esqlHits([
             { _id: 'wiki_service_checkout', _source: source },
             {
               _id: 'wiki_alert_latency',
@@ -65,9 +74,9 @@ describe('createWikiPageStore', () => {
                 attributes: { status: 'tentative', corroborations: 1, slug: 'latency' },
               },
             },
-          ],
-        },
-      }),
+          ])
+        ),
+      },
     };
 
     const store = createWikiPageStore({
@@ -90,9 +99,9 @@ describe('createWikiPageStore', () => {
 
   it('collapses slug-prefix duplicates onto the canonical page', async () => {
     const esClient = {
-      search: jest.fn().mockResolvedValue({
-        hits: {
-          hits: [
+      esql: {
+        query: jest.fn().mockResolvedValue(
+          esqlHits([
             {
               _id: 'wiki_service_wiki-service-email-service',
               _source: {
@@ -113,9 +122,9 @@ describe('createWikiPageStore', () => {
                 attributes: { status: 'established', corroborations: 1, slug: 'email-service' },
               },
             },
-          ],
-        },
-      }),
+          ])
+        ),
+      },
     };
 
     const store = createWikiPageStore({
@@ -460,14 +469,14 @@ describe('createWikiPageStore', () => {
       attributes: { status: 'established', corroborations: 1, slug: 'email-service' },
     };
     const esClient = {
-      search: jest.fn().mockResolvedValue({
-        hits: {
-          hits: [
+      esql: {
+        query: jest.fn().mockResolvedValue(
+          esqlHits([
             { _id: 'wiki_service_wiki-service-email-service', _source: prefixed },
             { _id: 'wiki_service_email-service', _source: canonical },
-          ],
-        },
-      }),
+          ])
+        ),
+      },
       get: jest.fn().mockImplementation(async ({ id }: { id: string }) => {
         if (id === 'default:wiki_service_wiki-service-email-service') {
           return { found: true, _id: id, _source: prefixed };
@@ -505,7 +514,7 @@ describe('createWikiPageStore', () => {
 
   it('only reads pages belonging to its own space', async () => {
     const esClient = {
-      search: jest.fn().mockResolvedValue({ hits: { hits: [] } }),
+      esql: { query: jest.fn().mockResolvedValue(esqlHits([])) },
     };
 
     const store = createWikiPageStore({
@@ -516,9 +525,11 @@ describe('createWikiPageStore', () => {
 
     await store.list();
 
-    expect(esClient.search).toHaveBeenCalledWith(
+    // The tag is multi-valued and the space a flattened subfield, so both are exact request filters.
+    expect(esClient.esql.query).toHaveBeenCalledWith(
       expect.objectContaining({
-        query: {
+        query: expect.stringContaining('SORT @timestamp DESC NULLS LAST'),
+        filter: {
           bool: {
             filter: [{ term: { tags: 'wiki' } }, { term: { 'attributes.space_id': 'marketing' } }],
           },
@@ -555,9 +566,13 @@ describe('createWikiPageStore', () => {
 
   it('hands callers logical ids even though storage is namespaced', async () => {
     const esClient = {
-      search: jest.fn().mockResolvedValue({
-        hits: { hits: [{ _id: 'marketing:wiki_service_checkout', _source: source }] },
-      }),
+      esql: {
+        query: jest
+          .fn()
+          .mockResolvedValue(
+            esqlHits([{ _id: 'marketing:wiki_service_checkout', _source: source }])
+          ),
+      },
     };
 
     const store = createWikiPageStore({

@@ -21,13 +21,21 @@ const conversation = (id: string, updatedAt: string) => ({
   updated_at: updatedAt,
 });
 
-const indexNotFound = () =>
+// ES|QL reports a missing index as a 400 `verification_exception`, not the DSL's 404.
+const unknownIndex = () =>
   new errors.ResponseError({
-    statusCode: 404,
-    body: { error: { type: 'index_not_found_exception' } },
+    statusCode: 400,
+    body: {
+      error: { type: 'verification_exception', reason: 'Unknown index [missing-index]' },
+    },
     warnings: null,
     meta: {} as never,
   });
+
+const esqlCount = (total: number) => ({
+  columns: [{ name: 'total', type: 'long' }],
+  values: [[total]],
+});
 
 const setup = ({
   conversations,
@@ -62,7 +70,7 @@ describe('createKnowledgePurgeClient', () => {
           conversation('inv-old', '2026-01-01T00:00:00.000Z'),
         ],
       });
-      esClient.count.mockResolvedValue({ count: 3 } as never);
+      esClient.esql.query.mockResolvedValue(esqlCount(3) as never);
 
       await expect(client.preview(SINCE)).resolves.toEqual({
         since: SINCE,
@@ -78,28 +86,29 @@ describe('createKnowledgePurgeClient', () => {
         investigations_capped: false,
       });
 
-      // Every store is filtered by space and by the cutoff, so another space is never counted.
+      // Every store is counted in the caller's space and after the cutoff, so another space is never
+      // counted. The space is the request filter; the cutoff is a bound parameter in the query.
       for (const index of [MEMORY_INDEX, WIKI_AI_INDEX_DEST, DECISION_TREE_AI_INDEX_DEST]) {
-        expect(esClient.count).toHaveBeenCalledWith(
-          {
-            index,
-            query: {
-              bool: {
-                filter: [
-                  { term: { 'attributes.space_id': 'marketing' } },
-                  { range: { '@timestamp': { gte: SINCE } } },
-                ],
-              },
-            },
-          },
+        expect(esClient.esql.query).toHaveBeenCalledWith(
+          expect.objectContaining({
+            query: expect.stringContaining(
+              `FROM ${index} | WHERE @timestamp >= TO_DATETIME(?since)`
+            ),
+            filter: { term: { 'attributes.space_id': 'marketing' } },
+          }),
           expect.anything()
         );
       }
+      const [request] = esClient.esql.query.mock.calls[0] as unknown as [
+        { query: string; params: Array<Record<string, unknown>> }
+      ];
+      expect(request.query).toContain('STATS total = COUNT(*)');
+      expect(request.params).toContainEqual({ since: SINCE });
     });
 
     it('reports an empty store when the backing index was never created', async () => {
       const { client, esClient } = setup({ conversations: [] });
-      esClient.count.mockRejectedValue(indexNotFound());
+      esClient.esql.query.mockRejectedValue(unknownIndex());
 
       const preview = await client.preview(SINCE);
 
@@ -113,7 +122,7 @@ describe('createKnowledgePurgeClient', () => {
 
     it('leaves investigations alone when Agent Builder is unavailable', async () => {
       const { client, esClient } = setup();
-      esClient.count.mockResolvedValue({ count: 1 } as never);
+      esClient.esql.query.mockResolvedValue(esqlCount(1) as never);
 
       const preview = await client.preview(SINCE);
 
