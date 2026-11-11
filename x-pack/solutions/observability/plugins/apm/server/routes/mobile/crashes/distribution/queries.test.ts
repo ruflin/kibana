@@ -6,19 +6,19 @@
  */
 
 import { getCrashDistribution } from './get_distribution';
-import type { SearchParamsMock } from '../../../../utils/test_helpers';
-import { inspectSearchParams } from '../../../../utils/test_helpers';
+import type { EsqlParamsMock } from '../../../../utils/esql_test_helpers';
+import { inspectEsqlParams, toEsqlRequest } from '../../../../utils/esql_test_helpers';
 import { ENVIRONMENT_ALL } from '../../../../../common/environment_filter_values';
 
 describe('error distribution queries', () => {
-  let mock: SearchParamsMock;
+  let mock: EsqlParamsMock;
 
   afterEach(() => {
     mock.teardown();
   });
 
   it('fetches an error distribution', async () => {
-    mock = await inspectSearchParams(({ mockApmEventClient }) =>
+    mock = await inspectEsqlParams(({ mockApmEventClient }) =>
       getCrashDistribution({
         serviceName: 'serviceName',
         apmEventClient: mockApmEventClient,
@@ -29,11 +29,11 @@ describe('error distribution queries', () => {
       })
     );
 
-    expect(mock.params).toMatchSnapshot();
+    expect(toEsqlRequest(mock.params)).toMatchSnapshot();
   });
 
   it('fetches an error distribution with a group id', async () => {
-    mock = await inspectSearchParams(({ mockApmEventClient }) =>
+    mock = await inspectEsqlParams(({ mockApmEventClient }) =>
       getCrashDistribution({
         serviceName: 'serviceName',
         groupId: 'foo',
@@ -45,6 +45,6 @@ describe('error distribution queries', () => {
       })
     );
 
-    expect(mock.params).toMatchSnapshot();
+    expect(toEsqlRequest(mock.params)).toMatchSnapshot();
   });
 });

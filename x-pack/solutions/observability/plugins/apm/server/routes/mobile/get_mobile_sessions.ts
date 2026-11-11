@@ -5,7 +5,8 @@
  * 2.0.
  */
 
-import { kqlQuery, rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import type { Coordinate } from '@kbn/apm-types';
 import type { Maybe } from '@kbn/apm-types-shared';
 import { offsetPreviousPeriodCoordinates } from '../../../common/utils/offset_previous_period_coordinate';
@@ -13,6 +14,14 @@ import { SERVICE_NAME, SESSION_ID, TRANSACTION_NAME } from '../../../common/es_f
 import { environmentQuery } from '../../../common/utils/environment_query';
 import { getOffsetInMs } from '../../../common/utils/get_offset_in_ms';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import {
+  addTimeBucket,
+  esqlBucketMap,
+  getTimeBucketKeys,
+  toNumberOrNull,
+  whereTerm,
+} from '../../lib/helpers/esql_values';
 import { getBucketSize } from '../../../common/utils/get_bucket_size';
 import { ApmDocumentType } from '../../../common/document_type';
 import { RollupInterval } from '../../../common/rollup';
@@ -49,19 +58,19 @@ async function getSessionTimeseries({
     offset,
   });
 
-  const { intervalString } = getBucketSize({
+  const { bucketSize } = getBucketSize({
     start: startWithOffset,
     end: endWithOffset,
     minBucketSize: 60,
   });
+  const intervalMs = bucketSize * 1000;
+  const bucketKeys = getTimeBucketKeys({
+    start: startWithOffset,
+    end: endWithOffset,
+    intervalMs,
+  });
 
-  const aggs = {
-    sessions: {
-      cardinality: { field: SESSION_ID },
-    },
-  };
-
-  const response = await apmEventClient.search('get_mobile_sessions', {
+  const request = {
     apm: {
       sources: [
         {
@@ -70,45 +79,47 @@ async function getSessionTimeseries({
         },
       ],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
+    filter: {
       bool: {
         filter: [
-          { exists: { field: SESSION_ID } },
-          ...termQuery(SERVICE_NAME, serviceName),
-          ...termQuery(TRANSACTION_NAME, transactionName),
           ...rangeQuery(startWithOffset, endWithOffset),
           ...environmentQuery(environment),
           ...kqlQuery(kuery),
         ],
       },
     },
-    aggs: {
-      timeseries: {
-        date_histogram: {
-          field: '@timestamp',
-          fixed_interval: intervalString,
-          min_doc_count: 0,
-          extended_bounds: { min: startWithOffset, max: endWithOffset },
-        },
-        aggs,
-      },
-      ...aggs,
-    },
-  });
+  };
+  const scoped = (index: string[]) =>
+    whereTerm(
+      whereTerm(esql.from(index), SERVICE_NAME, serviceName),
+      TRANSACTION_NAME,
+      transactionName
+    ).pipe`WHERE ${esql.col(SESSION_ID)} IS NOT NULL`;
 
-  const timeseries =
-    response?.aggregations?.timeseries.buckets.map((bucket) => {
-      return {
-        x: bucket.key,
-        y: bucket.sessions.value,
-      };
-    }) ?? [];
+  const [timeseriesResponse, totalResponse] = await Promise.all([
+    apmEventClient.esql('get_mobile_sessions', {
+      ...request,
+      query: (index) =>
+        addTimeBucket(scoped(index), intervalMs).pipe`STATS sessions = COUNT_DISTINCT(${esql.col(
+          SESSION_ID
+        )}) BY bucket`.limit(bucketKeys.length),
+    }),
+    apmEventClient.esql('get_mobile_sessions_total', {
+      ...request,
+      query: (index) =>
+        scoped(index).pipe`STATS sessions = COUNT_DISTINCT(${esql.col(SESSION_ID)})`.limit(1),
+    }),
+  ]);
+
+  const buckets = esqlBucketMap(timeseriesResponse);
+  const timeseries = bucketKeys.map((key) => ({
+    x: key,
+    y: Number(buckets.get(key)?.sessions ?? 0),
+  }));
 
   return {
     timeseries,
-    value: response.aggregations?.sessions?.value,
+    value: toNumberOrNull(esqlRows(totalResponse)[0]?.sessions),
   };
 }
 

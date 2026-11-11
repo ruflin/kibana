@@ -9,6 +9,7 @@ import type { APMEventClient } from '@kbn/apm-data-access-plugin/server';
 import { ENVIRONMENT_ALL_VALUE } from '../../../common/environment_filter_values';
 import { SERVICE_ENVIRONMENT } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
+import { esqlResponse, toEsqlRequest } from '../../utils/esql_test_helpers';
 import { getServiceMixedIngestion } from './get_service_mixed_ingestion';
 
 type SearchMock = jest.Mock<Promise<unknown>>;
@@ -39,24 +40,15 @@ function mixedResponse({
   otelFrom?: number;
   otelTo?: number;
 } = {}) {
-  return {
-    aggregations: {
-      ingestion_type: {
-        buckets: {
-          classic_apm: {
-            doc_count: classicCount,
-            min_timestamp: { value: classicFrom },
-            max_timestamp: { value: classicTo },
-          },
-          otel_native: {
-            doc_count: otelCount,
-            min_timestamp: { value: otelFrom },
-            max_timestamp: { value: otelTo },
-          },
-        },
-      },
-    },
-  };
+  const iso = (millis: number) => new Date(millis).toISOString();
+  const values: Array<Array<string | number | null>> = [];
+  if (classicCount > 0) {
+    values.push([classicCount, iso(classicFrom), iso(classicTo), 'classic_apm']);
+  }
+  if (otelCount > 0) {
+    values.push([otelCount, iso(otelFrom), iso(otelTo), 'otel_native']);
+  }
+  return esqlResponse(['doc_count', 'min_timestamp', 'max_timestamp', 'ingestion_type'], values);
 }
 
 function getSearchParams(search: SearchMock, callIndex = 0) {
@@ -64,14 +56,30 @@ function getSearchParams(search: SearchMock, callIndex = 0) {
 }
 
 function getFilterClauses(search: SearchMock, callIndex = 0) {
-  return getSearchParams(search, callIndex)?.query?.bool?.filter ?? [];
+  return getSearchParams(search, callIndex)?.filter?.bool?.filter ?? [];
 }
 
 describe('getServiceMixedIngestion', () => {
+  describe('query', () => {
+    it('groups the documents by ingestion type with a named service parameter', async () => {
+      const search: SearchMock = jest.fn().mockResolvedValueOnce(mixedResponse());
+      const apmEventClient = { esql: search } as unknown as APMEventClient;
+
+      await getServiceMixedIngestion({ ...baseParams, apmEventClient });
+
+      const { query, params } = toEsqlRequest(getSearchParams(search));
+      expect(query).toContain('SET unmapped_fields = "nullify"');
+      expect(query).toContain('WHERE `service.name` == ?serviceName');
+      expect(query).toContain('STATS');
+      expect(query).toContain('BY ingestion_type');
+      expect(params).toEqual([{ serviceName: 'my-service' }]);
+    });
+  });
+
   describe('environment filtering', () => {
     it('does not add an environment filter when ENVIRONMENT_ALL is used', async () => {
       const search: SearchMock = jest.fn().mockResolvedValueOnce(mixedResponse());
-      const apmEventClient = { search } as unknown as APMEventClient;
+      const apmEventClient = { esql: search } as unknown as APMEventClient;
 
       await getServiceMixedIngestion({ ...baseParams, apmEventClient });
 
@@ -80,7 +88,7 @@ describe('getServiceMixedIngestion', () => {
 
     it('adds an environment filter for a specific environment', async () => {
       const search: SearchMock = jest.fn().mockResolvedValueOnce(mixedResponse());
-      const apmEventClient = { search } as unknown as APMEventClient;
+      const apmEventClient = { esql: search } as unknown as APMEventClient;
 
       await getServiceMixedIngestion({
         ...baseParams,
@@ -97,17 +105,17 @@ describe('getServiceMixedIngestion', () => {
   describe('kuery filtering', () => {
     it('does not add a kql filter when kuery is empty', async () => {
       const search: SearchMock = jest.fn().mockResolvedValueOnce(mixedResponse());
-      const apmEventClient = { search } as unknown as APMEventClient;
+      const apmEventClient = { esql: search } as unknown as APMEventClient;
 
       await getServiceMixedIngestion({ ...baseParams, apmEventClient });
 
       const filters = getFilterClauses(search);
-      expect(filters).toHaveLength(2);
+      expect(filters).toHaveLength(1);
     });
 
     it('adds a kql filter when kuery is provided', async () => {
       const search: SearchMock = jest.fn().mockResolvedValueOnce(mixedResponse());
-      const apmEventClient = { search } as unknown as APMEventClient;
+      const apmEventClient = { esql: search } as unknown as APMEventClient;
 
       await getServiceMixedIngestion({
         ...baseParams,
@@ -116,7 +124,7 @@ describe('getServiceMixedIngestion', () => {
       });
 
       const filters = getFilterClauses(search);
-      expect(filters.length).toBeGreaterThan(2);
+      expect(filters.length).toBeGreaterThan(1);
     });
   });
 
@@ -125,7 +133,7 @@ describe('getServiceMixedIngestion', () => {
       const search: SearchMock = jest
         .fn()
         .mockResolvedValueOnce(mixedResponse({ classicCount: 5, otelCount: 3 }));
-      const apmEventClient = { search } as unknown as APMEventClient;
+      const apmEventClient = { esql: search } as unknown as APMEventClient;
 
       const result = await getServiceMixedIngestion({ ...baseParams, apmEventClient });
 
@@ -137,7 +145,7 @@ describe('getServiceMixedIngestion', () => {
       const search: SearchMock = jest
         .fn()
         .mockResolvedValueOnce(mixedResponse({ classicCount: 5, otelCount: 0 }));
-      const apmEventClient = { search } as unknown as APMEventClient;
+      const apmEventClient = { esql: search } as unknown as APMEventClient;
 
       const result = await getServiceMixedIngestion({ ...baseParams, apmEventClient });
 
@@ -149,7 +157,7 @@ describe('getServiceMixedIngestion', () => {
       const search: SearchMock = jest
         .fn()
         .mockResolvedValueOnce(mixedResponse({ classicCount: 0, otelCount: 8 }));
-      const apmEventClient = { search } as unknown as APMEventClient;
+      const apmEventClient = { esql: search } as unknown as APMEventClient;
 
       const result = await getServiceMixedIngestion({ ...baseParams, apmEventClient });
 
@@ -166,7 +174,7 @@ describe('getServiceMixedIngestion', () => {
       const search: SearchMock = jest
         .fn()
         .mockResolvedValueOnce(mixedResponse({ classicFrom, classicTo, otelFrom, otelTo }));
-      const apmEventClient = { search } as unknown as APMEventClient;
+      const apmEventClient = { esql: search } as unknown as APMEventClient;
 
       const result = await getServiceMixedIngestion({ ...baseParams, apmEventClient });
 

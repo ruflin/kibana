@@ -5,20 +5,17 @@
  * 2.0.
  */
 
+import { esql, type ComposerQuery } from '@elastic/esql';
+import { sumBy } from 'lodash';
 import type { ServiceMapServiceDependencyInfoResponse } from '@kbn/apm-api-shared';
-import {
-  calculateFailedTransactionRate,
-  calculateThroughputWithRange,
-  getOutcomeAggregation,
-} from '@kbn/apm-data-access-plugin/server/utils';
+import { calculateThroughputWithRange } from '@kbn/apm-data-access-plugin/server/utils';
 import type { NodeStats } from '@kbn/apm-types';
 import { LatencyAggregationType } from '@kbn/apm-types';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import { rangeQuery } from '@kbn/observability-plugin/server';
 import { calculateThroughputWithInterval } from '../../lib/helpers/calculate_throughput';
-import { ApmDocumentType } from '../../../common/document_type';
 import {
-  AT_TIMESTAMP,
+  EVENT_OUTCOME,
   SERVICE_NAME,
   SPAN_DESTINATION_SERVICE_RESOURCE,
   SPAN_DESTINATION_SERVICE_RESPONSE_TIME_COUNT,
@@ -30,8 +27,9 @@ import { getBucketSize } from '../../../common/utils/get_bucket_size';
 import { getOffsetInMs } from '../../../common/utils/get_offset_in_ms';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
 import { getDocumentTypeFilterForServiceDestinationStatistics } from '../../lib/helpers/spans/get_is_using_service_destination_metrics';
-import { getFailedTransactionRateTimeSeries } from '../../lib/helpers/transaction_error_rate';
-import { getLatencyAggregation, getLatencyValue } from '../../lib/helpers/latency_aggregation_type';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import { addTimeBucket, getTimeBucketKeys } from '../../lib/helpers/esql_values';
+import { nullifyEmptyRedMetricPoints } from '../../../common/utils/red_metric_value_for_histogram_bucket';
 import { withApmSpan } from '../../utils/with_apm_span';
 
 interface Options {
@@ -62,55 +60,56 @@ function getServiceMapDependencyNodeInfoForTimeRange({
       offset,
     });
 
-    const { intervalString, bucketSize } = getBucketSize({
+    const { bucketSize } = getBucketSize({
       start: startWithOffset,
       end: endWithOffset,
       numBuckets: 20,
     });
 
-    const connectionFilter = [
-      { terms: { [SPAN_DESTINATION_SERVICE_RESOURCE]: dependencies } },
-      ...(sourceServiceName ? [{ term: { [SERVICE_NAME]: sourceServiceName } }] : []),
-      ...rangeQuery(startWithOffset, endWithOffset),
-      ...environmentQuery(environment),
-    ];
+    const intervalMs = bucketSize * 1000;
+    const bucketKeys = getTimeBucketKeys({
+      start: startWithOffset,
+      end: endWithOffset,
+      intervalMs,
+    });
 
-    const subAggs = {
-      latency_sum: {
-        sum: { field: SPAN_DESTINATION_SERVICE_RESPONSE_TIME_SUM },
+    const connectionFilter = {
+      bool: {
+        filter: [...rangeQuery(startWithOffset, endWithOffset), ...environmentQuery(environment)],
       },
-      count: {
-        sum: { field: SPAN_DESTINATION_SERVICE_RESPONSE_TIME_COUNT },
-      },
-      ...getOutcomeAggregation(ApmDocumentType.ServiceDestinationMetric),
+    };
+
+    const withConnection = (query: ComposerQuery) => {
+      const withDependencies = query.pipe`WHERE ${esql.col(
+        SPAN_DESTINATION_SERVICE_RESOURCE
+      )} IN (${{ dependencies }})`;
+      return sourceServiceName
+        ? withDependencies.pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ sourceServiceName }}`
+        : withDependencies;
     };
 
     // Rollup search: always used for throughput + failed transaction rate.
-    // Also used for avg latency.
-    const rollupSearch = apmEventClient.search('get_service_map_dependency_node_stats', {
+    // Also used for avg latency. The totals are the sums of the buckets.
+    const rollupSearch = apmEventClient.esql('get_service_map_dependency_node_stats', {
       apm: {
         events: [ProcessorEvent.metric],
       },
-      track_total_hits: false,
-      size: 0,
-      query: {
+      query: (index) =>
+        addTimeBucket(withConnection(esql.from(index)), intervalMs).pipe`STATS
+            doc_count = COUNT(*),
+            latency_sum = SUM(${esql.col(SPAN_DESTINATION_SERVICE_RESPONSE_TIME_SUM)}),
+            count = SUM(${esql.col(SPAN_DESTINATION_SERVICE_RESPONSE_TIME_COUNT)}),
+            successful_or_failed = COUNT(*) WHERE ${esql.col(EVENT_OUTCOME)} IN (${{
+          outcomes: ['failure', 'success'],
+        }}),
+            successful = COUNT(*) WHERE ${esql.col(EVENT_OUTCOME)} == ${{ success: 'success' }}
+          BY bucket`.limit(bucketKeys.length),
+      filter: {
         bool: {
           filter: [
             ...getDocumentTypeFilterForServiceDestinationStatistics(true),
-            ...connectionFilter,
+            ...connectionFilter.bool.filter,
           ],
-        },
-      },
-      aggs: {
-        ...subAggs,
-        timeseries: {
-          date_histogram: {
-            field: AT_TIMESTAMP,
-            fixed_interval: intervalString,
-            min_doc_count: 0,
-            extended_bounds: { min: startWithOffset, max: endWithOffset },
-          },
-          aggs: subAggs,
         },
       },
     });
@@ -118,44 +117,61 @@ function getServiceMapDependencyNodeInfoForTimeRange({
     const isPercentile =
       latencyAggregationType === LatencyAggregationType.p95 ||
       latencyAggregationType === LatencyAggregationType.p99;
+    const percentile = latencyAggregationType === LatencyAggregationType.p95 ? 95 : 99;
 
     // p95/p99 latency needs the raw span documents: percentiles cannot be computed from the
-    // pre-aggregated rollup, so both requests run in parallel.
-    const percentileSearch = isPercentile
-      ? apmEventClient.search('get_service_map_dependency_node_stats_percentile', {
+    // pre-aggregated rollup, so both requests run in parallel. A percentile cannot be summed
+    // over buckets, so the overall value is its own request.
+    const percentileSearch = (bucketed: boolean) =>
+      apmEventClient.esql(
+        bucketed
+          ? 'get_service_map_dependency_node_stats_percentile_timeseries'
+          : 'get_service_map_dependency_node_stats_percentile',
+        {
           apm: {
             events: [ProcessorEvent.span],
           },
-          track_total_hits: false,
-          size: 0,
-          query: {
-            bool: {
-              filter: connectionFilter,
-            },
+          query: (index) => {
+            const spans = withConnection(esql.from(index));
+            return bucketed
+              ? addTimeBucket(spans, intervalMs).pipe`STATS latency = PERCENTILE(${esql.col(
+                  SPAN_DURATION
+                )}, ${{ percentile }}) BY bucket`.limit(bucketKeys.length)
+              : spans.pipe`STATS latency = PERCENTILE(${esql.col(SPAN_DURATION)}, ${{
+                  percentile,
+                }})`.limit(1);
           },
-          aggs: {
-            ...getLatencyAggregation(latencyAggregationType, SPAN_DURATION),
-            timeseries: {
-              date_histogram: {
-                field: AT_TIMESTAMP,
-                fixed_interval: intervalString,
-                min_doc_count: 0,
-                extended_bounds: { min: startWithOffset, max: endWithOffset },
-              },
-              aggs: getLatencyAggregation(latencyAggregationType, SPAN_DURATION),
-            },
-          },
-        })
-      : undefined;
+          filter: connectionFilter,
+        }
+      );
 
-    const [rollupResponse, spanResponse] = await Promise.all([rollupSearch, percentileSearch]);
+    const [rollupResponse, spanTimeseriesResponse, spanResponse] = await Promise.all([
+      rollupSearch,
+      isPercentile ? percentileSearch(true) : undefined,
+      isPercentile ? percentileSearch(false) : undefined,
+    ]);
 
-    const count = rollupResponse.aggregations?.count.value ?? 0;
-    const latencySum = rollupResponse.aggregations?.latency_sum.value ?? 0;
+    const rollupBuckets = new Map(
+      esqlRows(rollupResponse).map((row) => [row.bucket as number, row])
+    );
+    const buckets = bucketKeys.map((key) => {
+      const row = rollupBuckets.get(key);
+      return {
+        key,
+        docCount: Number(row?.doc_count ?? 0),
+        latencySum: row?.latency_sum == null ? null : Number(row.latency_sum),
+        count: row?.count == null ? null : Number(row.count),
+        successfulOrFailed: Number(row?.successful_or_failed ?? 0),
+        successful: Number(row?.successful ?? 0),
+      };
+    });
 
-    const avgFailedTransactionsRate = rollupResponse.aggregations
-      ? calculateFailedTransactionRate(rollupResponse.aggregations)
-      : null;
+    const count = sumBy(buckets, (bucket) => bucket.count ?? 0);
+    const latencySum = sumBy(buckets, (bucket) => bucket.latencySum ?? 0);
+    const successfulOrFailed = sumBy(buckets, (bucket) => bucket.successfulOrFailed);
+    const successful = sumBy(buckets, (bucket) => bucket.successful);
+
+    const avgFailedTransactionsRate = (successfulOrFailed - successful) / successfulOrFailed;
 
     const throughput = calculateThroughputWithRange({
       start: startWithOffset,
@@ -177,58 +193,48 @@ function getServiceMapDependencyNodeInfoForTimeRange({
     // pre-aggregated response_time.sum.us rollup. The average comes from the rollup, so the
     // numbers of the different aggregation types do not come from the same data source.
     let latencyValue: number | null = latencySum / count;
-    let latencyTimeseries: Array<{ x: number; y: number | null }> | undefined =
-      rollupResponse.aggregations?.timeseries.buckets.map((bucket) => ({
+    let latencyTimeseries: Array<{ x: number; y: number | null }> | undefined = buckets.map(
+      (bucket) => ({
         x: bucket.key + offsetInMs,
-        y:
-          bucket.count.value && bucket.latency_sum.value != null
-            ? bucket.latency_sum.value / bucket.count.value
-            : null,
-      }));
+        y: bucket.count && bucket.latencySum != null ? bucket.latencySum / bucket.count : null,
+      })
+    );
 
-    if (isPercentile && spanResponse) {
-      latencyValue = spanResponse.aggregations?.latency
-        ? getLatencyValue({
-            latencyAggregationType,
-            aggregation: spanResponse.aggregations.latency as
-              | { value: number | null }
-              | { values: Record<string, number | null> },
-          })
-        : null;
+    if (isPercentile) {
+      const overall = esqlRows(spanResponse)[0]?.latency;
+      latencyValue = overall == null ? null : Number(overall);
 
-      latencyTimeseries = spanResponse.aggregations?.timeseries.buckets.map((bucket) => ({
-        x: bucket.key + offsetInMs,
-        y: bucket.latency
-          ? getLatencyValue({
-              latencyAggregationType,
-              aggregation: bucket.latency as
-                | { value: number | null }
-                | { values: Record<string, number | null> },
-            })
-          : null,
-      }));
+      const spanBuckets = new Map(
+        esqlRows(spanTimeseriesResponse).map((row) => [row.bucket as number, row.latency])
+      );
+      latencyTimeseries = bucketKeys.map((key) => {
+        const value = spanBuckets.get(key);
+        return { x: key + offsetInMs, y: value == null ? null : Number(value) };
+      });
     }
 
     return {
       failedTransactionsRate: {
         value: avgFailedTransactionsRate,
-        timeseries: rollupResponse.aggregations?.timeseries
-          ? getFailedTransactionRateTimeSeries(rollupResponse.aggregations.timeseries.buckets).map(
-              ({ x, y }) => ({ x: x + offsetInMs, y })
-            )
-          : undefined,
+        timeseries: nullifyEmptyRedMetricPoints(
+          buckets.map((bucket) => ({
+            x: bucket.key + offsetInMs,
+            docCount: bucket.docCount,
+            y: (bucket.successfulOrFailed - bucket.successful) / bucket.successfulOrFailed,
+          }))
+        ),
       },
       transactionStats: {
         throughput: {
           value: throughput,
-          timeseries: rollupResponse.aggregations?.timeseries.buckets.map((bucket) => {
+          timeseries: buckets.map((bucket) => {
             return {
               x: bucket.key + offsetInMs,
               // The summed span count of the bucket (not the number of metric documents),
               // normalized by the bucket interval, not by the whole range.
               y: calculateThroughputWithInterval({
                 bucketSize,
-                value: bucket.count.value ?? 0,
+                value: bucket.count ?? 0,
               }),
             };
           }),

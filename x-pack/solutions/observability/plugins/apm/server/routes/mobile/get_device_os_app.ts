@@ -5,7 +5,8 @@
  * 2.0.
  */
 
-import { termQuery, kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import type { MobileErrorType } from '@kbn/apm-types';
 import {
   DEVICE_MODEL_IDENTIFIER,
@@ -18,6 +19,7 @@ import { environmentQuery } from '../../../common/utils/environment_query';
 import { ApmDocumentType } from '../../../common/document_type';
 import { RollupInterval } from '../../../common/rollup';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlTermsBuckets, topTermsQuery, whereTerm } from '../../lib/helpers/esql_values';
 import { mobileErrorTypeQuery } from './mobile_error_type_query';
 
 export async function getDeviceOSApp({
@@ -41,51 +43,57 @@ export async function getDeviceOSApp({
   end: number;
   size: number;
 }) {
-  return await apmEventClient.search('get_mobile_device_os_app', {
-    apm: {
-      sources: [
-        {
-          documentType: errorType ? ApmDocumentType.ErrorEvent : ApmDocumentType.TransactionEvent,
-          rollupInterval: RollupInterval.None,
-        },
+  const apm = {
+    sources: [
+      {
+        documentType: errorType ? ApmDocumentType.ErrorEvent : ApmDocumentType.TransactionEvent,
+        rollupInterval: RollupInterval.None,
+      },
+    ],
+  };
+  const filter = {
+    bool: {
+      filter: [
+        // The transactionType filter is only relevant for transaction documents;
+        // error documents are scoped by error.type instead.
+        ...(errorType ? mobileErrorTypeQuery(errorType) : []),
+        ...rangeQuery(start, end),
+        ...environmentQuery(environment),
+        ...kqlQuery(kuery),
       ],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
-      bool: {
-        filter: [
-          ...termQuery(SERVICE_NAME, serviceName),
-          // The transactionType filter is only relevant for transaction documents;
-          // error documents are scoped by error.type instead.
-          ...(errorType
-            ? mobileErrorTypeQuery(errorType)
-            : termQuery(TRANSACTION_TYPE, transactionType)),
-          ...rangeQuery(start, end),
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-        ],
-      },
+  };
+  // The fields are not mapped in every index, so unmapped fields read as null.
+  const topTerms = (operationName: string, field: string) =>
+    apmEventClient.esql(operationName, {
+      apm,
+      query: (index) =>
+        topTermsQuery(
+          whereTerm(
+            whereTerm(
+              esql.from(index).addSetCommand('unmapped_fields', 'nullify'),
+              SERVICE_NAME,
+              serviceName
+            ),
+            TRANSACTION_TYPE,
+            errorType ? undefined : transactionType
+          ),
+          field
+        ),
+      filter,
+    });
+
+  const [devices, osVersions, appVersions] = await Promise.all([
+    topTerms('get_mobile_device_os_app_devices', DEVICE_MODEL_IDENTIFIER),
+    topTerms('get_mobile_device_os_app_os_versions', HOST_OS_VERSION),
+    topTerms('get_mobile_device_os_app_app_versions', SERVICE_VERSION),
+  ]);
+
+  return {
+    aggregations: {
+      devices: esqlTermsBuckets(devices, DEVICE_MODEL_IDENTIFIER, size),
+      osVersions: esqlTermsBuckets(osVersions, HOST_OS_VERSION, size),
+      appVersions: esqlTermsBuckets(appVersions, SERVICE_VERSION, size),
     },
-    aggs: {
-      devices: {
-        terms: {
-          field: DEVICE_MODEL_IDENTIFIER,
-          size,
-        },
-      },
-      osVersions: {
-        terms: {
-          field: HOST_OS_VERSION,
-          size,
-        },
-      },
-      appVersions: {
-        terms: {
-          field: SERVICE_VERSION,
-          size,
-        },
-      },
-    },
-  });
+  };
 }

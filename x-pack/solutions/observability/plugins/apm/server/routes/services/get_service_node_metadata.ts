@@ -5,12 +5,14 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import type { ServiceNodeMetadataResponse } from '@kbn/apm-api-shared';
 import { HOST_NAME, CONTAINER_ID } from '../../../common/es_fields/apm';
 import { NOT_AVAILABLE_LABEL } from '../../../common/i18n';
-import { SERVICE_NAME, SERVICE_NODE_NAME } from '../../../common/es_fields/apm';
+import { SERVICE_NAME } from '../../../common/es_fields/apm';
 import { environmentQuery, serviceNodeNameQuery } from '../../../common/utils/environment_query';
+import { esqlRows } from '../../lib/helpers/esql_read';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
 import type { ApmServiceTransactionDocumentType } from '../../../common/document_type';
 import type { RollupInterval } from '../../../common/rollup';
@@ -36,53 +38,37 @@ export async function getServiceNodeMetadata({
   documentType: ApmServiceTransactionDocumentType;
   rollupInterval: RollupInterval;
 }): Promise<ServiceNodeMetadataResponse> {
-  const params = {
-    apm: {
-      sources: [
-        {
-          documentType,
-          rollupInterval,
-        },
-      ],
-    },
-    track_total_hits: false,
-    size: 0,
-    query: {
-      bool: {
-        filter: [
-          { term: { [SERVICE_NAME]: serviceName } },
-          ...rangeQuery(start, end),
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-          ...serviceNodeNameQuery(serviceNodeName),
-        ],
-      },
-    },
-    aggs: {
-      nodes: {
-        terms: {
-          field: SERVICE_NODE_NAME,
+  const topValue = async (operationName: string, field: string) => {
+    const response = await apmEventClient.esql(operationName, {
+      apm: { sources: [{ documentType, rollupInterval }] },
+      // The field is not mapped in every index, so unmapped fields read as null.
+      query: (index) =>
+        esql.from(index).addSetCommand('unmapped_fields', 'nullify').pipe`WHERE ${esql.col(
+          SERVICE_NAME
+        )} == ${{ serviceName }} AND ${esql.col(field)} IS NOT NULL`
+          .pipe`STATS doc_count = COUNT(*) BY ${esql.col(field)}`
+          .pipe`SORT doc_count DESC, ${esql.col(field)} ASC`.limit(1),
+      filter: {
+        bool: {
+          filter: [
+            ...rangeQuery(start, end),
+            ...environmentQuery(environment),
+            ...kqlQuery(kuery),
+            ...serviceNodeNameQuery(serviceNodeName),
+          ],
         },
       },
-      host: {
-        terms: {
-          field: HOST_NAME,
-          size: 1,
-        },
-      },
-      containerId: {
-        terms: {
-          field: CONTAINER_ID,
-          size: 1,
-        },
-      },
-    },
+    });
+    return esqlRows(response)[0]?.[field] as string | undefined;
   };
 
-  const { aggregations } = await apmEventClient.search('get_service_node_metadata', params);
+  const [host, containerId] = await Promise.all([
+    topValue('get_service_node_metadata_host', HOST_NAME),
+    topValue('get_service_node_metadata_container_id', CONTAINER_ID),
+  ]);
 
   return {
-    host: aggregations?.host.buckets[0]?.key || NOT_AVAILABLE_LABEL,
-    containerId: aggregations?.containerId.buckets[0]?.key || NOT_AVAILABLE_LABEL,
+    host: host || NOT_AVAILABLE_LABEL,
+    containerId: containerId || NOT_AVAILABLE_LABEL,
   };
 }

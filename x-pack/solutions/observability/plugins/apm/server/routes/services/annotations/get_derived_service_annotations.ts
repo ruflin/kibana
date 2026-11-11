@@ -5,12 +5,9 @@
  * 2.0.
  */
 
+import { esql, type ComposerQuery } from '@elastic/esql';
 import type { ESFilter } from '@kbn/es-types';
 import { rangeQuery } from '@kbn/observability-plugin/server';
-import { accessKnownApmEventFields } from '@kbn/apm-data-access-plugin/server/utils';
-import { maybe } from '../../../../common/utils/maybe';
-import { asMutableArray } from '../../../../common/utils/as_mutable_array';
-import { isFiniteNumber } from '../../../../common/utils/is_finite_number';
 import type { Annotation } from '../../../../common/annotations';
 import { AnnotationType } from '../../../../common/annotations';
 import { AT_TIMESTAMP, SERVICE_NAME, SERVICE_VERSION } from '../../../../common/es_fields/apm';
@@ -20,6 +17,8 @@ import {
   getProcessorEventForTransactions,
 } from '../../../lib/helpers/transactions';
 import type { APMEventClient } from '../../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlRows } from '../../../lib/helpers/esql_read';
+import { toEpochMillis } from '../../../lib/helpers/esql_values';
 import { compactMap } from '../../../utils/compact_map';
 
 export async function getDerivedServiceAnnotations({
@@ -37,79 +36,51 @@ export async function getDerivedServiceAnnotations({
   start: number;
   end: number;
 }) {
-  const filter: ESFilter[] = [
-    { term: { [SERVICE_NAME]: serviceName } },
+  const events = [getProcessorEventForTransactions(searchAggregatedTransactions)];
+  const baseWhere = (query: ComposerQuery) =>
+    query.pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ serviceName }}`;
+  const baseFilter: ESFilter[] = [
     ...getBackwardCompatibleDocumentTypeFilter(searchAggregatedTransactions),
     ...environmentQuery(environment),
   ];
 
-  const versions =
-    (
-      await apmEventClient.search('get_derived_service_annotations', {
-        apm: {
-          events: [getProcessorEventForTransactions(searchAggregatedTransactions)],
-        },
-        track_total_hits: false,
-        size: 0,
-        query: {
-          bool: {
-            filter: [...filter, ...rangeQuery(start, end)],
-          },
-        },
-        aggs: {
-          versions: {
-            terms: {
-              field: SERVICE_VERSION,
-            },
-          },
-        },
-      })
-    ).aggregations?.versions.buckets.map((bucket) => bucket.key) ?? [];
+  const versionsResponse = await apmEventClient.esql('get_derived_service_annotations', {
+    apm: { events },
+    query: (index) =>
+      baseWhere(esql.from(index)).pipe`STATS doc_count = COUNT(*) BY ${esql.col(SERVICE_VERSION)}`
+        .pipe`SORT doc_count DESC, ${esql.col(SERVICE_VERSION)} ASC`.limit(10),
+    filter: { bool: { filter: [...baseFilter, ...rangeQuery(start, end)] } },
+  });
+
+  const versions = esqlRows(versionsResponse).map((row) => row[SERVICE_VERSION] as string);
 
   if (versions.length <= 1) {
     return [];
   }
 
-  const requiredFields = asMutableArray([AT_TIMESTAMP] as const);
-  const annotations = await Promise.all(
-    versions.map(
-      async (version) =>
-        [
-          version,
-          await apmEventClient.search('get_first_seen_of_version', {
-            apm: {
-              events: [getProcessorEventForTransactions(searchAggregatedTransactions)],
-            },
-            track_total_hits: false,
-            size: 1,
-            query: {
-              bool: {
-                filter: [...filter, { term: { [SERVICE_VERSION]: version } }],
-              },
-            },
-            sort: {
-              '@timestamp': 'asc',
-            },
-            fields: requiredFields,
-          }),
-        ] as const
-    )
+  // The first-seen lookup has no time range: the range is only applied to the result below.
+  const firstSeenResponse = await apmEventClient.esql('get_first_seen_of_version', {
+    apm: { events },
+    query: (index) =>
+      baseWhere(esql.from(index)).pipe`WHERE ${esql.col(SERVICE_VERSION)} IN (${{ versions }})`
+        .pipe`STATS first_seen = MIN(@timestamp) BY ${esql.col(SERVICE_VERSION)}`.limit(
+        versions.length
+      ),
+    filter: { bool: { filter: baseFilter } },
+  });
+
+  const firstSeenByVersion = new Map(
+    esqlRows(firstSeenResponse).map((row) => [row[SERVICE_VERSION] as string, row.first_seen])
+  );
+  const annotations = versions.map(
+    (version) => [version, firstSeenByVersion.get(version)] as const
   );
 
-  return compactMap(annotations, ([version, response]) => {
-    const fields = maybe(response.hits.hits[0])?.fields;
+  return compactMap(annotations, ([version, firstSeenTimestamp]) => {
+    const firstSeen = toEpochMillis(firstSeenTimestamp);
 
-    const event = fields && accessKnownApmEventFields(fields).requireFields(requiredFields);
-
-    if (!event) {
+    if (firstSeen === null) {
       return null;
-    }
-
-    const timestamp = event[AT_TIMESTAMP];
-
-    const firstSeen = new Date(timestamp).getTime();
-    if (!isFiniteNumber(firstSeen)) {
-      throw new Error('First seen for version was unexpectedly undefined or null.');
     }
 
     if (firstSeen < start || firstSeen > end) {

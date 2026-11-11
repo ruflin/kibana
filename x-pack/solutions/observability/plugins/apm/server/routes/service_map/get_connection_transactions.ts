@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import { esql, type ComposerQuery } from '@elastic/esql';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import { rangeQuery } from '@kbn/observability-plugin/server';
 import type { ConnectionTransactionsResponse } from '@kbn/apm-api-shared';
@@ -25,9 +25,9 @@ import { EventOutcome } from '../../../common/event_outcome';
 import { environmentQuery } from '../../../common/utils/environment_query';
 import type { Environment } from '../../../common/environment_rt';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlRowsAsFields } from '../../lib/helpers/esql_values';
 import { withApmSpan } from '../../utils/with_apm_span';
 import { CONNECTION_JOIN_TIME_BUFFER_MS, MAX_CONNECTION_IDS } from './connection_constants';
-import { fieldsOf } from './get_connection_top_error';
 
 /** Maximum number of transaction groups (distinct transaction names) returned. */
 const MAX_TRANSACTION_GROUPS = 100;
@@ -70,76 +70,65 @@ export function getConnectionTransactions({
   end: number;
 }): Promise<ConnectionTransactionsResponse> {
   return withApmSpan('get_connection_transactions', async () => {
-    let scopeFilter: QueryDslQueryContainer[];
+    let scopeWhere: (query: ComposerQuery) => ComposerQuery;
     let isSampled = false;
 
     if (dependencies.length > 0) {
-      scopeFilter = [
-        { term: { [SERVICE_NAME]: sourceServiceName } },
-        { terms: { [SPAN_DESTINATION_SERVICE_RESOURCE]: dependencies } },
-      ];
+      scopeWhere = (query) =>
+        query.pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ sourceServiceName }}`
+          .pipe`WHERE ${esql.col(SPAN_DESTINATION_SERVICE_RESOURCE)} IN (${{ dependencies }})`;
     } else if (targetServiceName) {
       // The parent ids of the newest entry transactions of the target: the span ids of the exit
       // spans that called it. The parent id is specific to the call, so the environment of the
       // target is not filtered (the exit span query filters the source's environment).
-      const entryTransactionsResponse = await apmEventClient.search(
+      // One row more than the budget tells whether older ones were left out.
+      const entryTransactionsResponse = await apmEventClient.esql(
         'get_connection_transactions_target_parent_ids',
         {
           apm: { events: [ProcessorEvent.transaction] },
-          track_total_hits: MAX_CONNECTION_IDS + 1,
-          size: MAX_CONNECTION_IDS,
-          sort: [{ [AT_TIMESTAMP]: 'desc' }],
-          _source: false,
-          fields: [PARENT_ID],
-          query: {
-            bool: {
-              filter: [
-                { term: { [SERVICE_NAME]: targetServiceName } },
-                { exists: { field: PARENT_ID } },
-                ...rangeQuery(start, end),
-              ],
-            },
-          },
+          query: (index) =>
+            esql.from(index).pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ targetServiceName }}`
+              .pipe`WHERE ${esql.col(PARENT_ID)} IS NOT NULL`.pipe`SORT ${esql.col(
+              AT_TIMESTAMP
+            )} DESC NULLS LAST`
+              .keep(PARENT_ID)
+              .limit(MAX_CONNECTION_IDS + 1),
+          filter: { bool: { filter: rangeQuery(start, end) } },
         }
       );
 
-      const parentIds = entryTransactionsResponse.hits.hits
-        .map((hit) => fieldsOf(hit)[PARENT_ID]?.[0])
+      const entryTransactionRows = esqlRowsAsFields(entryTransactionsResponse);
+      const parentIds = entryTransactionRows
+        .slice(0, MAX_CONNECTION_IDS)
+        .map((fields) => fields[PARENT_ID]?.[0])
         .filter((parentId): parentId is string => typeof parentId === 'string');
 
       if (parentIds.length === 0) {
         return { transactionGroups: [], isSampled: false };
       }
 
-      isSampled = entryTransactionsResponse.hits.total.value > MAX_CONNECTION_IDS;
-      scopeFilter = [
-        { term: { [SERVICE_NAME]: sourceServiceName } },
-        { terms: { [SPAN_ID]: parentIds } },
-      ];
+      isSampled = entryTransactionRows.length > MAX_CONNECTION_IDS;
+      scopeWhere = (query) =>
+        query.pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ sourceServiceName }}`
+          .pipe`WHERE ${esql.col(SPAN_ID)} IN (${{ parentIds }})`;
     } else {
       // Unreachable: the route schema requires dependencies or targetServiceName.
       return { transactionGroups: [], isSampled: false };
     }
 
-    const exitSpansResponse = await apmEventClient.search(
-      'get_connection_transactions_exit_spans',
-      {
-        apm: { events: [ProcessorEvent.span] },
-        track_total_hits: MAX_CONNECTION_IDS + 1,
-        size: MAX_CONNECTION_IDS,
-        sort: [{ [AT_TIMESTAMP]: 'desc' }],
-        _source: false,
-        fields: [TRANSACTION_ID, SPAN_DURATION, EVENT_OUTCOME],
-        query: {
-          bool: {
-            filter: [...scopeFilter, ...rangeQuery(start, end), ...environmentQuery(environment)],
-          },
-        },
-      }
-    );
+    const exitSpansResponse = await apmEventClient.esql('get_connection_transactions_exit_spans', {
+      apm: { events: [ProcessorEvent.span] },
+      query: (index) =>
+        scopeWhere(esql.from(index)).pipe`SORT ${esql.col(AT_TIMESTAMP)} DESC NULLS LAST`
+          .keep(TRANSACTION_ID, SPAN_DURATION, EVENT_OUTCOME)
+          .limit(MAX_CONNECTION_IDS + 1),
+      filter: {
+        bool: { filter: [...rangeQuery(start, end), ...environmentQuery(environment)] },
+      },
+    });
 
-    const calls: ExitSpanCall[] = exitSpansResponse.hits.hits.flatMap((hit) => {
-      const fields = fieldsOf(hit);
+    const exitSpanRows = esqlRowsAsFields(exitSpansResponse);
+    const calls: ExitSpanCall[] = exitSpanRows.slice(0, MAX_CONNECTION_IDS).flatMap((fields) => {
       const transactionId = fields[TRANSACTION_ID]?.[0];
       if (typeof transactionId !== 'string') {
         return [];
@@ -155,31 +144,23 @@ export function getConnectionTransactions({
       return { transactionGroups: [], isSampled };
     }
 
-    isSampled =
-      isSampled || exitSpansResponse.hits.total.value > exitSpansResponse.hits.hits.length;
+    isSampled = isSampled || exitSpanRows.length > MAX_CONNECTION_IDS;
 
     // The name and type of the transaction of each call. A transaction starts before its exit
     // spans, so the range reaches back beyond the window to still resolve calls near its start.
-    const transactionsResponse = await apmEventClient.search('get_connection_transactions_names', {
+    const callTransactionIds = [...new Set(calls.map((c) => c.transactionId))];
+    const transactionsResponse = await apmEventClient.esql('get_connection_transactions_names', {
       apm: { events: [ProcessorEvent.transaction] },
-      track_total_hits: false,
-      size: MAX_CONNECTION_IDS,
-      _source: false,
-      fields: [TRANSACTION_ID, TRANSACTION_NAME, TRANSACTION_TYPE],
-      query: {
-        bool: {
-          filter: [
-            { term: { [SERVICE_NAME]: sourceServiceName } },
-            { terms: { [TRANSACTION_ID]: [...new Set(calls.map((c) => c.transactionId))] } },
-            ...rangeQuery(start - CONNECTION_JOIN_TIME_BUFFER_MS, end),
-          ],
-        },
-      },
+      query: (index) =>
+        esql.from(index).pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ sourceServiceName }}`
+          .pipe`WHERE ${esql.col(TRANSACTION_ID)} IN (${{ callTransactionIds }})`
+          .keep(TRANSACTION_ID, TRANSACTION_NAME, TRANSACTION_TYPE)
+          .limit(MAX_CONNECTION_IDS),
+      filter: { bool: { filter: rangeQuery(start - CONNECTION_JOIN_TIME_BUFFER_MS, end) } },
     });
 
     const transactionById = new Map<string, { name: string; type: string }>();
-    for (const hit of transactionsResponse.hits.hits) {
-      const fields = fieldsOf(hit);
+    for (const fields of esqlRowsAsFields(transactionsResponse)) {
       const id = fields[TRANSACTION_ID]?.[0];
       const name = fields[TRANSACTION_NAME]?.[0];
       if (typeof id === 'string' && typeof name === 'string') {

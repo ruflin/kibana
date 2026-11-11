@@ -5,10 +5,17 @@
  * 2.0.
  */
 
-import { rangeQuery, kqlQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { rangeQuery, kqlQuery } from '@kbn/observability-plugin/server';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import { ERROR_GROUP_ID, SERVICE_NAME, ERROR_TYPE } from '../../../../../common/es_fields/apm';
 import { environmentQuery } from '../../../../../common/utils/environment_query';
+import {
+  addTimeBucket,
+  esqlBucketMap,
+  getTimeBucketKeys,
+  whereTerm,
+} from '../../../../lib/helpers/esql_values';
 import type { APMEventClient } from '../../../../lib/helpers/create_es_client/create_apm_event_client';
 
 export async function getBuckets({
@@ -30,44 +37,32 @@ export async function getBuckets({
   start: number;
   end: number;
 }) {
-  const params = {
+  const bucketKeys = getTimeBucketKeys({ start, end, intervalMs: bucketSize });
+
+  const response = await apmEventClient.esql('get_error_distribution_buckets', {
     apm: {
       events: [ProcessorEvent.error],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
+    query: (index) =>
+      addTimeBucket(
+        whereTerm(
+          whereTerm(whereTerm(esql.from(index), ERROR_TYPE, 'crash'), SERVICE_NAME, serviceName),
+          ERROR_GROUP_ID,
+          groupId
+        ),
+        bucketSize
+      ).pipe`STATS doc_count = COUNT(*) BY bucket`.limit(bucketKeys.length),
+    filter: {
       bool: {
-        filter: [
-          ...termQuery(ERROR_TYPE, 'crash'),
-          ...termQuery(SERVICE_NAME, serviceName),
-          ...rangeQuery(start, end),
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-          ...termQuery(ERROR_GROUP_ID, groupId),
-        ],
+        filter: [...rangeQuery(start, end), ...environmentQuery(environment), ...kqlQuery(kuery)],
       },
     },
-    aggs: {
-      distribution: {
-        histogram: {
-          field: '@timestamp',
-          min_doc_count: 0,
-          interval: bucketSize,
-          extended_bounds: {
-            min: start,
-            max: end,
-          },
-        },
-      },
-    },
-  };
+  });
 
-  const resp = await apmEventClient.search('get_error_distribution_buckets', params);
-
-  const buckets = (resp.aggregations?.distribution.buckets || []).map((bucket) => ({
-    x: bucket.key,
-    y: bucket.doc_count,
+  const rows = esqlBucketMap(response);
+  const buckets = bucketKeys.map((key) => ({
+    x: key,
+    y: Number(rows.get(key)?.doc_count ?? 0),
   }));
   return { buckets };
 }

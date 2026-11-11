@@ -5,7 +5,8 @@
  * 2.0.
  */
 
-import { termQuery, kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import { merge } from 'lodash';
 import { calculateThroughputWithRange } from '@kbn/apm-data-access-plugin/server/utils';
 import {
@@ -16,8 +17,8 @@ import {
 } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
-import { getLatencyValue } from '../../lib/helpers/latency_aggregation_type';
-import { LatencyAggregationType } from '../../../common/latency_aggregation_types';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import { toNumberOrNull, whereTerm } from '../../lib/helpers/esql_values';
 import { ApmDocumentType } from '../../../common/document_type';
 import { RollupInterval } from '../../../common/rollup';
 
@@ -57,8 +58,14 @@ export async function getMobileMainStatisticsByField({
   end,
   field,
 }: Props) {
+  const filter = {
+    bool: {
+      filter: [...rangeQuery(start, end), ...environmentQuery(environment), ...kqlQuery(kuery)],
+    },
+  };
+
   async function getMobileTransactionEventStatistics() {
-    const response = await apmEventClient.search(
+    const response = await apmEventClient.esql(
       `get_mobile_transaction_events_main_statistics_by_field`,
       {
         apm: {
@@ -69,62 +76,37 @@ export async function getMobileMainStatisticsByField({
             },
           ],
         },
-        track_total_hits: false,
-        size: 0,
-        query: {
-          bool: {
-            filter: [
-              ...termQuery(SERVICE_NAME, serviceName),
-              ...rangeQuery(start, end),
-              ...environmentQuery(environment),
-              ...kqlQuery(kuery),
-            ],
-          },
-        },
-        aggs: {
-          main_statistics: {
-            terms: {
-              field,
-              size: 1000,
-            },
-            aggs: {
-              latency: {
-                avg: {
-                  field: TRANSACTION_DURATION,
-                },
-              },
-              sessions: {
-                cardinality: {
-                  field: SESSION_ID,
-                },
-              },
-            },
-          },
-        },
+        // The fields are not mapped in every index, so unmapped fields read as null.
+        query: (index) =>
+          whereTerm(
+            esql.from(index).addSetCommand('unmapped_fields', 'nullify'),
+            SERVICE_NAME,
+            serviceName
+          ).pipe`WHERE ${esql.col(field)} IS NOT NULL`.pipe`STATS
+              doc_count = COUNT(*),
+              latency = AVG(${esql.col(TRANSACTION_DURATION)}),
+              sessions = COUNT_DISTINCT(${esql.col(SESSION_ID)})
+            BY ${esql.col(field)}`.pipe`SORT doc_count DESC, ${esql.col(field)} ASC`.limit(1000),
+        filter,
       }
     );
 
-    return (
-      response.aggregations?.main_statistics.buckets.map((bucket) => {
-        return {
-          name: bucket.key,
-          latency: getLatencyValue({
-            latencyAggregationType: LatencyAggregationType.avg,
-            aggregation: bucket.latency,
-          }),
-          throughput: calculateThroughputWithRange({
-            start,
-            end,
-            value: bucket.doc_count,
-          }),
-          sessions: bucket.sessions.value,
-        };
-      }) ?? []
-    );
+    return esqlRows(response).map((row) => {
+      return {
+        name: row[field] as string | number,
+        latency: toNumberOrNull(row.latency),
+        throughput: calculateThroughputWithRange({
+          start,
+          end,
+          value: Number(row.doc_count),
+        }),
+        sessions: Number(row.sessions),
+      };
+    });
   }
 
   async function getMobileErrorEventStatistics() {
-    const response = await apmEventClient.search(`get_mobile_crashes`, {
+    const response = await apmEventClient.esql(`get_mobile_crashes`, {
       apm: {
         sources: [
           {
@@ -133,44 +115,23 @@ export async function getMobileMainStatisticsByField({
           },
         ],
       },
-      track_total_hits: false,
-      size: 0,
-      query: {
-        bool: {
-          filter: [
-            ...termQuery(SERVICE_NAME, serviceName),
-            ...rangeQuery(start, end),
-            ...environmentQuery(environment),
-            ...kqlQuery(kuery),
-          ],
-        },
-      },
-      aggs: {
-        main_statistics: {
-          terms: {
-            field,
-            size: 1000,
-          },
-          aggs: {
-            crashes: {
-              filter: {
-                term: {
-                  [ERROR_TYPE]: 'crash',
-                },
-              },
-            },
-          },
-        },
-      },
+      query: (index) =>
+        whereTerm(
+          esql.from(index).addSetCommand('unmapped_fields', 'nullify'),
+          SERVICE_NAME,
+          serviceName
+        ).pipe`WHERE ${esql.col(field)} IS NOT NULL`.pipe`STATS
+            doc_count = COUNT(*),
+            crashes = COUNT(*) WHERE ${esql.col(ERROR_TYPE)} == ${{ errorType: 'crash' }}
+          BY ${esql.col(field)}`.pipe`SORT doc_count DESC, ${esql.col(field)} ASC`.limit(1000),
+      filter,
     });
-    return (
-      response.aggregations?.main_statistics.buckets.map((bucket) => {
-        return {
-          name: bucket.key,
-          crashes: bucket.crashes.doc_count ?? 0,
-        };
-      }) ?? []
-    );
+    return esqlRows(response).map((row) => {
+      return {
+        name: row[field] as string | number,
+        crashes: Number(row.crashes ?? 0),
+      };
+    });
   }
 
   const [transactioEventStatistics, errorEventStatistics] = await Promise.all([

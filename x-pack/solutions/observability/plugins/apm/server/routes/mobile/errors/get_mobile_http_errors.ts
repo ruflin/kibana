@@ -6,12 +6,23 @@
  */
 
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
+import { esql } from '@elastic/esql';
 import { kqlQuery, rangeQuery, termQuery } from '@kbn/observability-plugin/server';
 import type { MobileHttpErrorsTimeseries } from '@kbn/apm-api-shared';
+import {
+  addTimeBucket,
+  esqlBucketMap,
+  getTimeBucketKeys,
+  whereTerm,
+} from '../../../lib/helpers/esql_values';
 import type { APMEventClient } from '../../../lib/helpers/create_es_client/create_apm_event_client';
 import { getOffsetInMs } from '../../../../common/utils/get_offset_in_ms';
 import { environmentQuery } from '../../../../common/utils/environment_query';
-import { SERVICE_NAME, HTTP_RESPONSE_STATUS_CODE } from '../../../../common/es_fields/apm';
+import {
+  SERVICE_NAME,
+  HTTP_RESPONSE_STATUS_CODE,
+  ERROR_TYPE,
+} from '../../../../common/es_fields/apm';
 import { offsetPreviousPeriodCoordinates } from '../../../../common/utils/offset_previous_period_coordinate';
 import type { Coordinate } from '../../../../typings/timeseries';
 import { BUCKET_TARGET_COUNT } from '../../transactions/constants';
@@ -42,42 +53,35 @@ async function getMobileHttpErrorsTimeseries({
     start,
     end,
   });
-  const response = await apmEventClient.search('get_mobile_http_errors', {
+  const bucketKeys = getTimeBucketKeys({ start, end, intervalMs: bucketSize });
+
+  const response = await apmEventClient.esql('get_mobile_http_errors', {
     apm: { events: [ProcessorEvent.error] },
-    track_total_hits: false,
-    size: 0,
-    query: {
+    // The status code field is not mapped in every error index, so unmapped fields read as null.
+    query: (index) =>
+      addTimeBucket(
+        whereTerm(
+          esql.from(index).addSetCommand('unmapped_fields', 'nullify'),
+          SERVICE_NAME,
+          serviceName
+        ).pipe`WHERE ${esql.col(HTTP_RESPONSE_STATUS_CODE)} >= ${{
+          minStatusCode: 400,
+        }} AND ${esql.col(HTTP_RESPONSE_STATUS_CODE)} <= ${{ maxStatusCode: 599 }}`,
+        bucketSize
+      ).pipe`STATS doc_count = COUNT(*) BY bucket`.limit(bucketKeys.length),
+    filter: {
       bool: {
-        filter: [
-          ...termQuery(SERVICE_NAME, serviceName),
-          ...environmentQuery(environment),
-          ...rangeQuery(start, end),
-          ...rangeQuery(400, 599, HTTP_RESPONSE_STATUS_CODE),
-          ...kqlQuery(kuery),
-        ],
-        must_not: {
-          term: { 'error.type': 'crash' },
-        },
-      },
-    },
-    aggs: {
-      timeseries: {
-        histogram: {
-          field: '@timestamp',
-          min_doc_count: 0,
-          interval: bucketSize,
-          extended_bounds: {
-            min: start,
-            max: end,
-          },
-        },
+        // Documents without an error type are not crashes.
+        must_not: termQuery(ERROR_TYPE, 'crash'),
+        filter: [...environmentQuery(environment), ...rangeQuery(start, end), ...kqlQuery(kuery)],
       },
     },
   });
 
-  const timeseries = (response?.aggregations?.timeseries.buckets || []).map((bucket) => ({
-    x: bucket.key,
-    y: bucket.doc_count,
+  const rows = esqlBucketMap(response);
+  const timeseries = bucketKeys.map((key) => ({
+    x: key,
+    y: Number(rows.get(key)?.doc_count ?? 0),
   }));
   return { timeseries };
 }

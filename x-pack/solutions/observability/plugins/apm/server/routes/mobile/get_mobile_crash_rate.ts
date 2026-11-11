@@ -5,10 +5,18 @@
  * 2.0.
  */
 
-import { kqlQuery, rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql, type ComposerQuery } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import type { Maybe } from '@kbn/apm-types-shared';
 import type { Coordinate } from '../../../typings/timeseries';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import {
+  addTimeBucket,
+  esqlBucketMap,
+  getTimeBucketKeys,
+  toNumberOrNull,
+} from '../../lib/helpers/esql_values';
 import { getBucketSize } from '../../../common/utils/get_bucket_size';
 import { ERROR_TYPE, ERROR_ID, SERVICE_NAME } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
@@ -49,19 +57,19 @@ async function getMobileCrashTimeseries({
     offset,
   });
 
-  const { intervalString } = getBucketSize({
+  const { bucketSize } = getBucketSize({
     start: startWithOffset,
     end: endWithOffset,
     minBucketSize: 60,
   });
+  const intervalMs = bucketSize * 1000;
+  const bucketKeys = getTimeBucketKeys({
+    start: startWithOffset,
+    end: endWithOffset,
+    intervalMs,
+  });
 
-  const aggs = {
-    crashes: {
-      cardinality: { field: ERROR_ID },
-    },
-  };
-
-  const response = await apmEventClient.search('get_mobile_crash_rate', {
+  const request = {
     apm: {
       sources: [
         {
@@ -70,44 +78,48 @@ async function getMobileCrashTimeseries({
         },
       ],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
+    filter: {
       bool: {
         filter: [
-          ...termQuery(ERROR_TYPE, 'crash'),
-          ...termQuery(SERVICE_NAME, serviceName),
           ...rangeQuery(startWithOffset, endWithOffset),
           ...environmentQuery(environment),
           ...kqlQuery(kuery),
         ],
       },
     },
-    aggs: {
-      timeseries: {
-        date_histogram: {
-          field: '@timestamp',
-          fixed_interval: intervalString,
-          min_doc_count: 0,
-          extended_bounds: { min: startWithOffset, max: endWithOffset },
-        },
-        aggs,
-      },
-      ...aggs,
-    },
-  });
+  };
+  const crashes = (query: ComposerQuery) =>
+    query.pipe`WHERE ${esql.col(ERROR_TYPE)} == ${{ errorType: 'crash' }}`.pipe`WHERE ${esql.col(
+      SERVICE_NAME
+    )} == ${{ serviceName }}`;
 
-  const timeseries =
-    response?.aggregations?.timeseries.buckets.map((bucket) => {
-      return {
-        x: bucket.key,
-        y: bucket.crashes.value,
-      };
-    }) ?? [];
+  const [timeseriesResponse, totalResponse] = await Promise.all([
+    apmEventClient.esql('get_mobile_crash_rate', {
+      ...request,
+      query: (index) =>
+        addTimeBucket(crashes(esql.from(index)), intervalMs)
+          .pipe`STATS crashes = COUNT_DISTINCT(${esql.col(ERROR_ID)}) BY bucket`.limit(
+          bucketKeys.length
+        ),
+    }),
+    apmEventClient.esql('get_mobile_crash_rate_total', {
+      ...request,
+      query: (index) =>
+        crashes(esql.from(index)).pipe`STATS crashes = COUNT_DISTINCT(${esql.col(ERROR_ID)})`.limit(
+          1
+        ),
+    }),
+  ]);
+
+  const buckets = esqlBucketMap(timeseriesResponse);
+  const timeseries = bucketKeys.map((key) => ({
+    x: key,
+    y: Number(buckets.get(key)?.crashes ?? 0),
+  }));
 
   return {
     timeseries,
-    value: response.aggregations?.crashes?.value,
+    value: toNumberOrNull(esqlRows(totalResponse)[0]?.crashes),
   };
 }
 

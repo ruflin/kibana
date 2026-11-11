@@ -7,8 +7,11 @@
 
 import type { APMEventClient } from '@kbn/apm-data-access-plugin/server';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
-import { rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { rangeQuery } from '@kbn/observability-plugin/server';
 import { PROCESSOR_EVENT, SERVICE_NAME, TRACE_ID } from '../../../common/es_fields/apm';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import { whereTerm } from '../../lib/helpers/esql_values';
 
 export async function getTraceSummaryCount({
   apmEventClient,
@@ -21,30 +24,24 @@ export async function getTraceSummaryCount({
   end: number;
   traceId: string;
 }) {
-  const { aggregations, hits } = await apmEventClient.search(
-    'observability_overview_get_service_count',
-    {
-      apm: {
-        events: [ProcessorEvent.span, ProcessorEvent.transaction],
-      },
-      track_total_hits: true,
-      size: 0,
-      query: {
-        bool: {
-          must: [
-            { bool: { filter: [...termQuery(TRACE_ID, traceId), ...rangeQuery(start, end)] } },
-          ],
-          should: [
-            { terms: { [PROCESSOR_EVENT]: [ProcessorEvent.span, ProcessorEvent.transaction] } },
-            { bool: { must_not: { exists: { field: PROCESSOR_EVENT } } } },
-          ],
-          minimum_should_match: 1,
-        },
-      },
-      aggs: { serviceCount: { cardinality: { field: SERVICE_NAME } } },
+  const response = await apmEventClient.esql('observability_overview_get_service_count', {
+    apm: {
+      events: [ProcessorEvent.span, ProcessorEvent.transaction],
     },
-    { skipProcessorEventFilter: true }
-  );
+    // OTel-native documents may have no `processor.event`, which can be unmapped in their
+    // indices, so unmapped fields read as null.
+    query: (index) =>
+      whereTerm(esql.from(index).addSetCommand('unmapped_fields', 'nullify'), TRACE_ID, traceId)
+        .pipe`WHERE ${esql.col(PROCESSOR_EVENT)} IN (${{
+        processorEvents: [ProcessorEvent.span, ProcessorEvent.transaction],
+      }}) OR ${esql.col(PROCESSOR_EVENT)} IS NULL`
+        .pipe`STATS trace_events = COUNT(*), services = COUNT_DISTINCT(${esql.col(
+        SERVICE_NAME
+      )})`.limit(1),
+    filter: { bool: { filter: rangeQuery(start, end) } },
+    skipProcessorEventFilter: true,
+  });
 
-  return { services: aggregations?.serviceCount.value || 0, traceEvents: hits.total.value };
+  const row = esqlRows(response)[0];
+  return { services: Number(row?.services ?? 0), traceEvents: Number(row?.trace_events ?? 0) };
 }

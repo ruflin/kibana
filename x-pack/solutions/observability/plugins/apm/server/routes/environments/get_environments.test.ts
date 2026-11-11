@@ -27,11 +27,17 @@ function createMockApmEventClient({
   };
 
   return {
-    search: async (name: string, params: { aggs?: { items?: { terms?: { field: string } } } }) => {
+    // The unset-environment check reads a row when a document has no environment.
+    esql: async (name: string) => {
       if (name === 'has_unset_value_for_fields') {
-        return { hits: unsetCount === undefined ? {} : { total: { value: unsetCount } } };
+        return {
+          columns: [{ name: 'service.name', type: 'keyword' }],
+          values: unsetCount === undefined || unsetCount === 0 ? [] : [['svc']],
+        };
       }
-
+      throw new Error(`unexpected esql operation ${name}`);
+    },
+    search: async (_name: string, params: { aggs?: { items?: { terms?: { field: string } } } }) => {
       const field = params.aggs?.items?.terms?.field ?? '';
       return {
         aggregations: {

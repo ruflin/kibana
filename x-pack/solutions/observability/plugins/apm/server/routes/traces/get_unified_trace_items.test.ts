@@ -142,6 +142,7 @@ describe('getErrorsByDocId', () => {
 describe('getUnifiedTraceItems', () => {
   const mockApmEventClient = {
     search: jest.fn(),
+    esql: jest.fn(),
   } as unknown as APMEventClient;
 
   const mockLogsClient = {} as LogsClient;
@@ -1784,6 +1785,7 @@ describe('getTraceItemIcon', () => {
 describe('getUnifiedTraceItems focused document reservation', () => {
   const mockApmEventClient = {
     search: jest.fn(),
+    esql: jest.fn(),
   } as unknown as APMEventClient;
 
   const mockLogsClient = {} as LogsClient;
@@ -1842,19 +1844,20 @@ describe('getUnifiedTraceItems focused document reservation', () => {
       },
     };
 
-    (mockApmEventClient.search as jest.Mock).mockImplementation((operationName: string) => {
-      if (operationName === 'get_focused_trace_items') {
-        return Promise.resolve({
-          hits: { hits: [focusedChild], total: { value: 1, relation: 'eq' } },
-        });
-      }
-
-      return Promise.resolve({
-        hits: {
-          hits: [rankedRoot],
-          total: { value: 2, relation: 'eq' },
-        },
-      });
+    (mockApmEventClient.search as jest.Mock).mockResolvedValue({
+      hits: {
+        hits: [rankedRoot],
+        total: { value: 2, relation: 'eq' },
+      },
+    });
+    // The focused transaction is fetched with ES|QL: one column per field, `_source` as a column.
+    const focusedFields = Object.entries(focusedChild.fields);
+    (mockApmEventClient.esql as jest.Mock).mockResolvedValue({
+      columns: [
+        ...focusedFields.map(([name]) => ({ name, type: 'keyword' })),
+        { name: '_source', type: '_source' },
+      ],
+      values: [[...focusedFields.map(([, value]) => value[0]), focusedChild._source]],
     });
 
     const result = await getUnifiedTraceItems({
@@ -1865,7 +1868,7 @@ describe('getUnifiedTraceItems focused document reservation', () => {
     expect(result.traceItems.map((item) => item.id)).toEqual(['focused-1']);
     expect(result.traceDocsTotal).toBe(2);
     expect(
-      (mockApmEventClient.search as jest.Mock).mock.calls.some(
+      (mockApmEventClient.esql as jest.Mock).mock.calls.some(
         (call) => call[0] === 'get_focused_trace_items'
       )
     ).toBe(true);

@@ -5,13 +5,15 @@
  * 2.0.
  */
 
-import { termQuery, kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import type { MobileErrorType } from '@kbn/apm-types';
 import { NETWORK_CONNECTION_TYPE, SERVICE_NAME } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
 import { ApmDocumentType } from '../../../common/document_type';
 import { RollupInterval } from '../../../common/rollup';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlTermsBuckets, topTermsQuery, whereTerm } from '../../lib/helpers/esql_values';
 import { mobileErrorTypeQuery } from './mobile_error_type_query';
 
 export async function getNCT({
@@ -33,7 +35,7 @@ export async function getNCT({
   end: number;
   size: number;
 }) {
-  return await apmEventClient.search('get_mobile_nct', {
+  const response = await apmEventClient.esql('get_mobile_nct', {
     apm: {
       sources: [
         {
@@ -42,12 +44,19 @@ export async function getNCT({
         },
       ],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
+    // The field is not mapped in every index, so unmapped fields read as null.
+    query: (index) =>
+      topTermsQuery(
+        whereTerm(
+          esql.from(index).addSetCommand('unmapped_fields', 'nullify'),
+          SERVICE_NAME,
+          serviceName
+        ),
+        NETWORK_CONNECTION_TYPE
+      ),
+    filter: {
       bool: {
         filter: [
-          ...termQuery(SERVICE_NAME, serviceName),
           ...mobileErrorTypeQuery(errorType),
           ...rangeQuery(start, end),
           ...environmentQuery(environment),
@@ -55,13 +64,11 @@ export async function getNCT({
         ],
       },
     },
-    aggs: {
-      netConnectionTypes: {
-        terms: {
-          field: NETWORK_CONNECTION_TYPE,
-          size,
-        },
-      },
-    },
   });
+
+  return {
+    aggregations: {
+      netConnectionTypes: esqlTermsBuckets(response, NETWORK_CONNECTION_TYPE, size),
+    },
+  };
 }

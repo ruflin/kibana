@@ -7,13 +7,8 @@
 
 import type { APMEventClient } from '@kbn/apm-data-access-plugin/server';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
-import {
-  PARENT_ID,
-  PROCESSOR_EVENT,
-  SERVICE_NAME,
-  SPAN_ID,
-  TRANSACTION_ID,
-} from '../../../common/es_fields/apm';
+import { PARENT_ID, SERVICE_NAME, SPAN_ID, TRANSACTION_ID } from '../../../common/es_fields/apm';
+import { esqlResponse, toEsqlRequest } from '../../utils/esql_test_helpers';
 import { ensureFocusedTraceHits, getTraceHitId } from './ensure_focused_trace_hits';
 
 function createHit({ id, parentId }: { id: string; parentId?: string }): {
@@ -26,6 +21,20 @@ function createHit({ id, parentId }: { id: string; parentId?: string }): {
       ...(parentId ? { [PARENT_ID]: [parentId] } : {}),
     },
   };
+}
+
+/** The ES|QL response for hits: one column per field, the first value of each field in a row. */
+function esqlHits(hits: Array<{ fields: Record<string, unknown> }>) {
+  const columns = [...new Set(hits.flatMap(({ fields }) => Object.keys(fields)))];
+  return esqlResponse(
+    columns,
+    hits.map(({ fields }) =>
+      columns.map((column) => {
+        const value = fields[column];
+        return (Array.isArray(value) ? value[0] : value ?? null) as string | null;
+      })
+    )
+  );
 }
 
 describe('getTraceHitId', () => {
@@ -53,7 +62,7 @@ describe('getTraceHitId', () => {
 
 describe('ensureFocusedTraceHits', () => {
   const search = jest.fn();
-  const apmEventClient = { search } as unknown as APMEventClient;
+  const apmEventClient = { esql: search } as unknown as APMEventClient;
 
   beforeEach(() => {
     search.mockReset();
@@ -83,9 +92,7 @@ describe('ensureFocusedTraceHits', () => {
     const rootB = createHit({ id: 'root-b' });
     const focused = createHit({ id: 'focused', parentId: 'root-a' });
 
-    search.mockResolvedValueOnce({
-      hits: { hits: [focused] },
-    });
+    search.mockResolvedValueOnce(esqlHits([focused]));
 
     const result = await ensureFocusedTraceHits({
       apmEventClient,
@@ -108,9 +115,7 @@ describe('ensureFocusedTraceHits', () => {
     const parent = createHit({ id: 'parent' });
     const focused = createHit({ id: 'focused', parentId: 'parent' });
 
-    search
-      .mockResolvedValueOnce({ hits: { hits: [focused] } })
-      .mockResolvedValueOnce({ hits: { hits: [parent] } });
+    search.mockResolvedValueOnce(esqlHits([focused])).mockResolvedValueOnce(esqlHits([parent]));
 
     const result = await ensureFocusedTraceHits({
       apmEventClient,
@@ -134,8 +139,8 @@ describe('ensureFocusedTraceHits', () => {
     const grandparent = createHit({ id: 'grandparent' });
 
     search
-      .mockResolvedValueOnce({ hits: { hits: [focused] } })
-      .mockResolvedValueOnce({ hits: { hits: [grandparent] } });
+      .mockResolvedValueOnce(esqlHits([focused]))
+      .mockResolvedValueOnce(esqlHits([grandparent]));
 
     const result = await ensureFocusedTraceHits({
       apmEventClient,
@@ -158,9 +163,7 @@ describe('ensureFocusedTraceHits', () => {
     const focused = createHit({ id: 'focused', parentId: 'parent' });
     const parent = createHit({ id: 'parent' });
 
-    search.mockResolvedValueOnce({
-      hits: { hits: [parent] },
-    });
+    search.mockResolvedValueOnce(esqlHits([parent]));
 
     const result = await ensureFocusedTraceHits({
       apmEventClient,
@@ -187,9 +190,7 @@ describe('ensureFocusedTraceHits', () => {
       },
     };
 
-    search.mockResolvedValueOnce({
-      hits: { hits: [childSpan] },
-    });
+    search.mockResolvedValueOnce(esqlHits([childSpan]));
 
     const result = await ensureFocusedTraceHits({
       apmEventClient,
@@ -202,26 +203,24 @@ describe('ensureFocusedTraceHits', () => {
       ecsOnly: true,
     });
 
-    expect(search.mock.calls[0][1].query.bool.should).toEqual([
-      {
-        bool: {
-          filter: [
-            { terms: { [TRANSACTION_ID]: ['focused'] } },
-            { term: { [PROCESSOR_EVENT]: ProcessorEvent.transaction } },
-          ],
-        },
-      },
-      { terms: { [SPAN_ID]: ['focused'] } },
-    ]);
+    const { query, params } = toEsqlRequest(search.mock.calls[0][1]);
+    expect(query).toContain(
+      'WHERE (`transaction.id` IN (?transactionIds)) AND `processor.event` == ?processorEvent OR (`span.id` IN (?spanIds))'
+    );
+    expect(params).toEqual(
+      expect.arrayContaining([
+        { transactionIds: ['focused'] },
+        { processorEvent: ProcessorEvent.transaction },
+        { spanIds: ['focused'] },
+      ])
+    );
     expect(result.map(getTraceHitId)).toEqual(['root-a']);
   });
 
   it('applies the service filter when reserving a focused document', async () => {
     const focused = createHit({ id: 'focused' });
 
-    search.mockResolvedValueOnce({
-      hits: { hits: [focused] },
-    });
+    search.mockResolvedValueOnce(esqlHits([focused]));
 
     await ensureFocusedTraceHits({
       apmEventClient,
@@ -235,8 +234,8 @@ describe('ensureFocusedTraceHits', () => {
       serviceName: 'focused-service',
     });
 
-    expect(search.mock.calls[0][1].query.bool.filter).toEqual(
-      expect.arrayContaining([{ term: { [SERVICE_NAME]: 'focused-service' } }])
-    );
+    const { query, params } = toEsqlRequest(search.mock.calls[0][1]);
+    expect(query).toContain(`WHERE \`${SERVICE_NAME}\` == ?service_name_value`);
+    expect(params).toEqual(expect.arrayContaining([{ service_name_value: 'focused-service' }]));
   });
 });

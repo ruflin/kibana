@@ -5,6 +5,7 @@
  * 2.0.
  */
 import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import { chunk } from 'lodash';
 import { accessKnownApmEventFields } from '@kbn/apm-data-access-plugin/server/utils';
@@ -33,6 +34,7 @@ import type { SpanLink } from '../../../typings/es_schemas/raw/fields/span_links
 import { getBufferedTimerange } from './utils';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
 import type { AgentName } from '../../../typings/es_schemas/ui/fields/agent';
+import { esqlRowsAsApmFields } from '../../lib/helpers/esql_apm';
 import { parseOtelDuration } from '../../lib/helpers/parse_otel_duration';
 import { compactMap } from '../../utils/compact_map';
 
@@ -82,63 +84,60 @@ async function fetchSpanLinksDetails({
 
   const optionalFields = asMutableArray([SERVICE_ENVIRONMENT, PROCESSOR_EVENT] as const);
 
-  const response = await apmEventClient.search(
-    'get_span_links_details',
-    {
-      apm: {
-        events: [ProcessorEvent.span, ProcessorEvent.transaction],
-      },
-      fields: [
-        ...requiredFields,
-        ...requiredTxFields,
-        ...requiredSpanFields,
-        ...requiredUnprocessedOtelSpanFields,
-        ...optionalFields,
-      ],
-      track_total_hits: false,
-      size: 1000,
-      query: {
-        bool: {
-          filter: [
-            ...rangeQuery(startWithBuffer, endWithBuffer),
-            ...kqlQuery(kuery),
-            {
-              bool: {
-                should: spanLinks.map((item) => {
-                  return {
-                    bool: {
-                      filter: [
-                        { term: { [TRACE_ID]: item.trace.id } },
-                        {
-                          bool: {
-                            should: [
-                              { term: { [SPAN_ID]: item.span.id } },
-                              { term: { [TRANSACTION_ID]: item.span.id } },
-                            ],
-                            minimum_should_match: 1,
-                          },
-                        },
-                      ],
-                    },
-                  };
-                }),
-                minimum_should_match: 1,
-              },
-            },
-          ],
-        },
+  const columns = [
+    ...new Set([
+      ...requiredFields,
+      ...requiredTxFields,
+      ...requiredSpanFields,
+      ...requiredUnprocessedOtelSpanFields,
+      ...optionalFields,
+    ]),
+  ];
+  const [firstColumn, ...otherColumns] = columns;
+  const traceIds = [...new Set(spanLinks.map((item) => item.trace.id))];
+  const linkedIds = [...new Set(spanLinks.map((item) => item.span.id))];
+
+  // One request matches the traces and ids of all the links, which can also match a pair that is
+  // not a link (a trace of one link with the span id of another). The exact pairs are checked
+  // on the rows below.
+  const linkKeys = new Set(spanLinks.map((item) => `${item.trace.id}:${item.span.id}`));
+
+  // The fields are not mapped in every index (the OTel-native ones), so unmapped fields read as null.
+  const response = await apmEventClient.esql('get_span_links_details', {
+    apm: {
+      events: [ProcessorEvent.span, ProcessorEvent.transaction],
+    },
+    query: (index) =>
+      esql.from(index).addSetCommand('unmapped_fields', 'nullify').pipe`WHERE ${esql.col(
+        TRACE_ID
+      )} IN (${{ traceIds }})`.pipe`WHERE ${esql.col(SPAN_ID)} IN (${{
+        spanIds: linkedIds,
+      }}) OR ${esql.col(TRANSACTION_ID)} IN (${{ transactionIds: linkedIds }})`
+        .keep(firstColumn, ...otherColumns)
+        .limit(1000),
+    filter: {
+      bool: {
+        filter: [...rangeQuery(startWithBuffer, endWithBuffer), ...kqlQuery(kuery)],
       },
     },
-    { skipProcessorEventFilter: true }
-  );
+    skipProcessorEventFilter: true,
+  });
+
+  const hits = esqlRowsAsApmFields(response).filter((fields) => {
+    const traceId = fields[TRACE_ID]?.[0];
+    return (
+      linkKeys.has(`${traceId}:${fields[SPAN_ID]?.[0]}`) ||
+      linkKeys.has(`${traceId}:${fields[TRANSACTION_ID]?.[0]}`)
+    );
+  });
 
   const spanIdsMap = spanLinks.reduce<Record<string, SpanLink>>((acc, link) => {
     acc[link.span.id] = link;
     return acc;
   }, {});
 
-  return compactMap(response.hits.hits, (hit) => {
-    const commonEvent = accessKnownApmEventFields(hit.fields).requireFields(requiredFields);
+  return compactMap(hits, (hitFields) => {
+    const commonEvent = accessKnownApmEventFields(hitFields).requireFields(requiredFields);
 
     const commonDetails = {
       serviceName: commonEvent[SERVICE_NAME],

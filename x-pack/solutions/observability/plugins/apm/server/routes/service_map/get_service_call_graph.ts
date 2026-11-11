@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import { ApmDocumentType, RollupInterval } from '@kbn/apm-data-access-plugin/common';
 import {
@@ -14,6 +15,7 @@ import {
 } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
 import type { IEnvOptions } from './get_service_map';
+import { esqlRows } from '../../lib/helpers/esql_read';
 import { recordByService } from './record_by_service';
 
 /** How far back the calls reach, ending when the map's own range ends. */
@@ -92,7 +94,7 @@ export async function getServiceCallGraph(
 }
 
 /**
- * Exists-check for each rollup. `terminate_after` stops at the first matching document,
+ * Exists-check for each rollup. `LIMIT 1` stops at the first matching document,
  * so this does not scan the day the composite aggregation reads next.
  */
 async function getDestinationMetricsAvailability({
@@ -107,43 +109,26 @@ async function getDestinationMetricsAvailability({
     ...kqlQuery(serviceGroupKuery),
   ];
 
-  const { responses } = await apmEventClient.msearch(
-    'get_service_call_graph_availability',
-    ...AVAILABILITY_CHECKS.map(({ rollupInterval }) => ({
-      apm: {
-        sources: [{ documentType: ApmDocumentType.ServiceDestinationMetric, rollupInterval }],
-      },
-      track_total_hits: 1,
-      size: 0,
-      terminate_after: 1,
-      query: {
-        bool: {
-          filter,
-        },
-      },
-    }))
+  const checks = await Promise.all(
+    AVAILABILITY_CHECKS.map(({ key, rollupInterval }) =>
+      apmEventClient
+        .esql(`get_service_call_graph_availability_${key}`, {
+          apm: {
+            sources: [{ documentType: ApmDocumentType.ServiceDestinationMetric, rollupInterval }],
+          },
+          query: (index) => esql.from(index).keep(SERVICE_NAME).limit(1),
+          filter: { bool: { filter } },
+        })
+        .then((response) => [key, esqlRows(response).length > 0] as const)
+    )
   );
 
-  const availability: DestinationMetricsAvailability = {
+  return {
     sixtyMinutes: false,
     tenMinutes: false,
     oneMinute: false,
+    ...Object.fromEntries(checks),
   };
-  for (const [index, { key }] of AVAILABILITY_CHECKS.entries()) {
-    availability[key] = availabilityResponseHasDocs(responses[index], key);
-  }
-  return availability;
-}
-
-/** A failed check is a failed query. Treating it as empty would read the wrong rollup. */
-function availabilityResponseHasDocs(response: unknown, key: string): boolean {
-  const total = (response as { hits?: { total?: number | { value?: number } } } | undefined)?.hits
-    ?.total;
-  const count = typeof total === 'number' ? total : total?.value;
-  if (count == null || (typeof response === 'object' && response !== null && 'error' in response)) {
-    throw new Error(`Unable to check ${key} service destination metrics`);
-  }
-  return count > 0;
 }
 
 /** The coarsest rollup that has data for the day. */
