@@ -17,6 +17,7 @@ import {
   getEsqlDocumentId,
   categorizeWithNoiseExclusion,
   columnPath,
+  esqlTimeRange,
   type CategorizeWithSampleRow,
 } from '@kbn/ai-tools';
 import { get } from 'lodash';
@@ -51,7 +52,7 @@ export async function getDiverseSampleDocuments({
 
   const [messageField, totalDocs] = await Promise.all([
     detectMessageField({ esClient, index, start, end }),
-    runEsqlCount({ esClient, indices, filter }),
+    runEsqlCount({ esClient, indices, start, end }),
   ]);
 
   if (totalDocs === 0 || !messageField) {
@@ -87,7 +88,8 @@ export async function getDiverseSampleDocuments({
     indices,
     field: messageField,
     sampleValues,
-    filter,
+    start,
+    end,
   });
 
   const hits: Array<SearchHit<Record<string, unknown>>> = [];
@@ -165,13 +167,15 @@ async function fetchRepresentativeDocuments({
   indices,
   field,
   sampleValues,
-  filter,
+  start,
+  end,
 }: {
   esClient: TracedElasticsearchClient;
   indices: string[];
   field: string;
   sampleValues: string[];
-  filter: { bool: { filter: ReturnType<typeof dateRangeQuery> } };
+  start: number;
+  end: number;
 }): Promise<Map<string, SearchHit<Record<string, unknown>>>> {
   const valueToHit = new Map<string, SearchHit<Record<string, unknown>>>();
   let pending = sampleValues;
@@ -183,8 +187,9 @@ async function fetchRepresentativeDocuments({
         field,
         values: pending,
         limit: pending.length * SOURCE_FETCH_PER_VALUE,
+        start,
+        end,
       }),
-      filter,
     })) as unknown as ESQLSearchResponse;
 
     const docs = parseEsqlSourceDocuments(fetchResponse);
@@ -238,19 +243,25 @@ function buildSourceFetchQuery({
   field,
   values,
   limit,
+  start,
+  end,
 }: {
   indices: string[];
   field: string;
   values: string[];
   limit: number;
+  start: number;
+  end: number;
 }): string {
   const fieldCol = esql.col(columnPath(field));
   const phrases = values
     .map((value) => esql.exp`MATCH_PHRASE(${fieldCol}, ${esql.str(value)})`)
     .reduce((acc, clause) => esql.exp`${acc} OR ${clause}`);
 
-  return esql.from(indices, ['_id', '_source'])
-    .where`(${phrases}) AND ${fieldCol}::keyword IN (${values.map((value) => esql.str(value))})`
+  return esql.from(indices, ['_id', '_source']).where`${esqlTimeRange(
+    start,
+    end
+  )} AND (${phrases}) AND ${fieldCol}::keyword IN (${values.map((value) => esql.str(value))})`
     .limit(limit)
     .print('basic');
 }
@@ -284,15 +295,17 @@ async function detectMessageField({
 async function runEsqlCount({
   esClient,
   indices,
-  filter,
+  start,
+  end,
 }: {
   esClient: TracedElasticsearchClient;
   indices: string[];
-  filter: { bool: { filter: ReturnType<typeof dateRangeQuery> } };
+  start: number;
+  end: number;
 }): Promise<number> {
   const response = (await esClient.esql('diverse_sample_count', {
-    query: esql.from(indices).pipe`STATS total = COUNT(*)`.print('basic'),
-    filter,
+    query: esql.from(indices).where`${esqlTimeRange(start, end)}`
+      .pipe`STATS total = COUNT(*)`.print('basic'),
   })) as unknown as ESQLSearchResponse;
   const total = response.values[0]?.[0];
 
