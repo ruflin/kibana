@@ -10,6 +10,7 @@ import { esql } from '@elastic/esql';
 import type { ESQLSearchResponse } from '@kbn/es-types';
 import type { TracedElasticsearchClient } from '@kbn/traced-es-client';
 import { orderBy, uniqBy } from 'lodash';
+import { esqlTimeRange } from './esql_time_range';
 
 export interface CategorizeWithSampleRow {
   count: number;
@@ -48,6 +49,9 @@ export function buildCategorizeWithSampleQuery({
   excludeTokens,
   countThreshold,
   order = 'ASC',
+  start,
+  end,
+  kql,
 }: {
   indices: string | string[];
   field: string;
@@ -57,10 +61,22 @@ export function buildCategorizeWithSampleQuery({
   excludeTokens?: string[];
   countThreshold?: number;
   order?: 'ASC' | 'DESC';
+  /** With `end`: restrict to this `@timestamp` range (epoch millis), inline in the query. */
+  start?: number;
+  end?: number;
+  kql?: string;
 }): string {
   const fieldCol = esql.col(columnPath(field));
 
   let query = esql.from(Array.isArray(indices) ? indices : [indices]);
+
+  // Inline predicates are pushed down with the view's own WHERE, unlike a request `filter`.
+  if (start !== undefined && end !== undefined) {
+    query = query.where`${esqlTimeRange(start, end)}`;
+  }
+  if (kql) {
+    query = query.where`KQL(${esql.str(kql)})`;
+  }
 
   // Exclusion predicates must sit before SAMPLE and STATS, on the indexed field.
   const whereClauses = [];
@@ -132,6 +148,9 @@ export async function categorizeWithNoiseExclusion({
   total,
   samplingProbability,
   filter,
+  start,
+  end,
+  kql,
   noiseFraction = NOISE_FRACTION_DEFAULT,
   maxDocsToSample = CATEGORIZE_MAX_DOCS_TO_SAMPLE,
 }: {
@@ -140,18 +159,25 @@ export async function categorizeWithNoiseExclusion({
   field: string;
   total: number;
   samplingProbability: number;
+  /** Query DSL sent as the request `filter`. Prefer `start`/`end`/`kql`, which are inline. */
   filter?: QueryDslQueryContainer;
+  /** With `end`: restrict to this `@timestamp` range (epoch millis), inline in every query. */
+  start?: number;
+  end?: number;
+  kql?: string;
   noiseFraction?: number;
   maxDocsToSample?: number;
 }): Promise<CategorizeWithSampleRow[]> {
   const p1 = samplingProbability;
   const run = (operationName: string, query: string) =>
     runCategorizeEsql(esClient, operationName, query, filter);
+  const inlineFilters = { start, end, kql };
 
   // In sampled space a `noiseFraction` pattern appears at `noiseFraction*total*p1` docs.
   const sampledThreshold = noiseFraction * total * p1;
 
   const headQuery = buildCategorizeWithSampleQuery({
+    ...inlineFilters,
     indices,
     field,
     samplingProbability: p1,
@@ -167,6 +193,7 @@ export async function categorizeWithNoiseExclusion({
     // No head to strip; a plain sampled categorize is the cheapest safe option.
     // DESC: unthresholded, so ASC silently truncates to the rarest 1000 on wide streams.
     const plainQuery = buildCategorizeWithSampleQuery({
+      ...inlineFilters,
       indices,
       field,
       samplingProbability: p1,
@@ -193,6 +220,7 @@ export async function categorizeWithNoiseExclusion({
   const p2 = residual > maxDocsToSample ? maxDocsToSample / residual : 1;
 
   const rareQuery = buildCategorizeWithSampleQuery({
+    ...inlineFilters,
     indices,
     field,
     samplingProbability: p2,

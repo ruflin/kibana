@@ -454,8 +454,6 @@ export async function getSigEventsLogPatternsEsql({
     const samplingProbability =
       MAX_DOCS_TO_SAMPLE / totalDocs < 0.5 ? MAX_DOCS_TO_SAMPLE / totalDocs : 1;
 
-    const filter = { bool: { filter: [...kqlQuery(kql), ...dateRangeQuery(start, end)] } };
-
     const perField = await Promise.all(
       eligibleFields.map(async (field) => {
         // Metadata-free, so it works on ES|QL views as well as concrete indices.
@@ -465,7 +463,9 @@ export async function getSigEventsLogPatternsEsql({
           field,
           total: totalDocs,
           samplingProbability,
-          filter,
+          start,
+          end,
+          kql,
         });
 
         return rows.map((row) => ({

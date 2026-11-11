@@ -8,6 +8,7 @@
 import { esql } from '@elastic/esql';
 import type { QueryLink } from '@kbn/significant-events-schema';
 import type { TracedElasticsearchClient } from '@kbn/traced-es-client';
+import { isEsqlUnknownIndexError } from '@kbn/storage-adapter';
 import { toEsqlRequest } from '../../streams/esql';
 import {
   RULES_BUCKET_SIZE,
@@ -49,13 +50,6 @@ interface RawRuleBucket {
   change_points?: { type?: ChangePointTypeMap };
 }
 
-function hitsTotal(total: number | { value: number } | undefined): number {
-  if (total == null) {
-    return 0;
-  }
-  return typeof total === 'number' ? total : total.value;
-}
-
 export class SignificantEventsAlertsReaderV2 implements ISignificantEventsAlertsReader {
   readonly index = RULE_EVENTS_INDEX;
   readonly ruleIdColumn = 'rule_id' as const;
@@ -74,6 +68,7 @@ export class SignificantEventsAlertsReaderV2 implements ISignificantEventsAlerts
     spaceId,
     rangeFromIso,
     rangeToIso,
+    writeTimeToIso,
   }: OccurrencesEsqlParams) {
     if (typeof rangeFromIso !== 'string' || typeof rangeToIso !== 'string') {
       throw new Error(
@@ -89,9 +84,17 @@ export class SignificantEventsAlertsReaderV2 implements ISignificantEventsAlerts
     const rangeStart = esql.str(rangeFromIso);
     const rangeEnd = esql.str(rangeToIso);
 
-    const scoped = esql.from([this.index]).where`${typeCol} == ${esql.str(
-      'signal'
-    )} AND ${spaceIdCol} == ${esql.str(spaceId)} AND ${ruleIdCol} IN (${ruleIdLiterals})`;
+    // The write-time `@timestamp` prune comes first so it is pushed down to the index. The
+    // precise window is on the source `bucket`, applied after the series columns are projected.
+    const source = esql.from([this.index]);
+    const pruned = writeTimeToIso
+      ? source.where`@timestamp >= TO_DATETIME(${rangeStart}) AND @timestamp <= TO_DATETIME(${esql.str(
+          writeTimeToIso
+        )})`
+      : source;
+    const scoped = pruned.where`${typeCol} == ${esql.str('signal')} AND ${spaceIdCol} == ${esql.str(
+      spaceId
+    )} AND ${ruleIdCol} IN (${ruleIdLiterals})`;
 
     return toEsqlRequest(
       projectMetricSeriesColumns(scoped).pipe`WHERE bucket IS NOT NULL AND metric_value IS NOT NULL`
@@ -107,23 +110,29 @@ export class SignificantEventsAlertsReaderV2 implements ISignificantEventsAlerts
     esClient: TracedElasticsearchClient,
     { lookback, spaceId, ruleUuid }: CountDetectionAlertsParams
   ): Promise<number> {
-    // The idle gate only needs "any activity" (> 0), so avoid exact-counting the
-    // full window: `terminate_after: 1` stops each shard after its first match and
-    // `track_total_hits: 1` caps the tracked total (0 stays 0, any match reads >= 1).
-    const response = await esClient.search('significant_events_alerts_v2_count_alerts', {
-      index: this.index,
-      ignore_unavailable: true,
-      size: 0,
-      track_total_hits: 1,
-      terminate_after: 1,
-      query: {
-        bool: {
-          filter: buildRuleEventsSignalFilter({ lookback, spaceId, ruleUuid }),
-        },
-      },
-    });
+    // The idle gate only needs "any activity" (> 0), so read at most one row instead of
+    // counting the full window. The lookback is Elasticsearch date math (`now-40m`), which
+    // ES|QL has no literal for, so the range stays in the request filter.
+    let query = esql.from([this.index], ['_id']).pipe`WHERE type == ${{
+      type: 'signal',
+    }} AND space_id == ${{ spaceId }}`;
+    if (ruleUuid) {
+      query = query.pipe`WHERE rule.id == ${{ ruleUuid }}`;
+    }
 
-    return hitsTotal(response.hits.total);
+    try {
+      const response = await esClient.esql('significant_events_alerts_v2_count_alerts', {
+        ...toEsqlRequest(query.pipe`KEEP _id`.limit(1)),
+        filter: { bool: { filter: [{ range: { '@timestamp': { gte: lookback } } }] } },
+      });
+      return response.values.length;
+    } catch (error) {
+      // Missing alerts index: nothing has fired.
+      if (isEsqlUnknownIndexError(error)) {
+        return 0;
+      }
+      throw error;
+    }
   }
 
   async runChangePointScan(

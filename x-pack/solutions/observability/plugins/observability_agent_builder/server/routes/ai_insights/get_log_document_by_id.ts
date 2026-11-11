@@ -5,7 +5,9 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
+import { esqlRows, runEsqlRead, toEsqlSources } from '../../utils/esql_read';
 
 const LOG_DOCUMENT_FIELDS = [
   '@timestamp',
@@ -39,26 +41,25 @@ export const getLogDocumentById = async ({
   index: string;
   id: string;
 }): Promise<LogDocument | undefined> => {
-  const result = await esClient.search({
-    index,
-    size: 1,
-    _source: false,
-    fields: [...LOG_DOCUMENT_FIELDS],
-    query: {
-      ids: { values: [id] },
-    },
+  // An index (or pattern) that does not exist is an empty result.
+  // Every mapped field comes back and the requested ones are picked, because KEEP on a field that
+  // is not mapped in the index fails the query.
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from(toEsqlSources(index), ['_id']).pipe`WHERE _id == ${{ id }}`.limit(1),
   });
 
-  const hit = result.hits.hits[0];
-
-  if (!hit?.fields) {
+  const [row] = esqlRows(response);
+  if (!row) {
     return undefined;
   }
 
-  return Object.fromEntries(
-    Object.entries(hit.fields).map(([key, value]) => [
-      key,
-      Array.isArray(value) && value.length === 1 ? value[0] : value,
-    ])
-  ) as LogDocument;
+  const document = Object.fromEntries(
+    LOG_DOCUMENT_FIELDS.flatMap((field) => {
+      const value = row[field];
+      return value == null ? [] : [[field, value]];
+    })
+  );
+
+  return Object.keys(document).length > 0 ? (document as LogDocument) : undefined;
 };

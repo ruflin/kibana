@@ -8,6 +8,7 @@ import datemath from '@elastic/datemath';
 import type { ElasticsearchClient, SavedObjectsClientContract, Logger } from '@kbn/core/server';
 import type { DataViewsServerPluginStart } from '@kbn/data-views-plugin/server';
 import { isInferenceRequestAbortedError } from '@kbn/inference-common';
+import { esql } from '@elastic/esql';
 import { castArray, chunk, groupBy, uniq } from 'lodash';
 import { catchError, lastValueFrom, of } from 'rxjs';
 import {
@@ -18,11 +19,33 @@ import {
 } from '../../../common';
 import { concatenateChatCompletionChunks } from '../../../common/utils/concatenate_chat_completion_chunks';
 import type { FunctionCallChatFunction } from '../../service/types';
+import { isEsqlUnknownIndexError, runEsqlRows } from '../../service/util/esql_read';
 
 export const GET_RELEVANT_FIELD_NAMES_SYSTEM_MESSAGE = `You are a helpful assistant for Elastic Observability. 
 Your task is to determine which fields are relevant to the conversation by selecting only the field IDs from the provided list. 
 The list in the user message consists of JSON objects that map a human-readable field "name" to its unique "id". 
 You must not output any field names — only the corresponding "id" values. Ensure that your output follows the exact JSON format specified.`;
+
+async function hasAnyHits(
+  esClient: ElasticsearchClient,
+  index: string | string[]
+): Promise<boolean> {
+  try {
+    const rows = await runEsqlRows({
+      esClient,
+      query: esql.from(
+        castArray(index).flatMap((pattern) => pattern.split(',')),
+        ['_id']
+      ).pipe`KEEP _id`.limit(1),
+    });
+    return rows.length > 0;
+  } catch (error) {
+    if (isEsqlUnknownIndexError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
 
 export async function getRelevantFieldNames({
   index,
@@ -49,20 +72,11 @@ export async function getRelevantFieldNames({
 }): Promise<{ fields: string[]; stats: { analyzed: number; total: number } }> {
   const dataViewsService = await dataViews.dataViewsServiceFactory(savedObjectsClient, esClient);
 
-  const hasAnyHitsResponse = await esClient.search({
-    index,
-    _source: false,
-    track_total_hits: 1,
-    terminate_after: 1,
-  });
-
-  const hitCount =
-    typeof hasAnyHitsResponse.hits.total === 'number'
-      ? hasAnyHitsResponse.hits.total
-      : hasAnyHitsResponse.hits.total?.value ?? 0;
+  // An index pattern without matches is an error in ES|QL, where the DSL search returned no hits.
+  const hasHits = await hasAnyHits(esClient, index);
 
   // all fields are empty in this case, so get them all
-  const includeEmptyFields = hitCount === 0;
+  const includeEmptyFields = !hasHits;
 
   const fields = await dataViewsService.getFieldsForWildcard({
     pattern: castArray(index).join(','),

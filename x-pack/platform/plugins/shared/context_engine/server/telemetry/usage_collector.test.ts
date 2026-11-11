@@ -24,10 +24,18 @@ const KI_COLUMNS = [
   'expires_at',
 ];
 
-const hit = (source: Record<string, unknown>) => ({
-  _index: '.contextengine-ai-indices',
-  _source: source,
+const REGISTRY_QUERY_START = 'FROM .contextengine-ai-indices';
+
+const registryResponse = (sources: Array<Record<string, unknown>>) => ({
+  columns: [
+    { name: '_id', type: 'keyword' },
+    { name: '_source', type: '_source' },
+  ],
+  values: sources.map((source, index) => [`doc-${index}`, source]),
 });
+
+const isRegistryQuery = (params: unknown) =>
+  (params as { query: string }).query.startsWith(REGISTRY_QUERY_START);
 
 const probeResponse = (columns: string[]) => ({
   columns: columns.map((name) => ({ name, type: 'keyword' })),
@@ -51,10 +59,9 @@ describe('context_engine usage collector', () => {
   let esqlResponses: Map<string, { columns?: string[]; counts?: Record<string, number> } | Error>;
   const managedDests = new Map<string, AiIndexDest>();
 
+  let registrySources: Array<Record<string, unknown>> = [];
   const setHits = (sources: Array<Record<string, unknown>>) => {
-    esClient.search.mockResolvedValue({
-      hits: { hits: sources.map(hit) },
-    } as unknown as Awaited<ReturnType<typeof esClient.search>>);
+    registrySources = sources;
   };
 
   const fetch = () => collector.fetch(createCollectorFetchContextMock());
@@ -62,8 +69,12 @@ describe('context_engine usage collector', () => {
   beforeEach(() => {
     esClient = elasticsearchClientMock.createElasticsearchClient();
     esqlResponses = new Map();
+    registrySources = [];
     managedDests.clear();
     esClient.esql.query.mockImplementation((async ({ query }: { query: string }) => {
+      if (query.startsWith(REGISTRY_QUERY_START)) {
+        return registryResponse(registrySources);
+      }
       const [, dest] = query.match(/^FROM "([^"]+)"/) ?? [];
       const response = esqlResponses.get(dest) ?? { columns: KI_COLUMNS, counts: {} };
       if (response instanceof Error) {
@@ -106,9 +117,14 @@ describe('context_engine usage collector', () => {
 
     const usage = await fetch();
 
-    expect(esClient.search).toHaveBeenCalledWith(
-      expect.not.objectContaining({ query: expect.anything() })
+    // One read of the whole registry, across spaces: no space filter, only the row cap.
+    const [[registryRequest]] = esClient.esql.query.mock.calls.filter(([params]) =>
+      isRegistryQuery(params)
     );
+    expect(registryRequest).toEqual({
+      query: `${REGISTRY_QUERY_START} METADATA _id, _source | KEEP _id, _source | LIMIT ?limit`,
+      params: [{ limit: 10_000 }],
+    });
     expect(usage).toEqual({
       ai_indices: { user: 3, managed: 0 },
       kis: {
@@ -154,7 +170,9 @@ describe('context_engine usage collector', () => {
     const usage = await fetch();
 
     expect(usage).toMatchObject({ ai_indices: { user: 1 } });
-    expect(esClient.esql.query).not.toHaveBeenCalled();
+    // Only the registry read: no KI query for a pattern dest.
+    expect(esClient.esql.query).toHaveBeenCalledTimes(1);
+    expect(isRegistryQuery(esClient.esql.query.mock.calls[0][0])).toBe(true);
   });
 
   it('skips dests that fail to count', async () => {
@@ -185,8 +203,9 @@ describe('context_engine usage collector', () => {
 
     await fetch();
 
-    expect(esClient.esql.query).toHaveBeenCalledTimes(2);
-    for (const call of esClient.esql.query.mock.calls) {
+    const kiCalls = esClient.esql.query.mock.calls.filter(([params]) => !isRegistryQuery(params));
+    expect(kiCalls).toHaveLength(2);
+    for (const call of kiCalls) {
       expect(call[1]).toEqual({ requestTimeout: 30_000 });
     }
   });
@@ -198,7 +217,8 @@ describe('context_engine usage collector', () => {
     await fetch();
 
     const [[{ query }]] = esClient.esql.query.mock.calls.filter(
-      ([params]) => !(params as { query: string }).query.includes('LIMIT 0')
+      ([params]) =>
+        !isRegistryQuery(params) && !(params as { query: string }).query.includes('LIMIT 0')
     ) as Array<[{ query: string }]>;
     expect(query).not.toContain('governance.lifecycle.status');
     expect(query).not.toContain('expires_at');

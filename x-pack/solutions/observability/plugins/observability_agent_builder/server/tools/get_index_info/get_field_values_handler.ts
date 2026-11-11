@@ -6,10 +6,11 @@
  */
 
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { IScopedClusterClient } from '@kbn/core/server';
 import { groupBy, keyBy, mapValues } from 'lodash';
 import { minimatch } from 'minimatch';
-import { getTypedSearch } from '../../utils/get_typed_search';
+import { esqlRows, runEsqlRead, toEsqlSources } from '../../utils/esql_read';
 import { timeRangeFilter, kqlFilter as toKqlFilter } from '../../utils/dsl_filters';
 import { parseDatemath } from '../../utils/time';
 import { getFieldType } from './get_field_type';
@@ -111,6 +112,13 @@ async function getKeywordFieldValues(
   }
 }
 
+/** `min_<i> = MIN(field), max_<i> = MAX(field)` for each field, read back by position. */
+const toMinMaxAggregations = (fields: string[]) =>
+  fields.flatMap((field, i) => [
+    esql.exp`${esql.col(`min_${i}`)} = MIN(${esql.col(field)})`,
+    esql.exp`${esql.col(`max_${i}`)} = MAX(${esql.col(field)})`,
+  ]);
+
 /** Gets min/max for multiple numeric fields in a single request */
 async function getNumericFieldValuesBatch(
   esClient: IScopedClusterClient,
@@ -120,20 +128,19 @@ async function getNumericFieldValuesBatch(
 ): Promise<Record<string, NumericFieldResult | FieldErrorResult>> {
   if (fields.length === 0) return {};
 
-  const search = getTypedSearch(esClient.asCurrentUser);
-  const response = await search({
-    index,
-    size: 0,
-    track_total_hits: false,
-    query: queryFilter,
-    aggs: Object.fromEntries(fields.map((field) => [field, { stats: { field } }])),
+  const response = await runEsqlRead({
+    esClient: esClient.asCurrentUser,
+    query: esql.from(toEsqlSources(index)).pipe`STATS ${toMinMaxAggregations(fields)}`,
+    filter: queryFilter,
   });
+  const row = esqlRows(response)[0] ?? {};
 
   return keyBy(
-    fields.map((field): NumericFieldResult | FieldErrorResult => {
-      const stats = response.aggregations?.[field];
-      if (stats?.min != null && stats?.max != null) {
-        return { type: 'numeric', field, min: stats.min, max: stats.max };
+    fields.map((field, i): NumericFieldResult | FieldErrorResult => {
+      const min = row[`min_${i}`];
+      const max = row[`max_${i}`];
+      if (typeof min === 'number' && typeof max === 'number') {
+        return { type: 'numeric', field, min, max };
       }
       return { type: 'error', field, message: 'No numeric values found' };
     }),
@@ -150,28 +157,19 @@ async function getDateFieldValuesBatch(
 ): Promise<Record<string, DateFieldResult | FieldErrorResult>> {
   if (fields.length === 0) return {};
 
-  const aggs = Object.fromEntries(
-    fields.flatMap((field) => [
-      [`${field}_min`, { min: { field } }],
-      [`${field}_max`, { max: { field } }],
-    ])
-  ) as Record<string, { min: { field: string } } | { max: { field: string } }>;
-
-  const search = getTypedSearch(esClient.asCurrentUser);
-  const response = await search({
-    index,
-    size: 0,
-    track_total_hits: false,
-    query: queryFilter,
-    aggs,
+  const response = await runEsqlRead({
+    esClient: esClient.asCurrentUser,
+    query: esql.from(toEsqlSources(index)).pipe`STATS ${toMinMaxAggregations(fields)}`,
+    filter: queryFilter,
   });
+  const row = esqlRows(response)[0] ?? {};
 
   return keyBy(
-    fields.map((field): DateFieldResult | FieldErrorResult => {
-      const minAgg = response.aggregations?.[`${field}_min`];
-      const maxAgg = response.aggregations?.[`${field}_max`];
-      if (minAgg?.value_as_string && maxAgg?.value_as_string) {
-        return { type: 'date', field, min: minAgg.value_as_string, max: maxAgg.value_as_string };
+    fields.map((field, i): DateFieldResult | FieldErrorResult => {
+      const min = row[`min_${i}`];
+      const max = row[`max_${i}`];
+      if (typeof min === 'string' && typeof max === 'string') {
+        return { type: 'date', field, min, max };
       }
       return { type: 'error', field, message: 'No date values found' };
     }),
@@ -187,20 +185,22 @@ async function getTextFieldSampleValues(
   queryFilter?: QueryDslQueryContainer
 ): Promise<Record<string, TextFieldResult | FieldErrorResult>> {
   if (fields.length === 0) return {};
+  const [firstField, ...otherFields] = fields;
 
-  const response = await esClient.asCurrentUser.search({
-    index,
-    size: MAX_TEXT_SAMPLES,
-    track_total_hits: false,
-    query: queryFilter,
-    _source: false,
-    fields,
+  const response = await runEsqlRead({
+    esClient: esClient.asCurrentUser,
+    query: esql
+      .from(toEsqlSources(index))
+      .keep(firstField, ...otherFields)
+      .limit(MAX_TEXT_SAMPLES),
+    filter: queryFilter,
   });
+  const rows = esqlRows(response);
 
   return Object.fromEntries(
     fields.map((field): [string, TextFieldResult | FieldErrorResult] => {
-      const samples = response.hits.hits
-        .flatMap((hit) => hit.fields?.[field] ?? [])
+      const samples = rows
+        .flatMap((row) => row[field] ?? [])
         .filter((v): v is string => typeof v === 'string')
         .slice(0, MAX_TEXT_SAMPLES)
         .map((v) => (v.length > MAX_CHARS_PER_SAMPLE ? v.slice(0, MAX_CHARS_PER_SAMPLE) + '…' : v));

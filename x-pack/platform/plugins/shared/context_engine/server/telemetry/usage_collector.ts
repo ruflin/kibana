@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import pLimit from 'p-limit';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import type { ESQLSearchResponse } from '@kbn/es-types';
@@ -13,6 +14,7 @@ import { isIndexPattern } from '../../common/ai_index_dest';
 import type { AiIndexDest } from '../../common/http_api/ai_indices';
 import { latestRevisionPipeline, probeColumns } from '../ai_indices/ki_list';
 import { aiIndicesIndexName, type StoredAiIndexDocument } from '../ai_indices/storage';
+import { esqlRows, runEsqlRead } from '../utils/esql_read';
 import { formatErrorMessage } from '../utils/format_es_error';
 
 /** Upper bound on AI index entries read per collection. */
@@ -125,25 +127,25 @@ const fetchContextEngineUsage = async ({
   getManagedDest: (id: string) => AiIndexDest | undefined;
   logger: Logger;
 }): Promise<ContextEngineUsage> => {
-  const response = await esClient.search<StoredAiIndexDocument>({
-    index: aiIndicesIndexName,
-    ignore_unavailable: true,
-    size: MAX_COLLECTED_AI_INDICES,
-    track_total_hits: false,
-    _source: ['id', 'managed', 'dest'],
+  // The index does not exist until the first AI index is registered.
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([aiIndicesIndexName], ['_id', '_source']).pipe`KEEP _id, _source`
+      .pipe`LIMIT ${{ limit: MAX_COLLECTED_AI_INDICES }}`,
+    ignoreUnknownIndex: true,
   });
 
   const aiIndices = { user: 0, managed: 0 };
   // Every dest counts once.
   const destOwners = new Map<string, { dest: AiIndexDest; owner: 'user' | 'managed' }>();
-  for (const hit of response.hits.hits) {
-    const source = hit._source;
-    if (source === undefined) {
+  for (const row of esqlRows(response)) {
+    const source = row._source as Partial<StoredAiIndexDocument> | null | undefined;
+    if (source === null || source === undefined) {
       continue;
     }
     const owner = source.managed === true ? 'managed' : 'user';
     aiIndices[owner] += 1;
-    const id = source.id ?? hit._id;
+    const id = source.id ?? (typeof row._id === 'string' ? row._id : undefined);
     const dest = owner === 'managed' && id !== undefined ? getManagedDest(id) : source.dest;
     if (dest !== undefined && !isIndexPattern(dest.value) && !destOwners.has(dest.value)) {
       destOwners.set(dest.value, { dest, owner });

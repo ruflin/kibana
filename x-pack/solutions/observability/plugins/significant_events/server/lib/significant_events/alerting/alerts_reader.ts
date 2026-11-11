@@ -71,6 +71,12 @@ export interface OccurrencesEsqlParams {
    */
   rangeFromIso: string;
   rangeToIso: string;
+  /**
+   * Upper bound of the write-time `@timestamp` prune (UTC ISO-8601). The prune starts at
+   * `rangeFromIso`; without this bound there is no prune. Callers widen it past `rangeToIso`
+   * for rule runs written late.
+   */
+  writeTimeToIso?: string;
 }
 
 export interface ISignificantEventsAlertsReader {

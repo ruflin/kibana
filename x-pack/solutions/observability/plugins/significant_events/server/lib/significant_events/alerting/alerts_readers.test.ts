@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { errors } from '@elastic/elasticsearch';
 import type { QueryLink } from '@kbn/significant-events-schema';
 import type { TracedElasticsearchClient } from '@kbn/traced-es-client';
 import {
@@ -43,9 +44,11 @@ const makeQueryLink = (
 
 function createEsClient() {
   const search = jest.fn();
+  const esql = jest.fn();
   return {
     search,
-    client: { search } as unknown as TracedElasticsearchClient,
+    esql,
+    client: { search, esql } as unknown as TracedElasticsearchClient,
   };
 }
 
@@ -82,6 +85,23 @@ describe('SignificantEventsAlertsReaderV2', () => {
     expect(request.query).not.toContain('group_hash');
   });
 
+  it('prunes by write-time @timestamp before the source-bucket window when a bound is given', () => {
+    const request = reader.buildOccurrencesEsqlRequest({
+      ruleIds: [RULE_UUID],
+      value: 5,
+      esqlUnit: 'minutes',
+      limit: 100,
+      spaceId: SPACE_ID,
+      rangeFromIso: '2026-01-01T00:00:00.000Z',
+      rangeToIso: '2026-01-01T01:00:00.000Z',
+      writeTimeToIso: '2026-01-01T01:07:00.000Z',
+    });
+
+    expect(request.query).toContain(
+      'FROM .rule-events | WHERE @timestamp >= TO_DATETIME("2026-01-01T00:00:00.000Z") AND @timestamp <= TO_DATETIME("2026-01-01T01:07:00.000Z")'
+    );
+  });
+
   it('rejects occurrences requests that omit the source-bucket range', () => {
     expect(() =>
       reader.buildOccurrencesEsqlRequest({
@@ -95,48 +115,52 @@ describe('SignificantEventsAlertsReaderV2', () => {
   });
 
   it('counts alerts with terminate_after for the idle gate', async () => {
-    const { client, search } = createEsClient();
-    search.mockResolvedValue({ hits: { total: { value: 1 } } });
+    const { client, esql } = createEsClient();
+    esql.mockResolvedValue({ columns: [{ name: '_id', type: 'keyword' }], values: [['a']] });
 
     const result = await reader.countAlerts(client, { lookback: LOOKBACK, spaceId: SPACE_ID });
 
     expect(result).toBe(1);
-    expect(search).toHaveBeenCalledWith('significant_events_alerts_v2_count_alerts', {
-      index: '.rule-events',
-      ignore_unavailable: true,
-      size: 0,
-      track_total_hits: 1,
-      terminate_after: 1,
-      query: {
-        bool: {
-          filter: [
-            { term: { type: 'signal' } },
-            { term: { space_id: SPACE_ID } },
-            { range: { '@timestamp': { gte: LOOKBACK } } },
-          ],
-        },
-      },
+    expect(esql).toHaveBeenCalledWith('significant_events_alerts_v2_count_alerts', {
+      query:
+        'FROM .rule-events METADATA _id | WHERE type == ?type AND space_id == ?spaceId | KEEP _id | LIMIT 1',
+      params: [{ type: 'signal' }, { spaceId: SPACE_ID }],
+      filter: { bool: { filter: [{ range: { '@timestamp': { gte: LOOKBACK } } }] } },
     });
   });
 
+  it('counts no alerts when the alerts index does not exist', async () => {
+    const { client, esql } = createEsClient();
+    esql.mockRejectedValue(
+      new errors.ResponseError({
+        statusCode: 400,
+        body: { error: { type: 'verification_exception', reason: 'Unknown index [.rule-events]' } },
+        warnings: [],
+        headers: {},
+        meta: {} as never,
+      })
+    );
+
+    expect(await reader.countAlerts(client, { lookback: LOOKBACK, spaceId: SPACE_ID })).toBe(0);
+  });
+
   it('scopes countAlerts to a single rule when ruleUuid is provided', async () => {
-    const { client, search } = createEsClient();
-    search.mockResolvedValue({ hits: { total: 0 } });
+    const { client, esql } = createEsClient();
+    esql.mockResolvedValue({ columns: [], values: [] });
 
-    await reader.countAlerts(client, {
-      lookback: LOOKBACK,
-      spaceId: SPACE_ID,
-      ruleUuid: RULE_UUID,
-    });
+    expect(
+      await reader.countAlerts(client, {
+        lookback: LOOKBACK,
+        spaceId: SPACE_ID,
+        ruleUuid: RULE_UUID,
+      })
+    ).toBe(0);
 
-    expect(search).toHaveBeenCalledWith(
+    expect(esql).toHaveBeenCalledWith(
       'significant_events_alerts_v2_count_alerts',
       expect.objectContaining({
-        query: {
-          bool: {
-            filter: expect.arrayContaining([{ term: { 'rule.id': RULE_UUID } }]),
-          },
-        },
+        query: expect.stringContaining('WHERE rule.id == ?ruleUuid'),
+        params: expect.arrayContaining([{ ruleUuid: RULE_UUID }]),
       })
     );
   });

@@ -6,7 +6,6 @@
  */
 
 import type { TracedElasticsearchClient } from '@kbn/traced-es-client';
-import { kqlQuery, dateRangeQuery } from '@kbn/es-query';
 import { getSigEventsLogPatternsEsql } from './get_log_patterns';
 
 const createEsClient = (
@@ -75,12 +74,10 @@ describe('getSigEventsLogPatternsEsql', () => {
       'categorize_noise_exclusion_head',
       expect.objectContaining({
         query:
-          'FROM logs-* | STATS count = COUNT(*), `sample` = TOP(body.text::KEYWORD, 1, "desc") BY pattern = CATEGORIZE(body.text, {"output_format": "tokens"}) | WHERE count > 0.1 | SORT count ASC | LIMIT 1000',
-        filter: {
-          bool: { filter: [...kqlQuery('service.name:"checkout"'), ...dateRangeQuery(100, 200)] },
-        },
+          'FROM logs-* | WHERE @timestamp >= "1970-01-01T00:00:00.100Z" AND @timestamp <= "1970-01-01T00:00:00.200Z" | WHERE KQL("service.name:\\"checkout\\"") | STATS count = COUNT(*), `sample` = TOP(body.text::KEYWORD, 1, "desc") BY pattern = CATEGORIZE(body.text, {"output_format": "tokens"}) | WHERE count > 0.1 | SORT count ASC | LIMIT 1000',
       }),
     ]);
+    expect(esql.mock.calls[1][1]).not.toHaveProperty('filter');
     expect(esql).toHaveBeenCalledTimes(2);
     expect(rawEsqlQuery).toHaveBeenCalledTimes(1);
     expect(rawEsqlQuery.mock.calls[0][0]).toEqual(

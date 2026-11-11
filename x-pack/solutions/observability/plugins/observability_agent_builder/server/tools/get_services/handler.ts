@@ -9,6 +9,7 @@ import type { KibanaRequest, Logger } from '@kbn/core/server';
 import type { IScopedClusterClient } from '@kbn/core-elasticsearch-server';
 import { ML_ANOMALY_SEVERITY } from '@kbn/ml-anomaly-utils/anomaly_severity';
 import { getSeverityType } from '@kbn/ml-anomaly-utils/get_severity_type';
+import { esql } from '@elastic/esql';
 import { kqlQuery } from '@kbn/observability-utils-server/es/queries/kql_query';
 import type { ObservabilityAgentBuilderDataRegistry } from '../../data_registry/data_registry';
 import type { ServicesItemsItem } from '../../data_registry/data_registry_types';
@@ -18,7 +19,7 @@ import type {
 } from '../../types';
 import { getLogsIndices } from '../../utils/get_logs_indices';
 import { getMetricsIndices } from '../../utils/get_metrics_indices';
-import { getTypedSearch } from '../../utils/get_typed_search';
+import { esqlRows, runEsqlRead, toEsqlSources } from '../../utils/esql_read';
 import { parseDatemath, toMilliseconds } from '../../utils/time';
 
 interface ServiceFromIndex {
@@ -52,43 +53,27 @@ async function getServicesFromLogsAndMetricsIndices({
   }
 
   try {
-    const search = getTypedSearch(esClient.asCurrentUser);
-    const response = await search({
-      index: allIndices,
-      size: 0,
-      track_total_hits: false,
-      query: {
+    // Highest document count first: the services are cut at the limit by total count, and the
+    // reported environment is the one with the most documents (nulls ranked last).
+    const response = await runEsqlRead({
+      esClient: esClient.asCurrentUser,
+      query: esql.from(toEsqlSources(allIndices)).pipe`WHERE service.name IS NOT NULL`
+        .pipe`STATS doc_count = COUNT(*) BY service.name, service.environment`
+        .pipe`EVAL env_rank = CASE(service.environment IS NULL, 0, -doc_count)`
+        .pipe`STATS total = SUM(doc_count), environment = FIRST(service.environment, env_rank) BY service.name`
+        .pipe`SORT total DESC, service.name ASC`.pipe`LIMIT ${{
+        limit: MAX_SERVICES_FROM_INDICES,
+      }}`,
+      filter: {
         bool: {
-          filter: [
-            { range: { '@timestamp': { gte: start, lte: end } } },
-            { exists: { field: 'service.name' } },
-            ...kqlQuery(kqlFilter),
-          ],
-        },
-      },
-      aggs: {
-        services: {
-          terms: {
-            field: 'service.name',
-            size: MAX_SERVICES_FROM_INDICES,
-          },
-          aggs: {
-            environments: {
-              terms: {
-                field: 'service.environment',
-                size: 10,
-              },
-            },
-          },
+          filter: [{ range: { '@timestamp': { gte: start, lte: end } } }, ...kqlQuery(kqlFilter)],
         },
       },
     });
 
-    const buckets = response.aggregations?.services?.buckets ?? [];
-
-    return buckets.map((bucket) => ({
-      serviceName: bucket.key as string,
-      environment: bucket.environments?.buckets?.[0]?.key as string | undefined,
+    return esqlRows(response).map((row) => ({
+      serviceName: String(row['service.name']),
+      environment: typeof row.environment === 'string' ? row.environment : undefined,
     }));
   } catch (error) {
     logger.debug(`Failed to get services from indices: ${error.message}`);

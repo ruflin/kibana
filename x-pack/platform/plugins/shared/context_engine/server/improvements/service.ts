@@ -6,6 +6,7 @@
  */
 
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import { isResponseError } from '@kbn/es-errors';
 import { BulkOperationError } from '@kbn/storage-adapter';
@@ -20,11 +21,8 @@ import type {
   ImprovementTransition,
   ListImprovementsResponse,
 } from '../../common/http_api/improvements';
-import {
-  IMPROVEMENT_STATUSES,
-  IMPROVEMENTS_INDEX,
-  isImprovementStatus,
-} from '../../common/http_api/improvements';
+import { IMPROVEMENTS_INDEX, isImprovementStatus } from '../../common/http_api/improvements';
+import { esqlRows, runEsqlRead } from '../utils/esql_read';
 import { createSpaceDslFilter } from '../utils/space_filter';
 import { ImprovementConflictError, ImprovementNotFoundError } from './errors';
 import type { ImprovementsClient } from './storage';
@@ -32,6 +30,9 @@ import { createImprovementsClient } from './storage';
 
 /** Only the newest revision of each lineage is a live improvement. */
 const LATEST_ONLY: QueryDslQueryContainer = { term: { latest: true } };
+
+/** Ceiling on the status groups of a summary. Far above the statuses this store writes, so a stray one cannot cut the total. */
+const MAX_STATUS_GROUPS = 100;
 
 /** A bulk item carrying this lost its OCC race; anything else is a genuine failure. */
 const VERSION_CONFLICT = 'version_conflict_engine_exception';
@@ -204,48 +205,45 @@ export class ImprovementsService implements ImprovementsServiceApi {
   }
 
   async get(improvementId: string): Promise<Improvement | undefined> {
-    const response = await this.client.search({
-      size: 1,
-      track_total_hits: false,
-      query: {
-        bool: {
-          filter: [
-            createSpaceDslFilter(this.space),
-            LATEST_ONLY,
-            { term: { improvement_id: improvementId } },
-          ],
-        },
-      },
+    const response = await runEsqlRead({
+      esClient: this.esClient,
+      query: esql.from([IMPROVEMENTS_INDEX], ['_source']).pipe`WHERE improvement_id == ${{
+        improvementId,
+      }}`.pipe`KEEP _source`.limit(1),
+      // The space match is Query DSL: the default space also matches documents without a `space`.
+      filter: { bool: { filter: [createSpaceDslFilter(this.space), LATEST_ONLY] } },
+      // The index does not exist until the first improvement is written.
+      ignoreUnknownIndex: true,
     });
-    return toDocuments(response.hits.hits)[0];
+    const [row] = esqlRows(response);
+    return row?._source != null ? (row._source as Improvement) : undefined;
   }
 
   async historySummaryFor(aiIndexId: string): Promise<ImprovementHistorySummary> {
-    const response = await this.client.search({
-      size: 0,
-      track_total_hits: true,
-      query: { bool: { filter: buildHeadFilter({ space: this.space, aiIndexId }) } },
-      aggs: { status: { terms: { field: 'status', size: IMPROVEMENT_STATUSES.length } } },
+    const response = await runEsqlRead({
+      esClient: this.esClient,
+      query: esql.from([IMPROVEMENTS_INDEX]).pipe`STATS count = COUNT(*) BY status`.pipe`LIMIT ${{
+        limit: MAX_STATUS_GROUPS,
+      }}`,
+      filter: { bool: { filter: buildHeadFilter({ space: this.space, aiIndexId }) } },
+      ignoreUnknownIndex: true,
     });
 
-    const buckets =
-      (response.aggregations?.status as { buckets?: Array<{ key: string; doc_count: number }> })
-        ?.buckets ?? [];
-
+    // The total counts every head, whatever its status, so it does not have to add up to the
+    // statuses this store writes.
+    let total = 0;
     const byStatus: Partial<Record<ImprovementStatus, number>> = {};
-    for (const { key, doc_count: count } of buckets) {
-      if (isImprovementStatus(key)) {
-        byStatus[key] = count;
+    for (const { status, count } of esqlRows(response)) {
+      if (typeof count !== 'number') {
+        continue;
+      }
+      total += count;
+      if (typeof status === 'string' && isImprovementStatus(status)) {
+        byStatus[status] = count;
       }
     }
 
-    return {
-      total:
-        typeof response.hits.total === 'number'
-          ? response.hits.total
-          : response.hits.total?.value ?? 0,
-      by_status: byStatus,
-    };
+    return { total, by_status: byStatus };
   }
 
   async transition(

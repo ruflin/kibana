@@ -9,7 +9,7 @@ import type { IScopedClusterClient } from '@kbn/core/server';
 import type { QueryDslBoolQuery } from '@elastic/elasticsearch/lib/api/types';
 import { getTypedSearch } from '../../utils/get_typed_search';
 import { unwrapEsFields } from '../../utils/unwrap_es_fields';
-import { getTotalHits } from '../../utils/get_total_hits';
+import { esqlCount } from '../../utils/esql_read';
 import { computeSamplingProbability } from '../../utils/compute_sampling_probability';
 
 export async function getSamplingProbability({
@@ -21,16 +21,11 @@ export async function getSamplingProbability({
   index: string[];
   boolQuery: QueryDslBoolQuery;
 }) {
-  const search = getTypedSearch(esClient.asCurrentUser);
-
-  const countResponse = await search({
+  const totalHits = await esqlCount({
+    esClient: esClient.asCurrentUser,
     index,
-    size: 0,
-    track_total_hits: true,
-    query: { bool: boolQuery },
+    filter: { bool: boolQuery },
   });
-
-  const totalHits = getTotalHits(countResponse);
   const samplingProbability = computeSamplingProbability({ totalHits, targetSampleSize: 10000 });
 
   return { samplingProbability, totalHits };

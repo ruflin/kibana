@@ -87,6 +87,7 @@ describe('ImprovementsService', () => {
     createImprovementsClientMock.mockReturnValue(client);
     bulk.mockResolvedValue({ errors: false, items: [] });
     search.mockResolvedValue(searchResponse([]));
+    esClient.esql.query.mockResolvedValue({ columns: [], values: [] } as never);
     service = new ImprovementsService({ esClient, logger, space: SPACE });
   });
 
@@ -334,16 +335,22 @@ describe('ImprovementsService', () => {
   });
 
   describe('get', () => {
+    const headRow = (document: Improvement) => ({
+      columns: [{ name: '_source', type: '_source' }],
+      values: [[document]],
+    });
+
     it('returns the head revision of the lineage', async () => {
       const head = makeHead();
-      search.mockResolvedValue(searchResponse([hitOf(head)]));
+      esClient.esql.query.mockResolvedValue(headRow(head) as never);
 
       await expect(service.get('imp-1')).resolves.toEqual(head);
-      expect(search.mock.calls[0][0].query.bool.filter).toEqual([
-        SPACE_FILTER,
-        { term: { latest: true } },
-        { term: { improvement_id: 'imp-1' } },
-      ]);
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query:
+          'FROM context-engine-improvements METADATA _source | WHERE improvement_id == ?improvementId | KEEP _source | LIMIT 1',
+        params: [{ improvementId: 'imp-1' }],
+        filter: { bool: { filter: [SPACE_FILTER, { term: { latest: true } }] } },
+      });
     });
 
     it('returns undefined for an unknown improvement', async () => {
@@ -352,38 +359,46 @@ describe('ImprovementsService', () => {
   });
 
   describe('historySummaryFor', () => {
-    const summaryResponse = (
-      buckets: Array<{ key: string; doc_count: number }>,
-      total = buckets.reduce((sum, { doc_count: count }) => sum + count, 0)
-    ) => ({
-      hits: { hits: [], total: { value: total, relation: 'eq' } },
-      aggregations: { status: { buckets } },
-    });
+    const summaryResponse = (counts: Array<[string, number]>) =>
+      ({
+        columns: [
+          { name: 'count', type: 'long' },
+          { name: 'status', type: 'keyword' },
+        ],
+        values: counts.map(([status, count]) => [count, status]),
+      } as never);
 
     it('counts the AI index heads by status without fetching any of them', async () => {
-      search.mockResolvedValue(
+      esClient.esql.query.mockResolvedValue(
         summaryResponse([
-          { key: 'rejected', doc_count: 4 },
-          { key: 'suggested', doc_count: 2 },
+          ['rejected', 4],
+          ['suggested', 2],
         ])
       );
 
       const summary = await service.historySummaryFor('sales');
 
-      const [request] = search.mock.calls[0];
-      expect(request.size).toBe(0);
-      expect(request.query.bool.filter).toEqual([
-        SPACE_FILTER,
-        { term: { latest: true } },
-        { term: { ai_index_id: 'sales' } },
-      ]);
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query: 'FROM context-engine-improvements | STATS count = COUNT(*) BY status | LIMIT ?limit',
+        params: [{ limit: 100 }],
+        filter: {
+          bool: {
+            filter: [SPACE_FILTER, { term: { latest: true } }, { term: { ai_index_id: 'sales' } }],
+          },
+        },
+      });
       expect(summary).toEqual({ total: 6, by_status: { rejected: 4, suggested: 2 } });
     });
 
     it('reports a total the counted statuses do not have to add up to', async () => {
-      // `track_total_hits` is what the briefing quotes, so it is read from the hits rather than
-      // summed from buckets a `size`-capped terms agg could have truncated.
-      search.mockResolvedValue(summaryResponse([{ key: 'rejected', doc_count: 4 }], 9));
+      // The total counts every head, so a status this store does not write adds to it but is not
+      // reported under `by_status`.
+      esClient.esql.query.mockResolvedValue(
+        summaryResponse([
+          ['rejected', 4],
+          ['archived', 5],
+        ])
+      );
 
       expect(await service.historySummaryFor('sales')).toEqual({
         total: 9,
@@ -392,13 +407,32 @@ describe('ImprovementsService', () => {
     });
 
     it('ignores a bucket key that is not a status this store writes', async () => {
-      search.mockResolvedValue(summaryResponse([{ key: 'archived', doc_count: 3 }], 3));
+      esClient.esql.query.mockResolvedValue(summaryResponse([['archived', 3]]));
 
       expect((await service.historySummaryFor('sales')).by_status).toEqual({});
     });
 
     it('reports an index with no proposals as empty rather than failing', async () => {
-      search.mockResolvedValue({ hits: { hits: [], total: { value: 0, relation: 'eq' } } });
+      esClient.esql.query.mockResolvedValue({ columns: [], values: [] } as never);
+
+      expect(await service.historySummaryFor('sales')).toEqual({ total: 0, by_status: {} });
+    });
+
+    it('reports an index that does not exist as empty', async () => {
+      esClient.esql.query.mockRejectedValue(
+        new errors.ResponseError({
+          statusCode: 400,
+          body: {
+            error: {
+              type: 'verification_exception',
+              reason: 'Unknown index [context-engine-improvements]',
+            },
+          },
+          warnings: [],
+          headers: {},
+          meta: {} as never,
+        })
+      );
 
       expect(await service.historySummaryFor('sales')).toEqual({ total: 0, by_status: {} });
     });

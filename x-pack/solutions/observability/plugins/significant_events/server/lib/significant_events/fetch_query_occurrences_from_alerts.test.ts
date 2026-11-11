@@ -517,24 +517,18 @@ describe('fetchQueryOccurrencesFromAlerts', () => {
       { kiClient, esClient }
     );
 
-    const calledWith = esql.mock.calls[0][1] as {
-      query: string;
-      filter?: {
-        bool?: {
-          filter?: Array<{ range?: { '@timestamp'?: { gte?: string; lte?: string } } }>;
-        };
-      };
-    };
+    const calledWith = esql.mock.calls[0][1] as { query: string };
     // Source-bucket window (not write-time) must be in the ES|QL body.
     expect(calledWith.query).toContain(
       `bucket >= TO_DATETIME("${FROM.toISOString()}") AND bucket <= TO_DATETIME("${TO.toISOString()}")`
     );
-    // Write-time prune stays as an index skip hint; lte is widened by MAX_WRITE_DELAY (7m).
-    const timestampRange = calledWith.filter?.bool?.filter?.find(
-      (clause) => clause.range?.['@timestamp']
-    )?.range?.['@timestamp'];
-    expect(timestampRange?.gte).toBe(FROM.toISOString());
-    expect(timestampRange?.lte).toBe(new Date(TO.getTime() + 7 * 60_000).toISOString());
+    // Write-time prune is inline in ES|QL, right after FROM; its upper bound is widened by
+    // MAX_WRITE_DELAY (7m).
+    expect(calledWith.query).toContain(
+      `FROM .rule-events | WHERE @timestamp >= TO_DATETIME("${FROM.toISOString()}") AND @timestamp <= TO_DATETIME("${new Date(
+        TO.getTime() + 7 * 60_000
+      ).toISOString()}")`
+    );
   });
 
   describe('write-horizon clamp', () => {
@@ -596,21 +590,11 @@ describe('fetchQueryOccurrencesFromAlerts', () => {
         { esClient }
       );
 
-      const calledWith = esql.mock.calls[0][1] as {
-        query: string;
-        filter?: {
-          bool?: {
-            filter?: Array<{ range?: { '@timestamp'?: { lte?: string } } }>;
-          };
-        };
-      };
+      const calledWith = esql.mock.calls[0][1] as { query: string };
       expect(calledWith.query).toContain(`bucket <= TO_DATETIME("${HORIZON_ISO}")`);
       // Clamped end widened by MAX_WRITE_DELAY lands back on `now`; leaving the
       // prune on the caller's `to` would keep it 7m wider than the ES|QL range.
-      const timestampRange = calledWith.filter?.bool?.filter?.find(
-        (clause) => clause.range?.['@timestamp']
-      )?.range?.['@timestamp'];
-      expect(timestampRange?.lte).toBe(NOW.toISOString());
+      expect(calledWith.query).toContain(`@timestamp <= TO_DATETIME("${NOW.toISOString()}")`);
     });
 
     it('returns no data without querying when the whole range is inside the horizon', async () => {

@@ -77,6 +77,22 @@ const searchHit = (document: ProposalDocument, id = 'proposal-1') => ({
 /** An empty ES|QL result, which every `chartsSummary` query defaults to. */
 const emptyEsql = () => ({ columns: [], values: [] });
 
+/** An ES|QL result with one row per document, as read with `METADATA _id, _source`. */
+const esqlHitsResponse = (hits: Array<{ _id: string; _source: ProposalDocument }>) => ({
+  columns: [
+    { name: '_id', type: 'keyword' },
+    { name: '_source', type: '_source' },
+  ],
+  values: hits.map((hit) => [hit._id, hit._source]),
+});
+
+/** The query text and named parameters of the pipeline a call passed to `storage.esql`. */
+const esqlRequest = (storage: { esql: jest.Mock }, call = 0) => {
+  const [{ pipeline, metadata, filter }] = storage.esql.mock.calls[call];
+  const { query, params } = pipeline.toRequest();
+  return { query: query.replace(/\s+/g, ' '), params, metadata, filter };
+};
+
 const createStorage = (document?: ProposalDocument) => {
   const hits = document ? [searchHit(document)] : [];
   return {
@@ -2390,6 +2406,29 @@ describe('ProposalsService', () => {
           return { hits: { hits } };
         }
       );
+      // The live head of a chain, released first: `getLatestRevision` reads it with ES|QL.
+      storage.esql.mockImplementation(
+        async ({ pipeline }: { pipeline: { toRequest: () => { params?: unknown } } }) => {
+          const params = (pipeline.toRequest().params ?? []) as Array<Record<string, unknown>>;
+          const rootProposalId = params.find((param) => 'rootProposalId' in param)?.rootProposalId;
+          const unreleased = ({ gateReleasedAt }: ProposalDocument) =>
+            gateReleasedAt === undefined ? 1 : 0;
+          return esqlHitsResponse(
+            [...records.entries()]
+              .filter(
+                ([, { document }]) =>
+                  document.rootProposalId === rootProposalId && document.supersededBy === undefined
+              )
+              .sort(
+                ([, a], [, b]) =>
+                  unreleased(a.document) - unreleased(b.document) ||
+                  b.document.revision - a.document.revision
+              )
+              .slice(0, 1)
+              .map(([liveId, { document }]) => ({ _id: liveId, _source: document }))
+          );
+        }
+      );
       storage.delete.mockImplementation(async ({ id }: { id: string }) => {
         records.delete(id);
         return { acknowledged: true, result: 'deleted' };
@@ -2506,27 +2545,23 @@ describe('ProposalsService', () => {
 
   describe('findByWorkflowExecutionId', () => {
     it('returns the original proposal its gate execution created, within the space', async () => {
-      const storage = createStorage(baseDocument());
+      const storage = createStorage();
+      storage.esql.mockResolvedValue(
+        esqlHitsResponse([{ _id: 'proposal-1', _source: baseDocument() }])
+      );
       const { service } = createService(storage);
 
       const proposal = await service.findByWorkflowExecutionId(EXECUTION_ID, SPACE_ID);
 
       expect(proposal).toMatchObject({ id: 'proposal-1', workflowExecutionId: EXECUTION_ID });
       expect(proposal).not.toHaveProperty('ranks');
-      expect(storage.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          size: 1,
-          query: {
-            bool: {
-              filter: [
-                { term: { workflowExecutionId: EXECUTION_ID } },
-                { term: { spaceId: SPACE_ID } },
-              ],
-            },
-          },
-          sort: [{ createdAt: { order: 'asc' } }],
-        })
-      );
+      expect(esqlRequest(storage)).toEqual({
+        query:
+          'WHERE workflowExecutionId == ?workflowExecutionId AND spaceId == ?spaceId | SORT createdAt ASC NULLS LAST | LIMIT 1',
+        params: [{ workflowExecutionId: EXECUTION_ID }, { spaceId: SPACE_ID }],
+        metadata: ['_id', '_source'],
+        filter: undefined,
+      });
     });
 
     it('returns undefined before the create step ran, or for a blank id', async () => {
@@ -2537,23 +2572,22 @@ describe('ProposalsService', () => {
         undefined
       );
       await expect(service.findByWorkflowExecutionId('', SPACE_ID)).resolves.toBe(undefined);
-      expect(storage.search).toHaveBeenCalledTimes(1);
+      expect(storage.esql).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('countPendingByConversationIds', () => {
     it('counts pending, unexpired proposals per conversation in one aggregation', async () => {
       const storage = createStorage();
-      storage.search.mockResolvedValue({
-        hits: { hits: [] },
-        aggregations: {
-          by_conversation: {
-            buckets: [
-              { key: 'conv-1', doc_count: 2 },
-              { key: 'conv-2', doc_count: 1 },
-            ],
-          },
-        },
+      storage.esql.mockResolvedValue({
+        columns: [
+          { name: 'count', type: 'long' },
+          { name: 'conversationId', type: 'keyword' },
+        ],
+        values: [
+          [2, 'conv-1'],
+          [1, 'conv-2'],
+        ],
       });
       const { service } = createService(storage);
 
@@ -2566,12 +2600,12 @@ describe('ProposalsService', () => {
         ['conv-1', 2],
         ['conv-2', 1],
       ]);
-      const [searchRequest] = storage.search.mock.calls[0];
-      expect(searchRequest).toMatchObject({
-        size: 0,
-        aggs: { by_conversation: { terms: { field: 'conversationId', size: 2 } } },
-      });
-      expect(searchRequest.query.bool.filter).toEqual(
+      const request = esqlRequest(storage);
+      expect(request.query).toBe(
+        'WHERE conversationId IS NOT NULL | STATS count = COUNT(*) BY conversationId | SORT count DESC, conversationId ASC | LIMIT ?limit'
+      );
+      expect(request.params).toEqual([{ limit: 2 }]);
+      expect(request.filter.bool.filter).toEqual(
         expect.arrayContaining([
           { term: { spaceId: SPACE_ID } },
           { term: { status: 'pending' } },
@@ -2590,23 +2624,22 @@ describe('ProposalsService', () => {
       const { service } = createService(storage);
 
       await expect(service.countPendingByConversationIds([], SPACE_ID)).resolves.toEqual(new Map());
-      expect(storage.search).not.toHaveBeenCalled();
+      expect(storage.esql).not.toHaveBeenCalled();
     });
   });
 
   describe('countByConversation', () => {
     it('counts the matching proposals per conversation in one aggregation', async () => {
       const storage = createStorage();
-      storage.search.mockResolvedValue({
-        hits: { hits: [] },
-        aggregations: {
-          by_conversation: {
-            buckets: [
-              { key: 'conv-1', doc_count: 3 },
-              { key: 'conv-2', doc_count: 1 },
-            ],
-          },
-        },
+      storage.esql.mockResolvedValue({
+        columns: [
+          { name: 'count', type: 'long' },
+          { name: 'conversationId', type: 'keyword' },
+        ],
+        values: [
+          [3, 'conv-1'],
+          [1, 'conv-2'],
+        ],
       });
       const { service } = createService(storage);
 
@@ -2626,12 +2659,10 @@ describe('ProposalsService', () => {
         ['conv-1', 3],
         ['conv-2', 1],
       ]);
-      const [searchRequest] = storage.search.mock.calls[0];
-      expect(searchRequest).toMatchObject({
-        size: 0,
-        aggs: { by_conversation: { terms: { field: 'conversationId', size: 500 } } },
-      });
-      expect(searchRequest.query.bool.filter).toEqual(
+      const request = esqlRequest(storage);
+      expect(request.query).toContain('STATS count = COUNT(*) BY conversationId');
+      expect(request.params).toEqual([{ limit: 500 }]);
+      expect(request.filter.bool.filter).toEqual(
         expect.arrayContaining([
           { term: { spaceId: SPACE_ID } },
           { term: { status: 'pending' } },
@@ -2643,10 +2674,6 @@ describe('ProposalsService', () => {
 
     it('filters by any of the given statuses', async () => {
       const storage = createStorage();
-      storage.search.mockResolvedValue({
-        hits: { hits: [] },
-        aggregations: { by_conversation: { buckets: [] } },
-      });
       const { service } = createService(storage);
 
       await service.countByConversation(
@@ -2659,8 +2686,7 @@ describe('ProposalsService', () => {
         10
       );
 
-      const [searchRequest] = storage.search.mock.calls[0];
-      expect(searchRequest.query.bool.filter).toEqual(
+      expect(esqlRequest(storage).filter.bool.filter).toEqual(
         expect.arrayContaining([{ terms: { status: ['pending', 'executing'] } }])
       );
     });
@@ -2704,7 +2730,9 @@ describe('ProposalsService', () => {
     });
 
     it('returns the proposal itself when it is the live revision', async () => {
-      const storage = createStorage(baseDocument({ rootProposalId: 'proposal-1', revision: 1 }));
+      const document = baseDocument({ rootProposalId: 'proposal-1', revision: 1 });
+      const storage = createStorage(document);
+      storage.esql.mockResolvedValue(esqlHitsResponse([{ _id: 'proposal-1', _source: document }]));
       const { service } = createService(storage);
 
       const result = await service.getLatestRevision('proposal-1', SPACE_ID);
@@ -2735,30 +2763,12 @@ describe('ProposalsService', () => {
         actionInput: { name: 'Revised PowerShell' },
       });
       const storage = createStorage(rootDocument);
-      // Dispatch on the query, not call order, so the asked-about row and the head
-      // are genuinely different documents: answering both with the head would let a
-      // read of the wrong document pass unnoticed.
-      storage.search.mockImplementation(async (searchRequest: { query?: unknown }) => {
-        const filter =
-          (
-            searchRequest.query as
-              | {
-                  bool?: {
-                    filter?: Array<{ term?: Record<string, unknown>; ids?: { values: string[] } }>;
-                  };
-                }
-              | undefined
-          )?.bool?.filter ?? [];
-        const asksForRoot = filter.some((clause) => clause.term?.rootProposalId !== undefined);
-        const askedForId = filter.find((clause) => clause.ids !== undefined)?.ids?.values[0];
-
-        if (asksForRoot) {
-          return { hits: { hits: [searchHit(liveDocument, 'proposal-2')], total: { value: 1 } } };
-        }
-        return askedForId === 'proposal-2'
-          ? { hits: { hits: [searchHit(liveDocument, 'proposal-2')], total: { value: 1 } } }
-          : { hits: { hits: [searchHit(rootDocument, 'proposal-1')], total: { value: 1 } } };
-      });
+      // The asked-about row (read by id) and the head (read by chain) are genuinely different
+      // documents: answering both with the head would let a read of the wrong document pass
+      // unnoticed.
+      storage.esql.mockResolvedValue(
+        esqlHitsResponse([{ _id: 'proposal-2', _source: liveDocument }])
+      );
       const { service } = createService(storage);
 
       const result = await service.getLatestRevision('proposal-1', SPACE_ID);
@@ -2770,15 +2780,12 @@ describe('ProposalsService', () => {
         decision: undefined,
         actionInput: { name: 'Revised PowerShell' },
       });
-      expect(storage.search).toHaveBeenCalledTimes(2);
-      expect(storage.search).toHaveBeenCalledWith(
+      expect(storage.search).toHaveBeenCalledTimes(1);
+      expect(esqlRequest(storage)).toEqual(
         expect.objectContaining({
-          query: expect.objectContaining({
-            bool: expect.objectContaining({
-              filter: expect.arrayContaining([{ term: { rootProposalId: 'proposal-1' } }]),
-              must_not: [{ exists: { field: 'supersededBy' } }],
-            }),
-          }),
+          query:
+            'WHERE rootProposalId == ?rootProposalId AND spaceId == ?spaceId AND supersededBy IS NULL | SORT gateReleasedAt DESC NULLS LAST | LIMIT 1',
+          params: [{ rootProposalId: 'proposal-1' }, { spaceId: SPACE_ID }],
         })
       );
     });
@@ -2786,14 +2793,8 @@ describe('ProposalsService', () => {
     it('falls back to the asked-about proposal if the chain query finds no live revision', async () => {
       const document = baseDocument({ rootProposalId: 'proposal-1', revision: 1 });
       const storage = createStorage(document);
-      // First call is the internal load(); second is the chain query — only
-      // the chain query should come back empty, otherwise this is testing a
-      // different failure (load() itself finding nothing).
-      storage.search
-        .mockResolvedValueOnce({
-          hits: { hits: [searchHit(document, 'proposal-1')], total: { value: 1 } },
-        })
-        .mockResolvedValueOnce({ hits: { hits: [], total: { value: 0 } } });
+      // `load()` finds the proposal; only the chain query comes back empty (the ES|QL default),
+      // otherwise this is testing a different failure (load() itself finding nothing).
       const { service } = createService(storage);
 
       const result = await service.getLatestRevision('proposal-1', SPACE_ID);

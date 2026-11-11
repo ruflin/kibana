@@ -6,6 +6,7 @@
  */
 
 import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import { DEFAULT_SPACE_ID } from '@kbn/core-spaces-common';
 import { isResponseError } from '@kbn/es-errors';
@@ -24,6 +25,7 @@ import type {
 } from '../../common/http_api/ai_indices';
 import { isIndexPattern } from '../../common/ai_index_dest';
 import { AI_INDEX_ID_PATTERN } from '../../common/validation';
+import { esqlRows } from '../utils/esql_read';
 import { createSpaceDslFilter } from '../utils/space_filter';
 import {
   InvalidAiIndexDestError,
@@ -433,19 +435,21 @@ export class AiIndexService {
   }
 
   private async searchSpace(spaceId: string): Promise<AiIndexHttpItem[]> {
-    const response = await this.storageClient.search({
-      size: MAX_AI_INDICES,
-      track_total_hits: false,
-      query: createSpaceDslFilter(spaceId),
-      // Pre-upgrade documents have no `id` to sort on and land at the end, where `_doc` keeps
-      // their order stable rather than leaving it undefined under the `size` cap.
-      sort: [{ id: { order: 'asc', missing: '_last' } }, { _doc: { order: 'asc' } }],
+    const response = await this.storageClient.esql({
+      // The space match is Query DSL because the default space also matches documents that carry
+      // no `space` field. Pre-upgrade documents have no `id` to sort on and land at the end, where
+      // the `_id` tiebreak keeps their order stable rather than leaving it undefined under the
+      // `LIMIT` cap.
+      pipeline: esql`SORT id ASC NULLS LAST, _id ASC | LIMIT ${{ limit: MAX_AI_INDICES }}`,
+      filter: createSpaceDslFilter(spaceId),
+      metadata: ['_id', '_source'],
     });
-    return response.hits.hits.flatMap((hit) => {
-      if (!hit._source || hit._id === undefined) {
+    return esqlRows(response).flatMap((row) => {
+      const source = row._source;
+      if (source === null || typeof source !== 'object' || typeof row._id !== 'string') {
         return [];
       }
-      return [this.toItem(toAiIndexDocument(hit._source, hit._id))];
+      return [this.toItem(toAiIndexDocument(source as StoredAiIndexDocument, row._id))];
     });
   }
 

@@ -176,7 +176,7 @@ describe('ai indices routes', () => {
               },
             },
             asInternalUser: {
-              search: esInternalSearch,
+              esql: { query: esInternalSearch },
             },
           },
         },
@@ -219,7 +219,7 @@ describe('ai indices routes', () => {
       aliases: [],
       data_streams: [],
     });
-    esInternalSearch = jest.fn().mockResolvedValue({ hits: { hits: [] } });
+    esInternalSearch = jest.fn().mockResolvedValue({ columns: [], values: [] });
     spacesStart = spacesMock.createStart();
     aiIndexService = {
       create: jest.fn(),
@@ -1862,12 +1862,10 @@ describe('ai indices routes', () => {
         });
 
         expect(esInternalSearch).toHaveBeenCalledWith({
-          index: aiIndicesIndexName,
-          size: MAX_AI_INDICES,
-          track_total_hits: false,
-          query: {
+          query: `FROM ${aiIndicesIndexName} METADATA _id, _source | WHERE dest.value == ?dest | KEEP _id, _source | LIMIT ?limit`,
+          params: [{ dest: aiIndexItem.dest.value }, { limit: MAX_AI_INDICES }],
+          filter: {
             bool: {
-              filter: [{ term: { 'dest.value': aiIndexItem.dest.value } }],
               must_not: [createAiIndexIdentityDslFilter('customer_support', defaultSpaceId)],
             },
           },
@@ -1889,9 +1887,8 @@ describe('ai indices routes', () => {
 
         expect(esInternalSearch).toHaveBeenCalledWith(
           expect.objectContaining({
-            query: {
+            filter: {
               bool: {
-                filter: [{ term: { 'dest.value': aiIndexItem.dest.value } }],
                 must_not: [createAiIndexIdentityDslFilter('customer_support', 'marketing')],
               },
             },
@@ -1918,7 +1915,11 @@ describe('ai indices routes', () => {
       it('skips dest delete and warns when another AI index still uses the dest', async () => {
         aiIndexService.delete.mockResolvedValue(undefined);
         esInternalSearch.mockResolvedValue({
-          hits: { hits: [{ _id: 'other_space_index' }] },
+          columns: [
+            { name: '_id', type: 'keyword' },
+            { name: '_source', type: '_source' },
+          ],
+          values: [['other_space_index', null]],
         });
 
         await callRoute('DELETE', AI_INDEX_BY_ID_PATH, {

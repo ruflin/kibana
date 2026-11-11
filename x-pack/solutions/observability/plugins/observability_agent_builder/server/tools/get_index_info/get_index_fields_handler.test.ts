@@ -5,7 +5,9 @@
  * 2.0.
  */
 
-import { extractFieldPaths } from './get_index_fields_handler';
+import { elasticsearchServiceMock, loggingSystemMock } from '@kbn/core/server/mocks';
+import type { ModelProvider } from '@kbn/agent-builder-server';
+import { extractFieldPaths, listFieldsHandler } from './get_index_fields_handler';
 
 describe('extractFieldPaths', () => {
   it('extracts top-level keys from a flat object', () => {
@@ -47,5 +49,76 @@ describe('extractFieldPaths', () => {
       'tags',
       'host.os.platform',
     ]);
+  });
+});
+
+describe('listFieldsHandler', () => {
+  const esClient = elasticsearchServiceMock.createScopedClusterClient();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  const run = () =>
+    listFieldsHandler({
+      esClient,
+      index: 'logs-*',
+      start: '2026-01-01T00:00:00.000Z',
+      end: '2026-01-01T01:00:00.000Z',
+      kqlFilter: 'service.name: a',
+      modelProvider: {} as ModelProvider,
+      logger: loggingSystemMock.createLogger(),
+    });
+
+  it('samples the _source of 1000 documents with ES|QL and groups the fields by type', async () => {
+    esClient.asCurrentUser.esql.query.mockResolvedValue({
+      columns: [{ name: '_source', type: '_source' }],
+      values: [
+        [{ '@timestamp': '2026-01-01T00:00:00.000Z', service: { name: 'a' } }],
+        [{ message: 'boom', service: { name: 'b' } }],
+      ],
+    } as never);
+    esClient.asCurrentUser.fieldCaps.mockResolvedValue({
+      indices: ['logs-1'],
+      fields: {
+        '@timestamp': { date: {} as never },
+        'service.name': { keyword: {} as never },
+        message: { text: {} as never },
+      },
+    });
+
+    const result = await run();
+
+    const request = esClient.asCurrentUser.esql.query.mock.calls[0][0] as {
+      query: string;
+      params: unknown[];
+    };
+    expect(request.query).toBe('FROM logs-* METADATA _source | KEEP _source | LIMIT ?limit');
+    expect(request.params).toEqual([{ limit: 1000 }]);
+    expect(esClient.asCurrentUser.fieldCaps).toHaveBeenCalledWith(
+      expect.objectContaining({ fields: ['@timestamp', 'service.name', 'message'] })
+    );
+    expect(result).toEqual({
+      fieldsByType: {
+        date: ['@timestamp'],
+        keyword: ['service.name'],
+        text: ['message'],
+      },
+    });
+    expect(esClient.asCurrentUser.search).not.toHaveBeenCalled();
+  });
+
+  it('reports no fields when the index pattern matches nothing', async () => {
+    esClient.asCurrentUser.esql.query.mockRejectedValue(
+      Object.assign(new Error('Unknown index [logs-*]'), {
+        statusCode: 400,
+        body: { error: { type: 'verification_exception', reason: 'Unknown index [logs-*]' } },
+      })
+    );
+
+    expect(await run()).toEqual({
+      fieldsByType: {},
+      message: 'No documents found in index or no fields with data.',
+    });
   });
 });
