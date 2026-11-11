@@ -5,8 +5,9 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
-import type { EsConversationSchema } from './types';
+import { runEsql } from '../../lib/esql_read';
 
 /**
  * Checks if a conversation exists by ID without user access filtering
@@ -23,24 +24,12 @@ export const conversationExists = async ({
   id: string;
 }): Promise<boolean> => {
   try {
-    const response = await esClient.search<EsConversationSchema>({
-      query: {
-        bool: {
-          must: [
-            {
-              term: {
-                _id: id,
-              },
-            },
-          ],
-        },
-      },
-      _source: false,
-      ignore_unavailable: true,
-      index: conversationIndex,
-      size: 0,
+    const response = await runEsql({
+      esClient,
+      query: esql.from([conversationIndex], ['_id']).pipe`WHERE _id == ${{ id }}`.limit(1),
+      ignoreUnknownIndex: true,
     });
-    return (response.hits.total as { value: number }).value > 0;
+    return (response?.values.length ?? 0) > 0;
   } catch (err) {
     logger.error(`Error checking if conversation exists: ${err} with id: ${id}`);
     return false;

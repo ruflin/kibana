@@ -60,13 +60,8 @@ const mockExperimentalFeatures = {
 } as ExperimentalFeatures;
 
 const buildEmptyRiskSearchResponse = () => ({
-  took: 1,
-  timed_out: false,
-  _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-  hits: {
-    hits: [] as Array<{ _id: string; _index: string; _source: unknown }>,
-    total: { value: 0, relation: 'eq' as const },
-  },
+  columns: [{ name: '_source', type: '_source' }],
+  values: [] as unknown[][],
 });
 
 describe('getEntityTool', () => {
@@ -93,10 +88,10 @@ describe('getEntityTool', () => {
     mockFetchRiskScoreGrounding.mockResolvedValue(null);
     // Default to an empty risk index so existing tests that don't care
     // about the attachment payload's risk enrichment still pass. The
-    // risk enrichment path issues `esClient.asCurrentUser.search` against
+    // risk enrichment path issues `esClient.asCurrentUser.esql.query` against
     // the time-series risk index; mocking a zero-hit response is the
     // cheapest safe default.
-    mockEsClient.asCurrentUser.search.mockResolvedValue(buildEmptyRiskSearchResponse());
+    mockEsClient.asCurrentUser.esql.query.mockResolvedValue(buildEmptyRiskSearchResponse());
   });
 
   describe('schema', () => {
@@ -1600,17 +1595,8 @@ describe('getEntityTool', () => {
         } as unknown as EntityRiskScoreRecord);
 
       const buildRiskSearchResponse = (records: EntityRiskScoreRecord[]) => ({
-        took: 1,
-        timed_out: false,
-        _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        hits: {
-          hits: records.map((risk, index) => ({
-            _id: `risk-doc-${index}`,
-            _index: 'risk-score.risk-score-default',
-            _source: { host: { risk } },
-          })),
-          total: { value: records.length, relation: 'eq' as const },
-        },
+        columns: [{ name: '_source', type: '_source' }],
+        values: records.map((risk) => [{ host: { risk } }]),
       });
 
       const primaryHitResponse = {
@@ -1635,7 +1621,7 @@ describe('getEntityTool', () => {
       it('embeds the primary risk stats on the attachment data (and strips inputs)', async () => {
         (executeEsql as jest.Mock).mockResolvedValueOnce(primaryHitResponse);
 
-        mockEsClient.asCurrentUser.search.mockResolvedValueOnce(
+        mockEsClient.asCurrentUser.esql.query.mockResolvedValueOnce(
           buildRiskSearchResponse([buildRiskRecord()])
         );
 
@@ -1671,7 +1657,7 @@ describe('getEntityTool', () => {
       it('queries the risk time-series index with both V2 (prefixed EUID) and V1 (bare name) candidates and excludes resolution docs', async () => {
         (executeEsql as jest.Mock).mockResolvedValueOnce(primaryHitResponse);
 
-        mockEsClient.asCurrentUser.search.mockResolvedValueOnce(
+        mockEsClient.asCurrentUser.esql.query.mockResolvedValueOnce(
           buildRiskSearchResponse([buildRiskRecord()])
         );
 
@@ -1684,36 +1670,23 @@ describe('getEntityTool', () => {
 
         await tool.handler({ entityType: 'host', entityId: 'server1' }, context);
 
-        expect(mockEsClient.asCurrentUser.search).toHaveBeenCalledTimes(1);
-        const searchCall = mockEsClient.asCurrentUser.search.mock.calls[0][0] as {
-          index: string;
-          ignore_unavailable?: boolean;
-          size: number;
-          query: {
-            bool: { filter: unknown[]; must_not?: unknown[] };
-          };
+        expect(mockEsClient.asCurrentUser.esql.query).toHaveBeenCalledTimes(1);
+        const searchCall = mockEsClient.asCurrentUser.esql.query.mock.calls[0][0] as {
+          query: string;
+          params: unknown[];
         };
-        expect(searchCall.index).toBe('risk-score.risk-score-default');
-        expect(searchCall.size).toBe(1);
-        // `ignore_unavailable: true` keeps spaces without a risk engine from
-        // tripping `index_not_found_exception` — the tool's availability gate
-        // only guarantees the entity-store index, not the risk time-series
-        // one, so a missing risk index should degrade to "no risk stats"
-        // rather than throw.
-        expect(searchCall.ignore_unavailable).toBe(true);
-        // Filter matches both the prefixed EUID (V2 `user.risk.id_value`
-        // convention — mirrored for hosts) and the bare identifier (V1
-        // convention), which is how the flyout stays robust across
-        // deployments. We mirror that here.
-        expect(searchCall.query.bool.filter).toContainEqual({
-          terms: { 'host.risk.id_value': ['host:server1', 'server1'] },
-        });
-        // The primary fetch explicitly excludes resolution-group docs so
-        // the card reflects the entity's own score rather than the
-        // resolution override.
-        expect(searchCall.query.bool.must_not).toContainEqual({
-          term: { 'host.risk.score_type': 'resolution' },
-        });
+        // Spaces without a risk engine must degrade to "no risk stats" instead of throwing on a
+        // missing index: the tool's availability gate only guarantees the entity-store index,
+        // not the risk time-series one.
+        // Filter matches both the prefixed EUID (V2 `user.risk.id_value` convention, mirrored
+        // for hosts) and the bare identifier (V1 convention), which is how the flyout stays
+        // robust across deployments. The primary fetch explicitly excludes resolution-group docs
+        // so the card reflects the entity's own score rather than the resolution override, and
+        // keeps docs without a score type.
+        expect(searchCall.query).toBe(
+          'FROM risk-score.risk-score-default METADATA _source | WHERE `host.risk.id_value` IN (?idCandidates) | WHERE NOT COALESCE(`host.risk.score_type` == "resolution", FALSE) | SORT @timestamp DESC NULLS LAST | LIMIT 1'
+        );
+        expect(searchCall.params).toEqual([{ idCandidates: ['host:server1', 'server1'] }]);
       });
 
       it('embeds both primary and resolution risk stats when the entity is part of a resolution group', async () => {
@@ -1734,7 +1707,7 @@ describe('getEntityTool', () => {
           category_1_count: 12,
           id_value: 'host:server-canonical',
         });
-        mockEsClient.asCurrentUser.search
+        mockEsClient.asCurrentUser.esql.query
           .mockResolvedValueOnce(buildRiskSearchResponse([primaryRecord]))
           .mockResolvedValueOnce(buildRiskSearchResponse([resolutionRecord]));
 
@@ -1771,16 +1744,17 @@ describe('getEntityTool', () => {
 
         // Two risk-index queries: one for the primary (no-resolution) doc,
         // one for the resolution doc keyed on the group target's id(s).
-        expect(mockEsClient.asCurrentUser.search).toHaveBeenCalledTimes(2);
-        const resolutionSearchCall = mockEsClient.asCurrentUser.search.mock.calls[1][0] as {
-          query: { bool: { filter: Array<Record<string, unknown>> } };
+        expect(mockEsClient.asCurrentUser.esql.query).toHaveBeenCalledTimes(2);
+        const resolutionSearchCall = mockEsClient.asCurrentUser.esql.query.mock.calls[1][0] as {
+          query: string;
+          params: unknown[];
         };
-        expect(resolutionSearchCall.query.bool.filter).toContainEqual({
-          terms: { 'host.risk.id_value': ['host:server-canonical', 'server-canonical'] },
-        });
-        expect(resolutionSearchCall.query.bool.filter).toContainEqual({
-          term: { 'host.risk.score_type': 'resolution' },
-        });
+        expect(resolutionSearchCall.query).toContain(
+          '| WHERE `host.risk.score_type` == "resolution" |'
+        );
+        expect(resolutionSearchCall.params).toEqual([
+          { idCandidates: ['host:server-canonical', 'server-canonical'] },
+        ]);
 
         const addCall = (context.attachments.add as jest.Mock).mock.calls[0][0];
         expect(addCall.data.riskStats).toEqual(
@@ -1803,7 +1777,7 @@ describe('getEntityTool', () => {
       it('does not fetch a resolution risk doc when the group only has one member', async () => {
         (executeEsql as jest.Mock).mockResolvedValueOnce(primaryHitResponse);
 
-        mockEsClient.asCurrentUser.search.mockResolvedValueOnce(
+        mockEsClient.asCurrentUser.esql.query.mockResolvedValueOnce(
           buildRiskSearchResponse([buildRiskRecord()])
         );
 
@@ -1829,7 +1803,7 @@ describe('getEntityTool', () => {
         await tool.handler({ entityType: 'host', entityId: 'server1' }, context);
 
         // Only the primary risk-index query should run for a solo group.
-        expect(mockEsClient.asCurrentUser.search).toHaveBeenCalledTimes(1);
+        expect(mockEsClient.asCurrentUser.esql.query).toHaveBeenCalledTimes(1);
         const addCall = (context.attachments.add as jest.Mock).mock.calls[0][0];
         expect(addCall.data.resolutionRiskStats).toBeUndefined();
       });
@@ -1837,7 +1811,7 @@ describe('getEntityTool', () => {
       it('omits riskStats when the risk index has no document for the entity', async () => {
         (executeEsql as jest.Mock).mockResolvedValueOnce(primaryHitResponse);
 
-        mockEsClient.asCurrentUser.search.mockResolvedValueOnce(buildRiskSearchResponse([]));
+        mockEsClient.asCurrentUser.esql.query.mockResolvedValueOnce(buildRiskSearchResponse([]));
 
         const context = createToolHandlerContext(mockRequest, mockEsClient, mockLogger);
         (context.attachments.getAttachmentRecord as jest.Mock).mockReturnValueOnce(undefined);
@@ -1856,7 +1830,7 @@ describe('getEntityTool', () => {
       it('still creates the attachment (without risk stats) when the risk index query throws', async () => {
         (executeEsql as jest.Mock).mockResolvedValueOnce(primaryHitResponse);
 
-        mockEsClient.asCurrentUser.search.mockRejectedValueOnce(
+        mockEsClient.asCurrentUser.esql.query.mockRejectedValueOnce(
           new Error('risk index unavailable')
         );
 
@@ -1877,7 +1851,7 @@ describe('getEntityTool', () => {
       it('embeds primary risk stats when the resolution fetch fails but the primary succeeds', async () => {
         (executeEsql as jest.Mock).mockResolvedValueOnce(primaryHitResponse);
 
-        mockEsClient.asCurrentUser.search.mockResolvedValueOnce(
+        mockEsClient.asCurrentUser.esql.query.mockResolvedValueOnce(
           buildRiskSearchResponse([buildRiskRecord()])
         );
 

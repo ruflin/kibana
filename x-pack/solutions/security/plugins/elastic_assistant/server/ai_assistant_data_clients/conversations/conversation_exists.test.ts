@@ -8,8 +8,6 @@
 import { elasticsearchClientMock } from '@kbn/core-elasticsearch-client-server-mocks';
 import { loggingSystemMock } from '@kbn/core-logging-server-mocks';
 import { conversationExists } from './conversation_exists';
-import { getBasicEmptySearchResponse } from '../../__mocks__/response';
-import { getConversationSearchEsMock } from '../../__mocks__/conversations_schema.mock';
 
 describe('conversationExists', () => {
   let loggerMock: ReturnType<typeof loggingSystemMock.createLogger>;
@@ -23,7 +21,10 @@ describe('conversationExists', () => {
   });
 
   test('returns true when conversation exists', async () => {
-    esClient.search.mockResponse(getConversationSearchEsMock());
+    esClient.esql.query.mockResponse({
+      columns: [{ name: '_id', type: 'keyword' }],
+      values: [['test-id']],
+    });
 
     const result = await conversationExists({
       esClient,
@@ -33,27 +34,15 @@ describe('conversationExists', () => {
     });
 
     expect(result).toBe(true);
-    expect(esClient.search).toHaveBeenCalledWith({
-      query: {
-        bool: {
-          must: [
-            {
-              term: {
-                _id: 'test-id',
-              },
-            },
-          ],
-        },
-      },
-      _source: false,
-      ignore_unavailable: true,
-      index: '.kibana-elastic-ai-assistant-conversations',
-      size: 0,
+    expect(esClient.esql.query).toHaveBeenCalledWith({
+      query:
+        'FROM .kibana-elastic-ai-assistant-conversations METADATA _id | WHERE _id == ?id | LIMIT 1',
+      params: [{ id: 'test-id' }],
     });
   });
 
   test('returns false when conversation does not exist', async () => {
-    esClient.search.mockResponse(getBasicEmptySearchResponse());
+    esClient.esql.query.mockResponse({ columns: [{ name: '_id', type: 'keyword' }], values: [] });
 
     const result = await conversationExists({
       esClient,
@@ -65,9 +54,9 @@ describe('conversationExists', () => {
     expect(result).toBe(false);
   });
 
-  test('returns false and logs error when search throws error', async () => {
+  test('returns false and logs error when the query throws error', async () => {
     const error = new Error('Search failed');
-    esClient.search.mockRejectedValue(error);
+    esClient.esql.query.mockRejectedValue(error);
 
     const result = await conversationExists({
       esClient,

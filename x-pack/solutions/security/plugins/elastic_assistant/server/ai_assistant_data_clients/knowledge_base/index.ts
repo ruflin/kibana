@@ -11,6 +11,7 @@ import type {
   SearchTotalHits,
   QueryDslQueryContainer,
 } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { MlPluginSetup } from '@kbn/ml-plugin/server';
 import { Document } from '@langchain/core/documents';
 import type {
@@ -80,6 +81,7 @@ import {
 } from '../../lib/langchain/content_loaders/defend_insights_loader';
 import { ASSISTANT_ELSER_INFERENCE_ID } from './field_maps_configuration';
 import type { BulkOperationError } from '../../lib/data_stream/documents_data_writer';
+import { esqlRows, runEsql } from '../../lib/esql_read';
 import { AUDIT_OUTCOME, KnowledgeBaseAuditAction, knowledgeBaseAuditEvent } from './audit_events';
 import { findDocuments } from '../find';
 
@@ -533,22 +535,15 @@ export class AIAssistantKnowledgeBaseDataClient extends AIAssistantDataClient {
     const esClient = await this.options.elasticsearchClientPromise;
 
     try {
-      const response = await esClient.count({
-        index: this.indexTemplateAndPattern.alias,
-        query: {
-          bool: {
-            must: [
-              {
-                bool: {
-                  must: [{ prefix: { kb_resource: DEFEND_INSIGHTS_RESOURCES } }],
-                },
-              },
-            ],
-          },
-        },
+      const response = await runEsql({
+        esClient,
+        query: esql.from([this.indexTemplateAndPattern.alias])
+          .pipe`WHERE STARTS_WITH(kb_resource, ${{ prefix: DEFEND_INSIGHTS_RESOURCES }})`
+          .pipe`STATS total = COUNT(*)`,
       });
+      const total = esqlRows(response)[0]?.total;
 
-      return response.count ?? 0;
+      return typeof total === 'number' ? total : 0;
     } catch (e) {
       this.options.logger.info(`Error checking if Defend Insights docs are loaded: ${e.message}`);
       return 0;

@@ -6,13 +6,12 @@
  */
 
 import type {
-  AggregationsAggregationContainer,
   AggregationsFilterAggregate,
   AggregationsStringTermsAggregate,
-  AggregationsStringTermsBucket,
   QueryDslQueryContainer,
 } from '@elastic/elasticsearch/lib/api/types';
 import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { SiemMigrationVendor } from '../../../../../common/siem_migrations/model/common.gen';
 import type { RuleMigrationFilters } from '../../../../../common/siem_migrations/rules/types';
 import { SiemMigrationStatus } from '../../../../../common/siem_migrations/constants';
@@ -28,6 +27,7 @@ import { SiemMigrationsDataItemClient } from '../../common/data/siem_migrations_
 import { MAX_ES_SEARCH_SIZE } from '../../common/data/constants';
 import type { SiemMigrationGetItemsOptions, SiemMigrationSort } from '../../common/data/types';
 import { getSortingOptions } from './sort';
+import { esqlRows, runEsql } from '../../../esql/esql_read';
 import { dsl } from './dsl_queries';
 
 export type CreateRuleMigrationRulesInput = CreateMigrationItemInput<RuleMigrationRule>;
@@ -92,27 +92,20 @@ export class RuleMigrationsDataRulesClient extends SiemMigrationsDataItemClient<
   /** Retrieves the stats for the integrations of all the migration rules */
   public async getAllIntegrationsStats(): Promise<RuleMigrationAllIntegrationsStats> {
     const index = await this.getIndexName();
-    const aggregations: { integrationIds: AggregationsAggregationContainer } = {
-      integrationIds: {
-        terms: {
-          field: 'elastic_rule.integration_ids', // aggregate by integration ids
-          exclude: '', // excluding empty string integration ids
-          size: MAX_ES_SEARCH_SIZE,
-        },
-      },
-    };
-    const result = await this.esClient
-      .search({ index, aggregations, _source: false })
-      .catch((error) => {
-        this.logger.error(`Error getting all integrations stats: ${error.message}`);
-        throw error;
-      });
+    // Grouping by the multi-valued field counts each rule once per integration id, like a terms aggregation
+    const response = await runEsql({
+      esClient: this.esClient,
+      query: esql.from([index])
+        .pipe`STATS total_rules = COUNT(*) BY integration_id = elastic_rule.integration_ids`
+        .pipe`WHERE integration_id != ""`.pipe`SORT total_rules DESC`.limit(MAX_ES_SEARCH_SIZE),
+    }).catch((error) => {
+      this.logger.error(`Error getting all integrations stats: ${error.message}`);
+      throw error;
+    });
 
-    const integrationsAgg = result.aggregations?.integrationIds as AggregationsStringTermsAggregate;
-    const buckets = (integrationsAgg?.buckets as AggregationsStringTermsBucket[]) ?? [];
-    return buckets.map((bucket) => ({
-      id: `${bucket.key}`,
-      total_rules: bucket.doc_count,
+    return esqlRows(response).map((row) => ({
+      id: `${row.integration_id}`,
+      total_rules: Number(row.total_rules),
     }));
   }
 

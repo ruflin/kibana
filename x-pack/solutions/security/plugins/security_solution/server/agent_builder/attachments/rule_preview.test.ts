@@ -74,17 +74,23 @@ describe('createRulePreviewAttachmentType', () => {
       const formatted = await attachmentType.format(attachment, formatContext);
       const tools = await formatted.getBoundedTools?.();
       const tool = tools?.[0];
-      const search = jest.fn().mockResolvedValue({
-        hits: {
-          total: { value: 1 },
-          hits: [{ _id: 'alert-1', _source: { [ALERT_RULE_UUID]: 'preview-1' } }],
-        },
-      });
+      const query = jest.fn().mockImplementation(async ({ query: esqlQuery }: { query: string }) =>
+        esqlQuery.includes('STATS')
+          ? { columns: [{ name: 'total', type: 'long' }], values: [[1]] }
+          : {
+              columns: [
+                { name: '_id', type: 'keyword' },
+                { name: '_index', type: 'keyword' },
+                { name: '_source', type: '_source' },
+              ],
+              values: [['alert-1', 'preview-index', { [ALERT_RULE_UUID]: 'preview-1' }]],
+            }
+      );
       const context = {
         spaceId: 'default',
         esClient: {
           asCurrentUser: {
-            search,
+            esql: { query },
           },
         },
       };
@@ -100,29 +106,26 @@ describe('createRulePreviewAttachmentType', () => {
       }
       const firstResult = result.results[0] as ToolResult;
 
-      expect(search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: `${DEFAULT_PREVIEW_INDEX}-default`,
-          size: 10,
-          query: {
-            bool: {
-              filter: [
-                {
-                  term: {
-                    [ALERT_RULE_UUID]: 'preview-1',
-                  },
-                },
-              ],
-            },
-          },
-        })
-      );
+      expect(query).toHaveBeenCalledWith({
+        query: `FROM ${DEFAULT_PREVIEW_INDEX}-default METADATA _id, _index, _source | WHERE \`${ALERT_RULE_UUID}\` == ?previewId | SORT @timestamp DESC NULLS LAST | LIMIT 10`,
+        params: [{ previewId: 'preview-1' }],
+      });
+      expect(query).toHaveBeenCalledWith({
+        query: `FROM ${DEFAULT_PREVIEW_INDEX}-default | WHERE \`${ALERT_RULE_UUID}\` == ?previewId | STATS total = COUNT(*)`,
+        params: [{ previewId: 'preview-1' }],
+      });
       expect(firstResult.type).toBe(ToolResultType.other);
       if (isOtherResult(firstResult)) {
         expect(firstResult.data).toEqual({
           previewId: 'preview-1',
           total: 1,
-          alerts: [{ _id: 'alert-1', _source: { [ALERT_RULE_UUID]: 'preview-1' } }],
+          alerts: [
+            {
+              _id: 'alert-1',
+              _index: 'preview-index',
+              _source: { [ALERT_RULE_UUID]: 'preview-1' },
+            },
+          ],
         });
       }
     });
@@ -162,28 +165,21 @@ describe('createRulePreviewAttachmentType', () => {
 
 describe('getRulePreviewAlertCount', () => {
   it('counts alerts generated for a preview id in the current space', async () => {
-    const count = jest.fn().mockResolvedValue({ count: 7 });
+    const query = jest.fn().mockResolvedValue({
+      columns: [{ name: 'total', type: 'long' }],
+      values: [[7]],
+    });
 
     const result = await getRulePreviewAlertCount({
-      esClient: { count } as never,
+      esClient: { esql: { query } } as never,
       previewId: 'preview-1',
       spaceId: 'default',
     });
 
     expect(result).toBe(7);
-    expect(count).toHaveBeenCalledWith({
-      index: `${DEFAULT_PREVIEW_INDEX}-default`,
-      query: {
-        bool: {
-          filter: [
-            {
-              term: {
-                [ALERT_RULE_UUID]: 'preview-1',
-              },
-            },
-          ],
-        },
-      },
+    expect(query).toHaveBeenCalledWith({
+      query: `FROM ${DEFAULT_PREVIEW_INDEX}-default | WHERE \`${ALERT_RULE_UUID}\` == ?previewId | STATS total = COUNT(*)`,
+      params: [{ previewId: 'preview-1' }],
     });
   });
 });

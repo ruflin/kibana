@@ -56,6 +56,21 @@ describe('requestIsValid', () => {
     expect(requestIsValid(params)).toBe(false);
   });
 
+  it.each(['.alerts-* | DROP kibana.alert.uuid', '.alerts-*\nFROM other', '"x"', ''])(
+    'returns false when the alertsIndexPattern is the unsafe %j',
+    (unsafePattern) => {
+      expect(
+        requestIsValid({
+          alertsIndexPattern: unsafePattern,
+          request: {
+            body: { ...request.body, alertsIndexPattern: unsafePattern },
+          } as typeof request,
+          size,
+        })
+      ).toBe(false);
+    }
+  );
+
   it('returns false when size is undefined', () => {
     const params = {
       alertsIndexPattern,

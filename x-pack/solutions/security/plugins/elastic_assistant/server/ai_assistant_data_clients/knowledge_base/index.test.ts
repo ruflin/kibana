@@ -82,9 +82,9 @@ describe('AIAssistantKnowledgeBaseDataClient', () => {
       // @ts-expect-error not full response interface
       getKnowledgeBaseEntrySearchEsMock()
     );
-    esClientMock.count.mockResolvedValue({
-      count: 1,
-      _shards: { total: 1, successful: 1, failed: 0 },
+    esClientMock.esql.query.mockResolvedValue({
+      columns: [{ name: 'total', type: 'long' }],
+      values: [[1]],
     });
   });
 
@@ -450,10 +450,24 @@ describe('AIAssistantKnowledgeBaseDataClient', () => {
       expect(results).toEqual(true);
     });
 
+    it('should count the docs with the defend insights prefix using ES|QL', async () => {
+      const client = new AIAssistantKnowledgeBaseDataClient(mockOptions);
+      mockOptions.currentUser = mockUser1;
+
+      await client.getLoadedDefendInsightsDocsCount();
+
+      expect(esClientMock.esql.query).toHaveBeenCalledWith({
+        query: expect.stringMatching(
+          /^FROM .+ \| WHERE STARTS_WITH\(kb_resource, \?prefix\) \| STATS total = COUNT\(\*\)$/
+        ),
+        params: [{ prefix: 'defend_insights:' }],
+      });
+    });
+
     it('should resolve to false when docs do not exist', async () => {
-      esClientMock.count.mockResolvedValueOnce({
-        count: 0,
-        _shards: { total: 1, successful: 1, failed: 0 },
+      esClientMock.esql.query.mockResolvedValueOnce({
+        columns: [{ name: 'total', type: 'long' }],
+        values: [[0]],
       });
       const client = new AIAssistantKnowledgeBaseDataClient(mockOptions);
       mockOptions.currentUser = mockUser1;
@@ -464,7 +478,7 @@ describe('AIAssistantKnowledgeBaseDataClient', () => {
     });
 
     it('should resolve to false when docs error', async () => {
-      esClientMock.count.mockRejectedValueOnce(new Error('Search error'));
+      esClientMock.esql.query.mockRejectedValueOnce(new Error('Search error'));
       const client = new AIAssistantKnowledgeBaseDataClient(mockOptions);
       mockOptions.currentUser = mockUser1;
 

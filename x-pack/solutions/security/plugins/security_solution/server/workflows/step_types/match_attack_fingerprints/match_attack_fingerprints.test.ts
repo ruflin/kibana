@@ -66,6 +66,35 @@ const logger = {
   warn: jest.fn(),
 } as unknown as StepHandlerContext['logger'];
 
+/**
+ * Mocks `esClient.esql.query` for the alert reads: the first/last alert time, and the host and
+ * user names of each alert. ES|QL gives a single value as a scalar and several as an array.
+ */
+const createEsqlQuery = (alertHits: unknown[] = []) =>
+  jest.fn(async ({ query }: { query: string }) => {
+    if (query.includes('STATS first_at')) {
+      return {
+        columns: [
+          { name: 'first_at', type: 'date' },
+          { name: 'last_at', type: 'date' },
+        ],
+        values: [['2026-10-21T10:00:00.000Z', '2026-10-21T10:30:00.000Z']],
+      };
+    }
+    const scalarOrList = (values: unknown[] | undefined) =>
+      values === undefined ? null : values.length === 1 ? values[0] : values;
+    return {
+      columns: [
+        { name: 'host.name', type: 'keyword' },
+        { name: 'user.name', type: 'keyword' },
+      ],
+      values: (alertHits as Array<{ fields: Record<string, unknown[]> }>).map(({ fields }) => [
+        scalarOrList(fields['host.name']),
+        scalarOrList(fields['user.name']),
+      ]),
+    };
+  });
+
 const createHarness = ({
   hits = [] as unknown[],
   alertHits = [] as unknown[],
@@ -80,19 +109,12 @@ const createHarness = ({
     if (params.index === ATTACK_FINGERPRINT_INDEX) {
       return { hits: { hits } };
     }
-    if ((params.size ?? 0) > 0) {
-      return { hits: { hits: alertHits } };
-    }
-    return {
-      aggregations: {
-        first: { value_as_string: '2026-10-21T10:00:00.000Z' },
-        last: { value_as_string: '2026-10-21T10:30:00.000Z' },
-      },
-    };
+    return { hits: { hits: [] } };
   });
   const callKibanaApi = jest.fn(async () => ({ body: conversation }));
   const esClient = {
     search,
+    esql: { query: createEsqlQuery(alertHits) },
     index,
     get,
     update,
@@ -667,18 +689,11 @@ describe('matchAttackFingerprints', () => {
       sort: ['2026-10-22T11:00:00.000Z', 'stored-fp'],
     };
     const search = jest.fn(async (params: { index?: string; search_after?: unknown }) => {
-      if (params.index !== ATTACK_FINGERPRINT_INDEX) {
-        return {
-          aggregations: {
-            first: { value_as_string: '2026-10-21T10:00:00.000Z' },
-            last: { value_as_string: '2026-10-21T10:30:00.000Z' },
-          },
-        };
-      }
       return { hits: { hits: params.search_after === undefined ? noise : [match] } };
     });
     const esClient = {
       search,
+      esql: { query: createEsqlQuery() },
       index: jest.fn(),
       get: jest.fn(),
       update: jest.fn().mockResolvedValue({ result: 'updated' }),
@@ -1330,15 +1345,7 @@ describe('matchAttackFingerprints', () => {
       if (params.index === ATTACK_FINGERPRINT_INDEX) {
         return { _shards: { total: 0 }, hits: { hits: [] } };
       }
-      if ((params.size ?? 0) > 0) {
-        return { hits: { hits: [] } };
-      }
-      return {
-        aggregations: {
-          first: { value_as_string: '2026-10-21T10:00:00.000Z' },
-          last: { value_as_string: '2026-10-21T10:30:00.000Z' },
-        },
-      };
+      return { hits: { hits: [] } };
     });
 
     const result = await matchAttackFingerprintsStepDefinition.handler({
@@ -1348,6 +1355,7 @@ describe('matchAttackFingerprints', () => {
       contextManager: {
         getScopedEsClient: () => ({
           search,
+          esql: { query: createEsqlQuery() },
           index,
           get: jest.fn(),
           update: jest.fn(),
@@ -1380,15 +1388,7 @@ describe('matchAttackFingerprints', () => {
       if (params.index === ATTACK_FINGERPRINT_INDEX) {
         throw new Error('security_exception');
       }
-      if ((params.size ?? 0) > 0) {
-        return { hits: { hits: [] } };
-      }
-      return {
-        aggregations: {
-          first: { value_as_string: '2026-10-21T10:00:00.000Z' },
-          last: { value_as_string: '2026-10-21T10:30:00.000Z' },
-        },
-      };
+      return { hits: { hits: [] } };
     });
 
     await expect(
@@ -1417,15 +1417,7 @@ describe('matchAttackFingerprints', () => {
           meta: {} as never,
         });
       }
-      if ((params.size ?? 0) > 0) {
-        return { hits: { hits: [] } };
-      }
-      return {
-        aggregations: {
-          first: { value_as_string: '2026-10-21T10:00:00.000Z' },
-          last: { value_as_string: '2026-10-21T10:30:00.000Z' },
-        },
-      };
+      return { hits: { hits: [] } };
     });
 
     const output = await matchAttackFingerprints({
@@ -1439,5 +1431,36 @@ describe('matchAttackFingerprints', () => {
 
     expect(output.reviews).toHaveLength(1);
     expect(index).toHaveBeenCalled();
+  });
+
+  it('reads the alert times and the host and user names of the alerts with ES|QL', async () => {
+    const { esClient, contextManager } = createHarness();
+
+    await matchAttackFingerprints({
+      attacks: [attackDocument(ATTACK_ID, ['a1', 'a2'])],
+      contextManager,
+      esClient,
+      logger,
+      now: new Date('2026-10-21T12:00:00.000Z'),
+      spaceId: 'default',
+    });
+
+    const queries = (esClient.esql.query as jest.Mock).mock.calls.map(([request]) => request);
+    expect(queries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          query: expect.stringMatching(
+            /^FROM \.alerts-security\.alerts-default \| WHERE _id IN \(\?alertIds\) \| STATS first_at = MIN\(@timestamp\), last_at = MAX\(@timestamp\)$/
+          ),
+          params: [{ alertIds: ['a1', 'a2'] }],
+        }),
+        expect.objectContaining({
+          query: expect.stringMatching(
+            /^FROM \.alerts-security\.alerts-default \| WHERE _id IN \(\?alertIds\) \| KEEP `host\.name`, `user\.name` \| LIMIT 2$/
+          ),
+          params: [{ alertIds: ['a1', 'a2'] }],
+        }),
+      ])
+    );
   });
 });

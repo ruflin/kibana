@@ -9,11 +9,9 @@ import type { IScopedClusterClient } from '@kbn/core/server';
 import { SiemMigrationsDataMigrationClient } from './siem_migrations_data_migration_client';
 import { elasticsearchServiceMock, loggingSystemMock } from '@kbn/core/server/mocks';
 import type { AuthenticatedUser } from '@kbn/security-plugin-types-common';
-import type { Client } from '@elastic/elasticsearch';
 
 type IndexApi = Client['create'];
 type GetApi = Client['get'];
-type SearchApi = Client['search'];
 import type { SiemMigrationsClientDependencies } from '../types';
 
 describe('SiemMigrationsDataMigrationClient', () => {
@@ -152,42 +150,28 @@ describe('SiemMigrationsDataMigrationClient', () => {
 
   describe('getAll', () => {
     it('should return all migrations', async () => {
+      const createdAt = new Date().toISOString();
       const response = {
-        hits: {
-          hits: [
-            {
-              _index: '.kibana-siem-rule-migrations',
-              _id: '1',
-              _source: {
-                created_by: currentUser.profile_uid,
-                created_at: new Date().toISOString(),
-              },
-            },
-            {
-              _index: '.kibana-siem-rule-migrations',
-              _id: '2',
-              _source: {
-                created_by: currentUser.profile_uid,
-                created_at: new Date().toISOString(),
-              },
-            },
-          ],
-        },
-      } as unknown as ReturnType<typeof esClient.asInternalUser.search>;
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [
+          ['1', { created_by: currentUser.profile_uid, created_at: createdAt }],
+          ['2', { created_by: currentUser.profile_uid, created_at: createdAt }],
+        ],
+      };
 
-      (esClient.asInternalUser.search as unknown as jest.MockedFn<SearchApi>).mockResolvedValueOnce(
-        response
-      );
+      (esClient.asInternalUser.esql.query as jest.Mock).mockResolvedValueOnce(response);
 
-      await siemMigrationsDataMigrationClient.getAll();
-      expect(esClient.asInternalUser.search).toHaveBeenCalledWith({
-        index: '.kibana-siem-rule-migrations',
-        size: 10000,
-        query: {
-          match_all: {},
-        },
-        _source: true,
+      const migrations = await siemMigrationsDataMigrationClient.getAll();
+      expect(esClient.asInternalUser.esql.query).toHaveBeenCalledWith({
+        query: 'FROM .kibana-siem-rule-migrations METADATA _id, _source | LIMIT 10000',
       });
+      expect(migrations).toEqual([
+        { id: '1', created_by: currentUser.profile_uid, created_at: createdAt },
+        { id: '2', created_by: currentUser.profile_uid, created_at: createdAt },
+      ]);
     });
   });
 

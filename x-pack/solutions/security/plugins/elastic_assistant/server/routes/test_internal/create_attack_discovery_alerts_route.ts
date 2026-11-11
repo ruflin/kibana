@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { z, lazySchema } from '@kbn/zod/v4';
 import { buildRouteValidationWithZod } from '@kbn/zod-helpers/v4';
 import {
@@ -19,6 +20,7 @@ import type { ElasticsearchClient } from '@kbn/core/server';
 import type { AuthenticatedUser } from '@kbn/core-security-common';
 import { ATTACK_DISCOVERY_ALERTS_CONTEXT } from '@kbn/attack-discovery-schedules-common';
 import type { ElasticAssistantPluginRouter } from '../../types';
+import { esqlRows, runEsql } from '../../lib/esql_read';
 import { ATTACK_DISCOVERY_DATA_GENERATOR_RULE_TYPE_ID } from '../../lib/attack_discovery/data_generator_rule/constants';
 import { getScheduledIndexPattern } from '../../lib/attack_discovery/persistence/get_scheduled_index_pattern';
 import { generateAttackDiscoveryAlertHash } from '../../lib/attack_discovery/persistence/transforms/transform_to_alert_documents';
@@ -91,30 +93,31 @@ const pollForAttackDiscoveryAlertDocumentIds = async ({
 
   let sleepMs = 250;
   while (Date.now() - start < timeoutMs) {
-    const result = await esClient.search<unknown>({
-      index,
-      size,
-      fields: [ALERT_INSTANCE_ID],
-      _source: false,
-      query: {
-        terms: {
-          [ALERT_INSTANCE_ID]: uniqueExpectedInstanceIds,
-        },
-      },
+    const result = await runEsql({
+      esClient,
+      query: esql.from([index], ['_id', '_index']).pipe`WHERE ${esql.col(ALERT_INSTANCE_ID)} IN (${{
+        instanceIds: uniqueExpectedInstanceIds,
+      }})`.pipe`KEEP _id, _index, ${esql.col(ALERT_INSTANCE_ID)}`.limit(size),
+      // The pattern matches nothing until the first alert is written
+      ignoreUnknownIndex: true,
     });
 
-    const hits = result.hits.hits;
-    if (hits.length >= uniqueExpectedInstanceIds.length) {
-      return hits.flatMap((h) => {
-        const raw = (h.fields as Record<string, unknown> | undefined)?.[ALERT_INSTANCE_ID];
+    const rows = esqlRows(result);
+    if (rows.length >= uniqueExpectedInstanceIds.length) {
+      return rows.flatMap((row) => {
+        const raw = row[ALERT_INSTANCE_ID];
         const instanceId =
           Array.isArray(raw) && typeof raw[0] === 'string'
             ? raw[0]
             : typeof raw === 'string'
             ? raw
             : null;
-        if (!instanceId || !h._id) return [];
-        return [{ documentId: h._id, instanceId, concreteIndex: h._index }];
+        const documentId = row._id;
+        const concreteIndex = row._index;
+        if (!instanceId || typeof documentId !== 'string' || typeof concreteIndex !== 'string') {
+          return [];
+        }
+        return [{ documentId, instanceId, concreteIndex }];
       });
     }
 

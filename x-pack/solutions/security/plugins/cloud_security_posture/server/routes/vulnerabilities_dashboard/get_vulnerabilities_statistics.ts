@@ -5,70 +5,37 @@
  * 2.0.
  */
 
-import type { SearchRequest } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 import {
   CDR_LATEST_NATIVE_VULNERABILITIES_INDEX_PATTERN,
   VULNERABILITIES_SEVERITY,
 } from '@kbn/cloud-security-posture-common';
+import { esqlRows, runEsql } from '../../lib/esql_read';
 
-export interface VulnerabilitiesStatisticsQueryResult {
-  critical: {
-    doc_count: number;
-  };
-  high: {
-    doc_count: number;
-  };
-  medium: {
-    doc_count: number;
-  };
-  resources_scanned: {
-    value: number;
-  };
-  cloud_accounts: {
-    value: number;
-  };
-}
+const toCount = (value: unknown): number => (typeof value === 'number' ? value : 0);
 
-export const getVulnerabilitiesStatisticsQuery = (): SearchRequest => ({
-  size: 0,
-  query: {
-    match_all: {},
-  },
-  index: CDR_LATEST_NATIVE_VULNERABILITIES_INDEX_PATTERN,
-  aggs: {
-    critical: {
-      filter: { term: { 'vulnerability.severity': VULNERABILITIES_SEVERITY.CRITICAL } },
-    },
-    high: {
-      filter: { term: { 'vulnerability.severity': VULNERABILITIES_SEVERITY.HIGH } },
-    },
-    medium: {
-      filter: { term: { 'vulnerability.severity': VULNERABILITIES_SEVERITY.MEDIUM } },
-    },
-    resources_scanned: {
-      cardinality: {
-        field: 'resource.id',
-      },
-    },
-    cloud_accounts: {
-      cardinality: {
-        field: 'cloud.account.id',
-      },
-    },
-  },
-});
+export const getVulnerabilitiesStatisticsQuery = () =>
+  esql.from([CDR_LATEST_NATIVE_VULNERABILITIES_INDEX_PATTERN]).pipe`STATS
+      critical = COUNT(*) WHERE vulnerability.severity == ${{
+        critical: VULNERABILITIES_SEVERITY.CRITICAL,
+      }},
+      high = COUNT(*) WHERE vulnerability.severity == ${{ high: VULNERABILITIES_SEVERITY.HIGH }},
+      medium = COUNT(*) WHERE vulnerability.severity == ${{
+        medium: VULNERABILITIES_SEVERITY.MEDIUM,
+      }},
+      resources_scanned = COUNT_DISTINCT(resource.id),
+      cloud_accounts = COUNT_DISTINCT(cloud.account.id)`;
 
 export const getVulnerabilitiesStatistics = async (esClient: ElasticsearchClient) => {
-  const queryResult = await esClient.search<unknown, VulnerabilitiesStatisticsQueryResult>(
-    getVulnerabilitiesStatisticsQuery()
-  );
+  const queryResult = await runEsql({ esClient, query: getVulnerabilitiesStatisticsQuery() });
+  const row = esqlRows(queryResult)[0];
 
   return {
-    criticalCount: queryResult.aggregations?.critical.doc_count,
-    highCount: queryResult.aggregations?.high.doc_count,
-    mediumCount: queryResult.aggregations?.medium.doc_count,
-    resourcesScanned: queryResult.aggregations?.resources_scanned.value,
-    cloudAccounts: queryResult.aggregations?.cloud_accounts.value,
+    criticalCount: toCount(row?.critical),
+    highCount: toCount(row?.high),
+    mediumCount: toCount(row?.medium),
+    resourcesScanned: toCount(row?.resources_scanned),
+    cloudAccounts: toCount(row?.cloud_accounts),
   };
 };

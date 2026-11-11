@@ -5,9 +5,6 @@
  * 2.0.
  */
 import type {
-  AggregationsAggregationContainer,
-  AggregationsMaxAggregate,
-  AggregationsMinAggregate,
   AggregationsStringTermsAggregate,
   AggregationsStringTermsBucket,
   BulkOperationContainer,
@@ -15,6 +12,7 @@ import type {
   QueryDslQueryContainer,
 } from '@elastic/elasticsearch/lib/api/types';
 import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { SiemMigrationVendor } from '../../../../../common/siem_migrations/model/common.gen';
 import type {
   MigrationType,
@@ -34,6 +32,8 @@ import type {
   SiemMigrationSort,
 } from './types';
 import { dsl } from './dsl_queries';
+import type { EsqlRow } from '../../../esql/esql_read';
+import { esqlRows, runEsql } from '../../../esql/esql_read';
 
 export type CreateMigrationItemInput<I extends ItemDocument> = Omit<
   I,
@@ -202,30 +202,30 @@ export abstract class SiemMigrationsDataItemClient<
   /** Retrieves the stats for the migrations items with the provided id */
   public async getStats(migrationId: string): Promise<SiemMigrationDataStats> {
     const index = await this.getIndexName();
-    const query = this.getFilterQuery(migrationId, { isEligibleForTranslation: true });
-    const aggregations = {
-      status: { terms: { field: 'status' } },
-      createdAt: { min: { field: '@timestamp' } },
-      lastUpdatedAt: { max: { field: 'updated_at' } },
-    };
+    const filter = this.getFilterQuery(migrationId, { isEligibleForTranslation: true });
 
     const vendor = await this.getVendor(migrationId);
-    const result = await this.esClient
-      .search({ index, query, aggregations, _source: false })
-      .catch((error) => {
-        this.logger.error(`Error getting migration ${this.type} stats: ${error.message}`);
-        throw error;
-      });
+    const response = await runEsql({
+      esClient: this.esClient,
+      query: esql.from([index])
+        .pipe`STATS items = COUNT(*), createdAt = MIN(@timestamp), lastUpdatedAt = MAX(updated_at) BY status`.limit(
+        MAX_ES_SEARCH_SIZE
+      ),
+      filter,
+    }).catch((error) => {
+      this.logger.error(`Error getting migration ${this.type} stats: ${error.message}`);
+      throw error;
+    });
 
-    const aggs = result.aggregations ?? {};
+    const [stats] = this.toMigrationStats(esqlRows(response));
     return {
       id: migrationId,
       items: {
-        total: this.getTotalHits(result),
-        ...this.statusAggCounts(aggs.status as AggregationsStringTermsAggregate),
+        total: stats?.total ?? 0,
+        ...(stats?.statusCounts ?? this.statusCounts([])),
       },
-      created_at: (aggs.createdAt as AggregationsMinAggregate)?.value_as_string ?? '',
-      last_updated_at: (aggs.lastUpdatedAt as AggregationsMaxAggregate)?.value_as_string ?? '',
+      created_at: stats?.createdAt ?? '',
+      last_updated_at: stats?.lastUpdatedAt ?? '',
       vendor,
     };
   }
@@ -233,42 +233,72 @@ export abstract class SiemMigrationsDataItemClient<
   /** Retrieves the stats for all the migration items aggregated by migration id, in creation order */
   async getAllStats(): Promise<SiemMigrationAllDataStats> {
     const index = await this.getIndexName();
-    const aggregations: { migrationIds: AggregationsAggregationContainer } = {
-      migrationIds: {
-        terms: { field: 'migration_id', order: { createdAt: 'asc' }, size: MAX_ES_SEARCH_SIZE },
-        aggregations: {
-          status: { terms: { field: 'status' } },
-          createdAt: { min: { field: '@timestamp' } },
-          lastUpdatedAt: { max: { field: 'updated_at' } },
-        },
-      },
-    };
+    const filter = this.getFilterQuery(undefined, { isEligibleForTranslation: true });
+    const response = await runEsql({
+      esClient: this.esClient,
+      query: esql.from([index])
+        .pipe`STATS items = COUNT(*), createdAt = MIN(@timestamp), lastUpdatedAt = MAX(updated_at) BY migration_id, status`.limit(
+        MAX_ES_SEARCH_SIZE
+      ),
+      filter,
+    }).catch((error) => {
+      this.logger.error(`Error getting all migration ${this.type} stats: ${error.message}`);
+      throw error;
+    });
 
-    const query = this.getFilterQuery(undefined, { isEligibleForTranslation: true });
-    const result = await this.esClient
-      .search({ index, query, aggregations, _source: false })
-      .catch((error) => {
-        this.logger.error(`Error getting all migration ${this.type} stats: ${error.message}`);
-        throw error;
-      });
-
-    const migrationsAgg = result.aggregations?.migrationIds as AggregationsStringTermsAggregate;
-    const buckets = (migrationsAgg?.buckets as AggregationsStringTermsBucket[]) ?? [];
+    const migrations = this.toMigrationStats(esqlRows(response), 'migration_id')
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .slice(0, MAX_ES_SEARCH_SIZE);
     const vendors = await Promise.all(
-      buckets.map(async (bucket) => this.getVendor(`${bucket.key}`))
+      migrations.map(async (migration) => this.getVendor(migration.id))
     );
-    return buckets.map<SiemMigrationDataStats>((bucket, idx) => ({
-      id: `${bucket.key}`,
+    return migrations.map<SiemMigrationDataStats>((migration, idx) => ({
+      id: migration.id,
       vendor: vendors[idx],
       items: {
-        total: bucket.doc_count,
-        ...this.statusAggCounts(bucket.status as AggregationsStringTermsAggregate),
+        total: migration.total,
+        ...migration.statusCounts,
       },
-      created_at: (bucket.createdAt as AggregationsMinAggregate | undefined)
-        ?.value_as_string as string,
-      last_updated_at: (bucket.lastUpdatedAt as AggregationsMaxAggregate | undefined)
-        ?.value_as_string as string,
+      created_at: migration.createdAt,
+      last_updated_at: migration.lastUpdatedAt,
     }));
+  }
+
+  /**
+   * Folds the `STATS ... BY [migration_id,] status` rows into one entry per migration, with the
+   * item counts by status and the earliest creation and latest update.
+   */
+  private toMigrationStats(rows: EsqlRow[], idColumn?: string) {
+    const rowsByMigration = new Map<string, EsqlRow[]>();
+    for (const row of rows) {
+      const id = idColumn ? `${row[idColumn]}` : '';
+      rowsByMigration.set(id, [...(rowsByMigration.get(id) ?? []), row]);
+    }
+    return [...rowsByMigration].map(([id, migrationRows]) => {
+      const dates = (column: string) =>
+        migrationRows.flatMap((row) => (typeof row[column] === 'string' ? [`${row[column]}`] : []));
+      const createdAt = dates('createdAt').sort()[0] ?? '';
+      const lastUpdatedAt = dates('lastUpdatedAt').sort().reverse()[0] ?? '';
+      const statusCounts = this.statusCounts(migrationRows);
+      return {
+        id,
+        total: migrationRows.reduce((sum, row) => sum + Number(row.items ?? 0), 0),
+        statusCounts,
+        createdAt,
+        lastUpdatedAt,
+      };
+    });
+  }
+
+  private statusCounts(rows: EsqlRow[]): Record<SiemMigrationStatus, number> {
+    const countOf = (status: SiemMigrationStatus) =>
+      rows.find((row) => row.status === status)?.items;
+    return {
+      [SiemMigrationStatus.PENDING]: Number(countOf(SiemMigrationStatus.PENDING) ?? 0),
+      [SiemMigrationStatus.PROCESSING]: Number(countOf(SiemMigrationStatus.PROCESSING) ?? 0),
+      [SiemMigrationStatus.COMPLETED]: Number(countOf(SiemMigrationStatus.COMPLETED) ?? 0),
+      [SiemMigrationStatus.FAILED]: Number(countOf(SiemMigrationStatus.FAILED) ?? 0),
+    };
   }
 
   /** Updates one migration item status to `processing` */

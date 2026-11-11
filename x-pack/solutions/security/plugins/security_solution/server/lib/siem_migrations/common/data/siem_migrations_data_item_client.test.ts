@@ -55,70 +55,81 @@ describe('SiemMigrationsDataItemClient', () => {
 
   describe('getStats', () => {
     it('queries ES using isEligibleForTranslation filter', async () => {
-      (
-        esClient.asInternalUser.search as unknown as jest.MockedFn<typeof SearchApi>
-      ).mockResolvedValueOnce({
-        hits: { total: { value: 0 }, hits: [] },
-        aggregations: {
-          status: {
-            buckets: [],
-          },
-        },
-      } as unknown as SearchApiResponse);
+      (esClient.asInternalUser.esql.query as jest.Mock).mockResolvedValueOnce({
+        columns: [],
+        values: [],
+      });
 
-      await client.getStats('mig-1');
+      const stats = await client.getStats('mig-1');
 
-      expect(esClient.asInternalUser.search).toHaveBeenCalledWith({
-        index: '.kibana-siem-rule-migrations-rules-default',
-        query: {
+      expect(esClient.asInternalUser.esql.query).toHaveBeenCalledWith({
+        query:
+          'FROM .kibana-siem-rule-migrations-rules-default | STATS items = COUNT(*), createdAt = MIN(@timestamp), lastUpdatedAt = MAX(updated_at) BY status | LIMIT 10000',
+        filter: {
           bool: {
             filter: [{ term: { migration_id: 'mig-1' } }, dsl.isEligibleForTranslation()],
           },
         },
-        aggregations: {
-          status: { terms: { field: 'status' } },
-          createdAt: { min: { field: '@timestamp' } },
-          lastUpdatedAt: { max: { field: 'updated_at' } },
-        },
-        _source: false,
       });
+      expect(stats).toMatchObject({ items: { total: 0 }, created_at: '', last_updated_at: '' });
     });
   });
 
   describe('getAllStats', () => {
     it('queries ES using eligibility filter', async () => {
-      (
-        esClient.asInternalUser.search as unknown as jest.MockedFn<typeof SearchApi>
-      ).mockResolvedValueOnce({
-        hits: { total: { value: 0 }, hits: [] },
-        aggregations: {
-          migrationIds: {
-            buckets: [],
-          },
-        },
-      } as unknown as SearchApiResponse);
+      (esClient.asInternalUser.esql.query as jest.Mock).mockResolvedValueOnce({
+        columns: [],
+        values: [],
+      });
 
       await client.getAllStats();
 
-      expect(esClient.asInternalUser.search).toHaveBeenCalledWith({
-        index: '.kibana-siem-rule-migrations-rules-default',
-        query: {
-          bool: {
-            filter: [dsl.isEligibleForTranslation()],
-          },
-        },
-        aggregations: {
-          migrationIds: {
-            terms: { field: 'migration_id', order: { createdAt: 'asc' }, size: 10000 },
-            aggregations: {
-              status: { terms: { field: 'status' } },
-              createdAt: { min: { field: '@timestamp' } },
-              lastUpdatedAt: { max: { field: 'updated_at' } },
-            },
-          },
-        },
-        _source: false,
+      expect(esClient.asInternalUser.esql.query).toHaveBeenCalledWith({
+        query:
+          'FROM .kibana-siem-rule-migrations-rules-default | STATS items = COUNT(*), createdAt = MIN(@timestamp), lastUpdatedAt = MAX(updated_at) BY migration_id, status | LIMIT 10000',
+        filter: { bool: { filter: [dsl.isEligibleForTranslation()] } },
       });
+    });
+
+    it('returns the migrations in creation order with their counts by status', async () => {
+      (esClient.asInternalUser.esql.query as jest.Mock).mockResolvedValueOnce({
+        columns: [
+          { name: 'items', type: 'long' },
+          { name: 'createdAt', type: 'date' },
+          { name: 'lastUpdatedAt', type: 'date' },
+          { name: 'migration_id', type: 'keyword' },
+          { name: 'status', type: 'keyword' },
+        ],
+        values: [
+          [4, '2025-02-01T00:00:00.000Z', '2025-02-03T00:00:00.000Z', 'late', 'completed'],
+          [1, '2025-01-01T00:00:00.000Z', '2025-01-02T00:00:00.000Z', 'early', 'pending'],
+          [2, '2025-01-05T00:00:00.000Z', '2025-01-09T00:00:00.000Z', 'early', 'failed'],
+        ],
+      });
+
+      const stats = await client.getAllStats();
+
+      expect(
+        stats.map(({ id, items, created_at: createdAt, last_updated_at: updatedAt }) => ({
+          id,
+          items,
+          createdAt,
+          updatedAt,
+        }))
+      ).toEqual([
+        {
+          id: 'early',
+          items: { total: 3, pending: 1, processing: 0, completed: 0, failed: 2 },
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-09T00:00:00.000Z',
+        },
+        {
+          id: 'late',
+          items: { total: 4, pending: 0, processing: 0, completed: 4, failed: 0 },
+          createdAt: '2025-02-01T00:00:00.000Z',
+          updatedAt: '2025-02-03T00:00:00.000Z',
+        },
+      ]);
     });
   });
 

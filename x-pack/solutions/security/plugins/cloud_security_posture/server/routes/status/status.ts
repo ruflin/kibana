@@ -31,6 +31,7 @@ import type {
   PackagePolicyClient,
   PackageService,
 } from '@kbn/fleet-plugin/server';
+import { esql } from '@elastic/esql';
 import moment from 'moment';
 import type { Installation, PackagePolicy } from '@kbn/fleet-plugin/common';
 import { schema } from '@kbn/config-schema';
@@ -57,6 +58,7 @@ import {
   getInstalledPolicyTemplates,
 } from '../../lib/fleet_util';
 import { checkIndexStatus } from '../../lib/check_index_status';
+import { runEsql } from '../../lib/esql_read';
 
 export const INDEX_TIMEOUT_IN_MINUTES = 10;
 export const INDEX_TIMEOUT_IN_MINUTES_CNVM = 240;
@@ -154,31 +156,21 @@ const checkIndexHasFindings = async (
   logger: Logger
 ) => {
   try {
-    const response = await esClient.search({
-      index,
-      size: 0, // We only need to know if there are any hits, so we don't need to retrieve documents
-      query: {
-        bool: {
-          filter: [
-            {
-              range: {
-                '@timestamp': {
-                  gte: `now-${retentionPolicy}`,
-                  lte: 'now',
-                },
-              },
-            },
-          ],
-        },
-      },
-      ignore_unavailable: true,
+    const [, amount, unit] = /^(\d+)(\w+)$/.exec(retentionPolicy) ?? [];
+    const since = moment()
+      .subtract(Number(amount), unit as moment.unitOfTime.DurationConstructor)
+      .toISOString();
+
+    // We only need to know if there are any rows, so a single one is enough
+    const response = await runEsql({
+      esClient,
+      query: esql.from([index]).pipe`WHERE @timestamp >= TO_DATETIME(${{
+        since,
+      }}) AND @timestamp <= NOW()`.limit(1),
+      ignoreUnknownIndex: true,
     });
 
-    // Check the number of hits
-    const totalHits =
-      typeof response.hits.total === 'object' ? response.hits.total.value : response.hits.total;
-
-    return !!totalHits;
+    return !!response?.values.length;
   } catch (err) {
     logger.error(`Error checking if index ${index} has findings`);
     logger.error(err);

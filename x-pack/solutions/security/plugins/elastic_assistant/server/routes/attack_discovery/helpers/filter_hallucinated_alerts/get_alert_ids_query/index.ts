@@ -5,29 +5,13 @@
  * 2.0.
  */
 
-interface AlertIdsQuery {
-  _source: false;
-  ignore_unavailable: boolean;
-  index: string;
-  query: {
-    ids: {
-      values: string[];
-    };
-  };
-  size: number;
-}
+import { esql } from '@elastic/esql';
 
-export const getAlertIdsQuery = (
-  alertsIndexPattern: string,
-  alertIds: string[]
-): AlertIdsQuery => ({
-  _source: false,
-  ignore_unavailable: true,
-  index: alertsIndexPattern,
-  query: {
-    ids: {
-      values: alertIds,
-    },
-  },
-  size: alertIds.length,
-});
+import { toEsqlSources } from '../../../../../lib/esql_read';
+
+/**
+ * Returns the ES|QL query that gives the _id of each of the given alerts that exists
+ */
+export const getAlertIdsQuery = (alertsIndexPattern: string, alertIds: string[]) =>
+  esql.from(toEsqlSources(alertsIndexPattern), ['_id']).pipe`WHERE _id IN (${{ alertIds }})`
+    .pipe`KEEP _id`.limit(alertIds.length);

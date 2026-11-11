@@ -6,9 +6,10 @@
  */
 
 import { elasticsearchServiceMock } from '@kbn/core-elasticsearch-server-mocks';
+import { ATTACK_DISCOVERY_EVENT_SERVICE_ACCOUNT_TAG } from '@kbn/discoveries';
 
 import { isServiceAccountGeneration } from '.';
-import { getServiceAccountGenerationQuery } from '../get_service_account_generation_query';
+import { ATTACK_DISCOVERY_EVENT_PROVIDER } from '../../../../../common/constants';
 
 const params = {
   eventLogIndex: 'test-event-log-index',
@@ -16,11 +17,9 @@ const params = {
   spaceId: 'test-space-id',
 };
 
-const mockSearchResponse = (total: number | { relation: 'eq'; value: number } | undefined) => ({
-  _shards: { failed: 0, successful: 1, total: 1 },
-  hits: { hits: [], total },
-  timed_out: false,
-  took: 1,
+const mockEsqlResponse = (rows: number) => ({
+  columns: [{ name: '@timestamp', type: 'date' as const }],
+  values: Array.from({ length: rows }, () => ['2026-01-01T00:00:00.000Z']),
 });
 
 describe('isServiceAccountGeneration', () => {
@@ -30,34 +29,48 @@ describe('isServiceAccountGeneration', () => {
     esClient = elasticsearchServiceMock.createElasticsearchClient();
   });
 
-  it('searches with the service account generation query', async () => {
-    esClient.search.mockResolvedValue(mockSearchResponse({ relation: 'eq', value: 0 }));
+  it('queries the service account generation events', async () => {
+    esClient.esql.query.mockResolvedValue(mockEsqlResponse(0));
 
     await isServiceAccountGeneration({ ...params, esClient });
 
-    expect(esClient.search).toHaveBeenCalledWith(getServiceAccountGenerationQuery(params));
+    expect(esClient.esql.query).toHaveBeenCalledWith({
+      query:
+        'FROM test-event-log-index | WHERE event.provider == ?provider AND kibana.alert.rule.execution.uuid == ?executionUuid | LIMIT 1',
+      params: [
+        { provider: ATTACK_DISCOVERY_EVENT_PROVIDER },
+        { executionUuid: 'test-execution-uuid' },
+      ],
+      filter: {
+        bool: {
+          filter: [
+            { term: { 'kibana.space_ids': 'test-space-id' } },
+            { term: { tags: ATTACK_DISCOVERY_EVENT_SERVICE_ACCOUNT_TAG } },
+          ],
+        },
+      },
+    });
   });
 
   it('returns true when a tagged event exists', async () => {
-    esClient.search.mockResolvedValue(mockSearchResponse({ relation: 'eq', value: 1 }));
+    esClient.esql.query.mockResolvedValue(mockEsqlResponse(1));
 
     expect(await isServiceAccountGeneration({ ...params, esClient })).toBe(true);
   });
 
   it('returns false when no tagged event exists', async () => {
-    esClient.search.mockResolvedValue(mockSearchResponse({ relation: 'eq', value: 0 }));
+    esClient.esql.query.mockResolvedValue(mockEsqlResponse(0));
 
     expect(await isServiceAccountGeneration({ ...params, esClient })).toBe(false);
   });
 
-  it('supports a numeric total', async () => {
-    esClient.search.mockResolvedValue(mockSearchResponse(1));
-
-    expect(await isServiceAccountGeneration({ ...params, esClient })).toBe(true);
-  });
-
-  it('returns false when the total is missing', async () => {
-    esClient.search.mockResolvedValue(mockSearchResponse(undefined));
+  it('returns false when the event log index does not exist', async () => {
+    esClient.esql.query.mockRejectedValue(
+      Object.assign(new Error('verification_exception'), {
+        statusCode: 400,
+        body: { error: { type: 'verification_exception', reason: 'Unknown index [x]' } },
+      })
+    );
 
     expect(await isServiceAccountGeneration({ ...params, esClient })).toBe(false);
   });

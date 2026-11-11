@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { z, lazySchema } from '@kbn/zod/v4';
 import { ToolType, ToolResultType } from '@kbn/agent-builder-common';
 import type { BuiltinToolDefinition, ToolAvailabilityContext } from '@kbn/agent-builder-server';
@@ -25,6 +26,7 @@ import type {
   SecuritySolutionPluginCoreSetupDependencies,
   SetupPlugins,
 } from '../../../plugin_contract';
+import { esqlRows, runEsql } from '../../../lib/esql/esql_read';
 import { securityTool } from '../constants';
 import { buildRenderAttachmentTag } from './attachment_utils';
 import { getEntityAnalyticsToolAvailability } from './entity_analytics_availability';
@@ -212,25 +214,25 @@ const searchRiskDocForCandidates = async ({
   const scoreTypeField = `${entityType}.risk.score_type`;
 
   try {
-    const response = await esClient.search<Record<EntityType, { risk: EntityRiskScoreRecord }>>({
-      index: getRiskScoreTimeSeriesIndex(spaceId),
-      ignore_unavailable: true,
-      size: 1,
-      sort: [{ '@timestamp': { order: 'desc' } }],
-      query: {
-        bool: {
-          filter: [
-            { terms: { [idValueField]: idCandidates } },
-            ...(scoreType === 'resolution' ? [{ term: { [scoreTypeField]: 'resolution' } }] : []),
-          ],
-          ...(scoreType === 'base'
-            ? { must_not: [{ term: { [scoreTypeField]: 'resolution' } }] }
-            : {}),
-        },
-      },
+    const withIdValue = esql.from([getRiskScoreTimeSeriesIndex(spaceId)], ['_source'])
+      .pipe`WHERE ${esql.col(idValueField)} IN (${{ idCandidates }})`;
+    // Docs without a score type are base docs, and a missing value does not pass `!=`
+    const withScoreType =
+      scoreType === 'resolution'
+        ? withIdValue.pipe`WHERE ${esql.col(scoreTypeField)} == "resolution"`
+        : withIdValue.pipe`WHERE NOT COALESCE(${esql.col(scoreTypeField)} == "resolution", false)`;
+
+    const response = await runEsql({
+      esClient,
+      query: withScoreType.pipe`SORT @timestamp DESC NULLS LAST`.limit(1),
+      ignoreUnknownIndex: true,
     });
 
-    return response.hits.hits[0]?._source?.[entityType]?.risk;
+    const source = esqlRows(response)[0]?._source as
+      | Partial<Record<EntityType, { risk?: EntityRiskScoreRecord }>>
+      | null
+      | undefined;
+    return source?.[entityType]?.risk;
   } catch (error) {
     logger.debug(
       `Failed to fetch ${scoreType} risk score for attachment ${debugLabel}: ${

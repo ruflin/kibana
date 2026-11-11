@@ -6,6 +6,7 @@
  */
 
 import { v4 as uuidV4 } from 'uuid';
+import { esql } from '@elastic/esql';
 import type { BulkOperationContainer } from '@elastic/elasticsearch/lib/api/types';
 import type { RuleMigrationLastExecution } from '../../../../../common/siem_migrations/model/rule_migration.gen';
 import type { MigrationDocument, Stored } from '../types';
@@ -13,6 +14,7 @@ import { SiemMigrationsDataBaseClient } from './siem_migrations_data_base_client
 import { isNotFoundError } from '../api/util/is_not_found_error';
 import { MAX_ES_SEARCH_SIZE } from './constants';
 import { MIGRATION_ID_NOT_FOUND } from '../translations';
+import { esqlRows, runEsql } from '../../../esql/esql_read';
 
 export class SiemMigrationsDataMigrationClient<
   M extends MigrationDocument = MigrationDocument
@@ -62,14 +64,19 @@ export class SiemMigrationsDataMigrationClient<
    */
   async getAll(): Promise<Stored<M>[]> {
     const index = await this.getIndexName();
-    return this.esClient
-      .search<Stored<M>>({
-        index,
-        size: MAX_ES_SEARCH_SIZE, // Adjust size as needed
-        query: { match_all: {} },
-        _source: true,
-      })
-      .then((result) => this.processResponseHits(result))
+    return runEsql({
+      esClient: this.esClient,
+      query: esql.from([index], ['_id', '_source']).limit(MAX_ES_SEARCH_SIZE), // Adjust size as needed
+    })
+      .then((response) =>
+        this.processHits(
+          esqlRows(response).map(({ _id, _source }) => ({
+            _index: index,
+            _id: typeof _id === 'string' ? _id : undefined,
+            _source: _source as Stored<M>,
+          }))
+        )
+      )
       .catch((error) => {
         this.logger.error(`Error getting all migrations:- ${error}`);
         throw error;

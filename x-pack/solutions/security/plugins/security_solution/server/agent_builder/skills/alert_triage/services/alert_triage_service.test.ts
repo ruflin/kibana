@@ -28,25 +28,40 @@ interface AlertSearchParams {
   query: { bool: { filter: Array<Record<string, unknown>> } };
 }
 
+/** An ES|QL response with one row per `fields`-shaped hit (single values are scalars). */
+const toEsqlResponse = (hits: Array<{ fields: Record<string, unknown[]> }>) => {
+  const columns = [...new Set(hits.flatMap((hit) => Object.keys(hit.fields)))];
+  return {
+    columns: columns.map((name) => ({ name, type: 'keyword' })),
+    values: hits.map((hit) =>
+      columns.map((name) => {
+        const value = hit.fields[name];
+        return value === undefined ? null : value.length === 1 ? value[0] : value;
+      })
+    ),
+  };
+};
+
 /**
- * ES client mock that routes `search` by target index: the alerts index returns scored
- * alert hits, the risk-score-latest index returns entity risk docs, and the
- * asset-criticality index returns criticality docs. The returned `search` jest mock is
- * exposed so tests can assert on the query sent to the alerts index.
+ * ES client mock: `search` returns the scored alert hits, and `esql.query` routes by target
+ * index: the risk-score-latest index returns entity risk docs and the asset-criticality index
+ * returns criticality docs. The `search` jest mock is exposed so tests can assert on the query
+ * sent to the alerts index.
  */
 const createEsClient = (data: MockData): { esClient: ElasticsearchClient; search: jest.Mock } => {
-  const search = jest.fn(async (params: { index: string }) => {
-    if (params.index.startsWith('risk-score.')) {
+  const search = jest.fn(async () => ({ hits: { hits: data.alerts } }));
+  const query = jest.fn(async (params: { query: string }) => {
+    if (params.query.startsWith('FROM risk-score.')) {
       if (data.riskThrows) throw new Error('risk index missing');
-      return { hits: { hits: data.risk ?? [] } };
+      return toEsqlResponse(data.risk ?? []);
     }
-    if (params.index.startsWith('.asset-criticality.')) {
+    if (params.query.startsWith('FROM .asset-criticality.')) {
       if (data.criticalityThrows) throw new Error('criticality index missing');
-      return { hits: { hits: data.criticality ?? [] } };
+      return toEsqlResponse(data.criticality ?? []);
     }
-    return { hits: { hits: data.alerts } };
+    throw new Error(`unexpected ES|QL query: ${params.query}`);
   });
-  return { esClient: { search } as unknown as ElasticsearchClient, search };
+  return { esClient: { search, esql: { query } } as unknown as ElasticsearchClient, search };
 };
 
 /** Returns the query bool.filter clauses sent to the alerts index (first search call). */
@@ -106,6 +121,24 @@ describe('prioritizeAlerts', () => {
       const { esClient } = createEsClient({ alerts: [criticalLateralMovementHit] });
       const result = await prioritizeAlerts({ ...defaultArgs, esClient });
       expect(result.totalAlertsFetched).toBe(1);
+    });
+  });
+
+  describe('entity enrichment queries', () => {
+    it('reads risk scores and asset criticality with ES|QL for the distinct hosts and users', async () => {
+      const { esClient } = createEsClient({ alerts: [criticalLateralMovementHit] });
+      await prioritizeAlerts({ ...defaultArgs, esClient });
+
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query:
+          'FROM risk-score.risk-score-latest-default | WHERE (host.name IN (?hostNames)) OR (user.name IN (?userNames)) | KEEP `host.name`, `host.risk.calculated_level`, `host.risk.calculated_score_norm`, `user.name`, `user.risk.calculated_level`, `user.risk.calculated_score_norm` | LIMIT 2',
+        params: [{ hostNames: ['EVAL-DC01'] }, { userNames: ['Administrator'] }],
+      });
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query:
+          'FROM .asset-criticality.asset-criticality-default | WHERE id_field == "host.name" AND (id_value IN (?hostNames)) OR id_field == "user.name" AND (id_value IN (?userNames)) | KEEP id_field, id_value, criticality_level | LIMIT 2',
+        params: [{ hostNames: ['EVAL-DC01'] }, { userNames: ['Administrator'] }],
+      });
     });
   });
 

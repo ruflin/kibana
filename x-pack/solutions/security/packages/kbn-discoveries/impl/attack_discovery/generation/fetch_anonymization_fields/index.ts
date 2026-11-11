@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import type { AnonymizationFieldResponse } from '@kbn/elastic-assistant-common/impl/schemas';
 
@@ -33,29 +34,28 @@ export const fetchAnonymizationFields = async ({
   let fields: AnonymizationFieldResponse[];
 
   try {
-    const response = await esClient.search({
-      index,
-      query: { match_all: {} },
-      size: 1000,
+    const response = await esClient.esql.query({
+      query: esql.from([index], ['_id', '_source']).limit(1000).print('basic'),
     });
 
-    fields = response.hits.hits
-      .filter((hit) => hit._source !== undefined)
-      .map((hit) => {
-        const source = hit._source as Record<string, unknown>;
-        return {
+    fields = response.values.flatMap(([id, rawSource]) => {
+      if (rawSource == null || typeof rawSource !== 'object') return [];
+      const source = rawSource as Record<string, unknown>;
+      return [
+        {
           allowed: source.allowed as boolean,
           anonymized: source.anonymized as boolean,
           createdAt: source.created_at as string | undefined,
           createdBy: source.created_by as string | undefined,
           field: source.field as string,
-          id: hit._id ?? '',
+          id: typeof id === 'string' ? id : '',
           namespace: source.namespace as string | undefined,
           timestamp: source['@timestamp'] as string | undefined,
           updatedAt: source.updated_at as string | undefined,
           updatedBy: source.updated_by as string | undefined,
-        };
-      });
+        },
+      ];
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
 

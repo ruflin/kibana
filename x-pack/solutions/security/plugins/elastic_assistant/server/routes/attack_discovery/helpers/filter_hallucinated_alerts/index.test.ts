@@ -5,7 +5,6 @@
  * 2.0.
  */
 
-import type { estypes } from '@elastic/elasticsearch';
 import { elasticsearchServiceMock } from '@kbn/core/server/mocks';
 import type { AttackDiscovery } from '@kbn/elastic-assistant-common';
 import { loggerMock } from '@kbn/logging-mocks';
@@ -14,6 +13,16 @@ import { filterHallucinatedAlerts } from '.';
 
 const mockEsClient = elasticsearchServiceMock.createElasticsearchClient();
 const mockLogger = loggerMock.create();
+
+const mockExistingAlerts = (ids: string[]) =>
+  mockEsClient.esql.query.mockResolvedValue({
+    columns: [{ name: '_id', type: 'keyword' }],
+    values: ids.map((id) => [id]),
+  });
+
+const getRequest = () =>
+  mockEsClient.esql.query.mock.calls[0][0] as unknown as { query: string; params?: unknown[] };
+const getQueriedIds = () => (getRequest().params?.[0] as { alertIds: string[] }).alertIds;
 
 describe('filterHallucinatedAlerts', () => {
   const alertsIndexPattern = '.alerts-security.alerts-*';
@@ -63,20 +72,16 @@ describe('filterHallucinatedAlerts', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     // Default: all alerts exist
-    mockEsClient.search.mockResponse({
-      hits: {
-        hits: [
-          { _id: 'alert-1' },
-          { _id: 'alert-2' },
-          { _id: 'alert-3' },
-          { _id: 'alert-4' },
-          { _id: 'alert-5' },
-          { _id: 'alert-6' },
-          { _id: 'alert-7' },
-          { _id: 'alert-8' },
-        ],
-      },
-    } as unknown as estypes.SearchResponse);
+    mockExistingAlerts([
+      'alert-1',
+      'alert-2',
+      'alert-3',
+      'alert-4',
+      'alert-5',
+      'alert-6',
+      'alert-7',
+      'alert-8',
+    ]);
   });
 
   describe('when no discoveries are provided', () => {
@@ -95,7 +100,7 @@ describe('filterHallucinatedAlerts', () => {
         attackDiscoveries: [],
       });
 
-      expect(mockEsClient.search).not.toHaveBeenCalled();
+      expect(mockEsClient.esql.query).not.toHaveBeenCalled();
     });
   });
 
@@ -115,79 +120,57 @@ describe('filterHallucinatedAlerts', () => {
     it('queries ES with the correct index pattern', async () => {
       await filterHallucinatedAlerts(defaultProps);
 
-      expect(mockEsClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: alertsIndexPattern,
-        })
-      );
+      expect(getRequest().query).toMatch(/^FROM \.alerts-security\.alerts-\* METADATA _id \|/);
     });
 
     it('queries ES with the correct size', async () => {
       await filterHallucinatedAlerts(defaultProps);
 
-      expect(mockEsClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          size: 8,
-        })
+      expect(getRequest().query).toMatch(/\| LIMIT 8$/);
+    });
+
+    it('queries ES with the ids filter containing all unique alert IDs', async () => {
+      await filterHallucinatedAlerts(defaultProps);
+
+      expect(getRequest().query).toContain('WHERE _id IN (?alertIds)');
+      expect(getQueriedIds()).toEqual(
+        expect.arrayContaining([
+          'alert-1',
+          'alert-2',
+          'alert-3',
+          'alert-4',
+          'alert-5',
+          'alert-6',
+          'alert-7',
+          'alert-8',
+        ])
       );
     });
 
-    it('queries ES with the ids query containing all unique alert IDs', async () => {
+    it('queries ES for the _id column only', async () => {
       await filterHallucinatedAlerts(defaultProps);
 
-      const searchCall = mockEsClient.search.mock.calls[0][0] as estypes.SearchRequest;
-      expect(searchCall.query).toEqual({
-        ids: {
-          values: expect.arrayContaining([
-            'alert-1',
-            'alert-2',
-            'alert-3',
-            'alert-4',
-            'alert-5',
-            'alert-6',
-            'alert-7',
-            'alert-8',
-          ]),
-        },
-      });
+      expect(getRequest().query).toContain('| KEEP _id |');
     });
 
-    it('queries ES with _source set to false', async () => {
-      await filterHallucinatedAlerts(defaultProps);
-
-      expect(mockEsClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          _source: false,
+    it('returns no existing alert when the alerts index does not exist', async () => {
+      mockEsClient.esql.query.mockRejectedValueOnce(
+        Object.assign(new Error('verification_exception'), {
+          statusCode: 400,
+          body: { error: { type: 'verification_exception', reason: 'Unknown index [x]' } },
         })
       );
-    });
 
-    it('queries ES with ignore_unavailable set to true', async () => {
-      await filterHallucinatedAlerts(defaultProps);
+      const result = await filterHallucinatedAlerts(defaultProps);
 
-      expect(mockEsClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          ignore_unavailable: true,
-        })
-      );
+      expect(result).toEqual([]);
     });
   });
 
   describe('when some alert IDs do not exist', () => {
     beforeEach(() => {
       // Only alerts 1, 2, 3, 4, 5 exist (discovery 3's alerts are missing)
-      mockEsClient.search.mockResponse({
-        hits: {
-          hits: [
-            { _id: 'alert-1' },
-            { _id: 'alert-2' },
-            { _id: 'alert-3' },
-            { _id: 'alert-4' },
-            { _id: 'alert-5' },
-            // alert-6, alert-7, alert-8 are missing
-          ],
-        },
-      } as unknown as estypes.SearchResponse);
+      mockExistingAlerts(['alert-1', 'alert-2', 'alert-3', 'alert-4', 'alert-5']);
     });
 
     it('returns only discoveries with all alert IDs present', async () => {
@@ -214,20 +197,15 @@ describe('filterHallucinatedAlerts', () => {
   describe('when only one alert ID is missing from a discovery', () => {
     beforeEach(() => {
       // alert-3 is missing from discovery 1
-      mockEsClient.search.mockResponse({
-        hits: {
-          hits: [
-            { _id: 'alert-1' },
-            { _id: 'alert-2' },
-            // alert-3 is missing
-            { _id: 'alert-4' },
-            { _id: 'alert-5' },
-            { _id: 'alert-6' },
-            { _id: 'alert-7' },
-            { _id: 'alert-8' },
-          ],
-        },
-      } as unknown as estypes.SearchResponse);
+      mockExistingAlerts([
+        'alert-1',
+        'alert-2',
+        'alert-4',
+        'alert-5',
+        'alert-6',
+        'alert-7',
+        'alert-8',
+      ]);
     });
 
     it('filters out the discovery with the missing alert ID', async () => {
@@ -257,17 +235,7 @@ describe('filterHallucinatedAlerts', () => {
 
   describe('when multiple discoveries have missing alert IDs', () => {
     beforeEach(() => {
-      mockEsClient.search.mockResponse({
-        hits: {
-          hits: [
-            { _id: 'alert-1' },
-            { _id: 'alert-2' },
-            { _id: 'alert-3' },
-            // alert-4, alert-5 missing (discovery 2)
-            // alert-6, alert-7, alert-8 missing (discovery 3)
-          ],
-        },
-      } as unknown as estypes.SearchResponse);
+      mockExistingAlerts(['alert-1', 'alert-2', 'alert-3']);
     });
 
     it('logs information about filtered discoveries', async () => {
@@ -281,11 +249,7 @@ describe('filterHallucinatedAlerts', () => {
 
   describe('when all alert IDs are hallucinated', () => {
     beforeEach(() => {
-      mockEsClient.search.mockResponse({
-        hits: {
-          hits: [],
-        },
-      } as unknown as estypes.SearchResponse);
+      mockExistingAlerts([]);
     });
 
     it('returns empty array', async () => {
@@ -319,8 +283,7 @@ describe('filterHallucinatedAlerts', () => {
           attackDiscoveries: [discoveryWithDuplicates],
         });
 
-        const searchCall = mockEsClient.search.mock.calls[0][0] as estypes.SearchRequest;
-        const queryValues = (searchCall.query as { ids: { values: string[] } }).ids.values;
+        const queryValues = getQueriedIds();
 
         expect(queryValues).toHaveLength(3);
       });
@@ -331,8 +294,7 @@ describe('filterHallucinatedAlerts', () => {
           attackDiscoveries: [discoveryWithDuplicates],
         });
 
-        const searchCall = mockEsClient.search.mock.calls[0][0] as estypes.SearchRequest;
-        const queryValues = (searchCall.query as { ids: { values: string[] } }).ids.values;
+        const queryValues = getQueriedIds();
 
         expect(new Set(queryValues).size).toBe(3);
       });
@@ -361,8 +323,7 @@ describe('filterHallucinatedAlerts', () => {
           attackDiscoveries: [discovery1, discovery2],
         });
 
-        const searchCall = mockEsClient.search.mock.calls[0][0] as estypes.SearchRequest;
-        const queryValues = (searchCall.query as { ids: { values: string[] } }).ids.values;
+        const queryValues = getQueriedIds();
 
         expect(queryValues).toHaveLength(3);
       });
@@ -373,8 +334,7 @@ describe('filterHallucinatedAlerts', () => {
           attackDiscoveries: [discovery1, discovery2],
         });
 
-        const searchCall = mockEsClient.search.mock.calls[0][0] as estypes.SearchRequest;
-        const queryValues = (searchCall.query as { ids: { values: string[] } }).ids.values;
+        const queryValues = getQueriedIds();
 
         expect(new Set(queryValues).size).toBe(3);
       });
@@ -384,7 +344,7 @@ describe('filterHallucinatedAlerts', () => {
   describe('error handling', () => {
     it('throws error when ES query fails', async () => {
       const error = new Error('ES query failed');
-      mockEsClient.search.mockRejectedValue(error);
+      mockEsClient.esql.query.mockRejectedValue(error);
 
       await expect(filterHallucinatedAlerts(defaultProps)).rejects.toThrow('ES query failed');
     });
@@ -415,8 +375,7 @@ describe('filterHallucinatedAlerts', () => {
           attackDiscoveries: [discoveryWithNoAlerts, mockDiscovery1],
         });
 
-        const searchCall = mockEsClient.search.mock.calls[0][0] as estypes.SearchRequest;
-        const queryValues = (searchCall.query as { ids: { values: string[] } }).ids.values;
+        const queryValues = getQueriedIds();
 
         expect(queryValues).toEqual(expect.arrayContaining(['alert-1', 'alert-2', 'alert-3']));
       });
@@ -483,7 +442,7 @@ describe('filterHallucinatedAlerts', () => {
           attackDiscoveries: [discoveryWithNoAlerts1, discoveryWithNoAlerts2],
         });
 
-        expect(mockEsClient.search).not.toHaveBeenCalled();
+        expect(mockEsClient.esql.query).not.toHaveBeenCalled();
       });
 
       it('logs info message about all discoveries being filtered', async () => {
