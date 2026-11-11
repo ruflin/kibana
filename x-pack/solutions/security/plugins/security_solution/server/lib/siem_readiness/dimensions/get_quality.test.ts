@@ -10,7 +10,7 @@ import type { Logger } from '@kbn/logging';
 import { getQuality } from './get_quality';
 
 const esClient = {
-  search: jest.fn(),
+  esql: { query: jest.fn() },
 } as unknown as ElasticsearchClient;
 const logger = { error: jest.fn(), warn: jest.fn(), info: jest.fn() } as unknown as Logger;
 
@@ -40,13 +40,30 @@ const makeSearchHit = (indexName: string, incompatibleFieldCount = 0) => ({
 });
 
 const mockSearchResponse = (hits: ReturnType<typeof makeSearchHit>[]) => {
-  (esClient.search as jest.Mock).mockResolvedValueOnce({
-    hits: { hits },
+  (esClient.esql.query as jest.Mock).mockResolvedValueOnce({
+    columns: [{ name: '_source', type: '_source' }],
+    values: hits.map((hit) => [hit._source]),
   });
 };
 
 describe('getQuality', () => {
   beforeEach(() => jest.clearAllMocks());
+
+  it('reads the newest results first and keeps one per index', async () => {
+    mockSearchResponse([makeSearchHit('logs-a', 3), makeSearchHit('logs-a', 0)]);
+
+    const result = await getQuality({ esClient, logger });
+
+    expect(esClient.esql.query).toHaveBeenCalledWith(
+      {
+        query:
+          'FROM .kibana-data-quality-dashboard-results-* METADATA _source | SORT checkedAt DESC | KEEP _source | LIMIT 10000',
+        params: [],
+      },
+      { signal: undefined }
+    );
+    expect(result.status).toBe('actionsRequired');
+  });
 
   describe('status', () => {
     it('returns noData when there are no quality results', async () => {
@@ -107,7 +124,7 @@ describe('getQuality', () => {
     });
 
     it('returns no findings when esClient throws (graceful degradation)', async () => {
-      (esClient.search as jest.Mock).mockRejectedValueOnce(new Error('ES unavailable'));
+      (esClient.esql.query as jest.Mock).mockRejectedValueOnce(new Error('ES unavailable'));
       const result = await getQuality({ esClient, logger });
       expect(result.status).toBe('noData');
       expect(result.actionableFindings).toHaveLength(0);

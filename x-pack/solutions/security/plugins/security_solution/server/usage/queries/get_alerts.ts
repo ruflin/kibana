@@ -5,19 +5,16 @@
  * 2.0.
  */
 
-import type {
-  OpenPointInTimeResponse,
-  AggregationsCompositeAggregation,
-  SearchRequest,
-} from '@elastic/elasticsearch/lib/api/types';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
-import { ALERT_RULE_UUID } from '@kbn/rule-data-utils';
-import type { AlertBucket, AlertAggs } from '../types';
+import { esql } from '@elastic/esql';
+import type { AlertBucket } from '../types';
+import { esqlRows, runEsqlRead, toCount } from '../../utils/esql/esql_read';
 
 export interface GetAlertsOptions {
   esClient: ElasticsearchClient;
   signalsIndex: string;
   maxSize: number;
+  /** Kept for the callers: one ES|QL query returns up to `maxSize` buckets, so nothing is paged. */
   maxPerPage: number;
   logger: Logger;
 }
@@ -26,90 +23,22 @@ export const getAlerts = async ({
   esClient,
   signalsIndex,
   maxSize,
-  maxPerPage,
   logger,
 }: GetAlertsOptions): Promise<AlertBucket[]> => {
-  // default is from looking at Kibana saved objects and online documentation
-  const keepAlive = '5m';
+  // `maxSize` is the 10,000 result window, which is also the ES|QL result cap, so there is
+  // nothing to page. Buckets sort by rule uuid, as the composite aggregation did.
+  const query = esql.from([signalsIndex])
+    .pipe`WHERE @timestamp >= NOW() - 24 hours AND @timestamp <= NOW()`
+    .pipe`STATS doc_count = COUNT(*) BY rule_uuid = kibana.alert.rule.uuid`
+    .pipe`WHERE rule_uuid IS NOT NULL`.pipe`SORT rule_uuid ASC`.limit(maxSize);
+  logger.debug(() => `Getting alerts with ES|QL query: ${query.print('basic')}`);
 
-  // create and assign an initial point in time
-  let pitId: OpenPointInTimeResponse['id'] = (
-    await esClient.openPointInTime({
-      index: signalsIndex,
-      keep_alive: keepAlive,
-    })
-  ).id;
-
-  let after: AggregationsCompositeAggregation['after'];
-  let buckets: AlertBucket[] = [];
-  let fetchMore = true;
-  while (fetchMore) {
-    const ruleSearchOptions: SearchRequest = {
-      aggs: {
-        buckets: {
-          composite: {
-            size: Math.min(maxPerPage, maxSize - buckets.length),
-            sources: [
-              {
-                detectionAlerts: {
-                  terms: {
-                    field: ALERT_RULE_UUID,
-                  },
-                },
-              },
-            ],
-            after,
-          },
-        },
-      },
-      query: {
-        bool: {
-          filter: [
-            {
-              range: {
-                '@timestamp': {
-                  gte: 'now-24h',
-                  lte: 'now',
-                },
-              },
-            },
-          ],
-        },
-      },
-      track_total_hits: false,
-      sort: [{ _shard_doc: 'desc' }] as unknown as string[], // TODO: Remove this "unknown" once it is typed correctly https://github.com/elastic/elasticsearch-js/issues/1589
-      pit: { id: pitId },
-      size: 0,
-    };
-    logger.debug(
-      () => `Getting alerts with point in time (PIT) query: ${JSON.stringify(ruleSearchOptions)}`
-    );
-    const body = await esClient.search<unknown, AlertAggs>(ruleSearchOptions);
-    if (body.aggregations?.buckets?.buckets != null) {
-      buckets = [...buckets, ...body.aggregations.buckets.buckets];
-    }
-    if (body.aggregations?.buckets?.after_key != null) {
-      after = {
-        detectionAlerts: body.aggregations.buckets.after_key.detectionAlerts,
-      };
-    }
-
-    fetchMore =
-      body.aggregations?.buckets?.buckets != null &&
-      body.aggregations?.buckets?.buckets.length !== 0 &&
-      buckets.length < maxSize;
-    if (body.pit_id != null) {
-      pitId = body.pit_id;
-    }
-  }
-  try {
-    await esClient.closePointInTime({ id: pitId });
-  } catch (error) {
-    // Don't fail due to a bad point in time closure. We have seen failures in e2e tests during nominal operations.
-    logger.warn(
-      `Error trying to close point in time: "${pitId}", it will expire within "${keepAlive}". Error is: "${error}"`
-    );
-  }
+  const response = await runEsqlRead({ esClient, query, tolerateUnknownIndex: false });
+  const buckets = esqlRows(response).flatMap((row) =>
+    typeof row.rule_uuid === 'string'
+      ? [{ key: { detectionAlerts: row.rule_uuid }, doc_count: toCount(row.doc_count) }]
+      : []
+  );
   logger.debug(`Returning alerts response of length: "${buckets.length}"`);
   return buckets;
 };

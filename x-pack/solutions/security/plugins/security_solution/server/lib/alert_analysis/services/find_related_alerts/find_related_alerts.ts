@@ -6,9 +6,10 @@
  */
 
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
+import { esqlRows, runEsqlRead } from '../../../../utils/esql/esql_read';
 import {
   extractSourceEntitiesFromAlert,
-  RELATED_ALERT_ENTITY_SOURCE_INCLUDES,
   RELATED_ALERT_SOURCE_ALLOWLIST,
   trimEntityValues,
   type SourceEntities,
@@ -252,20 +253,21 @@ const getAlertSourceEntities = async (
   alertsIndex: string,
   alertId: string
 ): Promise<SourceEntities | null> => {
-  const searchResult = await esClient.search<Record<string, unknown>>({
-    index: alertsIndex,
-    size: 1,
-    query: { ids: { values: [alertId] } },
-    _source: [...RELATED_ALERT_ENTITY_SOURCE_INCLUDES],
-    ignore_unavailable: true,
+  // `_source` keeps the lookup independent of which entity fields the alert index maps. A missing
+  // index is an empty result, as `ignore_unavailable` made it.
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([alertsIndex], ['_id', '_source']).where`_id == ${{ alertId }}`
+      .keep('_source')
+      .limit(1),
   });
 
-  const alertSource = searchResult.hits.hits[0]?._source;
-  if (!alertSource) {
+  const alertSource = esqlRows(response)[0]?._source;
+  if (alertSource === null || typeof alertSource !== 'object') {
     return null;
   }
 
-  return extractSourceEntitiesFromAlert(alertSource);
+  return extractSourceEntitiesFromAlert(alertSource as Record<string, unknown>);
 };
 
 const getErrorMessage = (error: unknown): string =>

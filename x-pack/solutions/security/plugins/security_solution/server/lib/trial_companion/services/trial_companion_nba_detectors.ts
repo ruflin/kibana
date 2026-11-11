@@ -10,8 +10,29 @@ import type { PackageService } from '@kbn/fleet-plugin/server';
 import type { CollectorFetchContext, ICollectorSet } from '@kbn/usage-collection-plugin/server';
 import { CASE_SAVED_OBJECT } from '@kbn/cases-plugin/common/constants';
 import { SavedSearchType } from '@kbn/saved-search-plugin/common';
+import { esql } from '@elastic/esql';
 import type { DetectorF } from '../types';
+import { esqlRows, runEsqlRead, toCount } from '../../../utils/esql/esql_read';
 import { Milestone } from '../../../../common/trial_companion/types';
+
+/**
+ * Counts documents with ES|QL. A pattern that matches no index is an error in ES|QL, where the
+ * count API returned 0, so a missing index counts as 0.
+ */
+const countDocs = async (
+  esClient: ElasticsearchClient,
+  index: string,
+  /** When set, only documents whose date field is within the last 30 days count. */
+  last30DaysField?: string
+): Promise<number> => {
+  const source = esql.from([index]);
+  const query = (last30DaysField
+    ? source.pipe`WHERE ${esql.col(last30DaysField)} >= NOW() - 30 days`
+    : source
+  ).pipe`STATS total = COUNT(*)`;
+  const response = await runEsqlRead({ esClient, query });
+  return toCount(esqlRows(response)[0]?.total);
+};
 
 export interface UsageCollectorDeps {
   logger: Logger;
@@ -51,12 +72,10 @@ export const installedPackagesM1 = (
         }, installed package names: ${nonDefaultPackages.join(', ')}`
       );
 
-      const agentLogs = await esClient.count({
-        index: 'logs-elastic_agent*',
-      });
-      logger.debug(`agentLogs: ${JSON.stringify(agentLogs)}`);
+      const agentLogsCount = await countDocs(esClient, 'logs-elastic_agent*');
+      logger.debug(`agentLogs: ${JSON.stringify({ count: agentLogsCount })}`);
 
-      if (nonDefaultPackages.length === 0 || !agentLogs.count || agentLogs.count === 0) {
+      if (nonDefaultPackages.length === 0 || agentLogsCount === 0) {
         return Milestone.M1;
       }
       return undefined;
@@ -131,44 +150,17 @@ export const savedDiscoverySessionsM2 = (deps: UsageCollectorDeps): DetectorF =>
 
 export const aiFeaturesM5 = (esClient: ElasticsearchClient): DetectorF => {
   return async (): Promise<Milestone | undefined> => {
-    const deltaT = 'now-30d';
-    const attackDiscoveryResponse = await esClient.count({
-      index: '.alerts-security.attack.discovery.alerts-*',
-      query: {
-        range: {
-          '@timestamp': {
-            gte: deltaT,
-          },
-        },
-      },
-    });
-    if (attackDiscoveryResponse.count > 0) {
+    if (
+      (await countDocs(esClient, '.alerts-security.attack.discovery.alerts-*', '@timestamp')) > 0
+    ) {
       return undefined;
     }
-    const aiAssistantResponse = await esClient.count({
-      index: '.kibana-elastic-ai-assistant-conversations-*',
-      query: {
-        range: {
-          '@timestamp': {
-            gte: deltaT,
-          },
-        },
-      },
-    });
-    if (aiAssistantResponse.count > 0) {
+    if (
+      (await countDocs(esClient, '.kibana-elastic-ai-assistant-conversations-*', '@timestamp')) > 0
+    ) {
       return undefined;
     }
-    const aiChatsResponse = await esClient.count({
-      index: '.chat-conversations*',
-      query: {
-        range: {
-          updated_at: {
-            gte: deltaT,
-          },
-        },
-      },
-    });
-    if (aiChatsResponse.count > 0) {
+    if ((await countDocs(esClient, '.chat-conversations*', 'updated_at')) > 0) {
       return undefined;
     }
     return Milestone.M5;

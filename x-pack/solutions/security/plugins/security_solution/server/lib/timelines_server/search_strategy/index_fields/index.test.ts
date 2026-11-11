@@ -237,10 +237,15 @@ describe('Index Fields', () => {
   });
 });
 
+const apmCount = (total: number) => ({
+  columns: [{ name: 'total', type: 'long' }],
+  values: [[total]],
+});
+
 describe('Fields Provider', () => {
   describe('search', () => {
     const getFieldsForWildcardMock = jest.fn();
-    const esClientSearchMock = jest.fn();
+    const esClientEsqlMock = jest.fn();
     const esClientFieldCapsMock = jest.fn();
     const mockPattern = {
       title: 'coolbro',
@@ -272,12 +277,14 @@ describe('Fields Provider', () => {
     ]);
 
     const depsCurrentESUser = {
-      esClient: { asCurrentUser: { search: esClientSearchMock, fieldCaps: esClientFieldCapsMock } },
+      esClient: {
+        asCurrentUser: { esql: { query: esClientEsqlMock }, fieldCaps: esClientFieldCapsMock },
+      },
     } as unknown as SearchStrategyDependencies;
 
     const depsInternalESUser = {
       esClient: {
-        asInternalUser: { search: esClientSearchMock, fieldCaps: esClientFieldCapsMock },
+        asInternalUser: { esql: { query: esClientEsqlMock }, fieldCaps: esClientFieldCapsMock },
       },
     } as unknown as SearchStrategyDependencies;
 
@@ -288,14 +295,14 @@ describe('Fields Provider', () => {
       beforeAll(() => {
         getFieldsForWildcardMock.mockResolvedValue([]);
 
-        esClientSearchMock.mockResolvedValue({ hits: { total: { value: 123 } } });
+        esClientEsqlMock.mockResolvedValue(apmCount(123));
         esClientFieldCapsMock.mockResolvedValue({ indices: ['value'] });
         IndexPatternsFetcher.prototype.getFieldsForWildcard = getFieldsForWildcardMock;
       });
 
       beforeEach(() => {
         getFieldsForWildcardMock.mockClear();
-        esClientSearchMock.mockClear();
+        esClientEsqlMock.mockClear();
         esClientFieldCapsMock.mockClear();
       });
 
@@ -409,7 +416,7 @@ describe('Fields Provider', () => {
           onlyCheckIfIndicesExist: true,
         };
 
-        esClientSearchMock.mockResolvedValue({ hits: { total: { value: 1 } } });
+        esClientEsqlMock.mockResolvedValue(apmCount(1));
         const response = await requestIndexFieldSearchHandler(
           request,
           deps,
@@ -418,16 +425,14 @@ describe('Fields Provider', () => {
           useInternalUser
         );
 
-        expect(esClientSearchMock).toHaveBeenCalledWith({
-          index: indices[0],
-          query: { match_all: {} },
-          size: 0,
-        });
-        expect(esClientSearchMock).toHaveBeenCalledWith({
-          index: indices[1],
-          query: { match_all: {} },
-          size: 0,
-        });
+        expect(esClientEsqlMock).toHaveBeenCalledWith(
+          { query: `FROM ${indices[0]} | LIMIT 1 | STATS total = COUNT(*)`, params: [] },
+          { signal: undefined }
+        );
+        expect(esClientEsqlMock).toHaveBeenCalledWith(
+          { query: `FROM ${indices[1]} | LIMIT 1 | STATS total = COUNT(*)`, params: [] },
+          { signal: undefined }
+        );
         expect(getFieldsForWildcardMock).not.toHaveBeenCalled();
 
         expect(response.indexFields).toHaveLength(0);
@@ -441,9 +446,7 @@ describe('Fields Provider', () => {
           onlyCheckIfIndicesExist: true,
         };
 
-        esClientSearchMock.mockResolvedValue({
-          body: { hits: { total: { value: 0 } } },
-        });
+        esClientEsqlMock.mockResolvedValue(apmCount(0));
 
         const response = await requestIndexFieldSearchHandler(
           request,
@@ -453,16 +456,14 @@ describe('Fields Provider', () => {
           useInternalUser
         );
 
-        expect(esClientSearchMock).toHaveBeenCalledWith({
-          index: indices[0],
-          query: { match_all: {} },
-          size: 0,
-        });
-        expect(esClientSearchMock).toHaveBeenCalledWith({
-          index: indices[1],
-          query: { match_all: {} },
-          size: 0,
-        });
+        expect(esClientEsqlMock).toHaveBeenCalledWith(
+          { query: `FROM ${indices[0]} | LIMIT 1 | STATS total = COUNT(*)`, params: [] },
+          { signal: undefined }
+        );
+        expect(esClientEsqlMock).toHaveBeenCalledWith(
+          { query: `FROM ${indices[1]} | LIMIT 1 | STATS total = COUNT(*)`, params: [] },
+          { signal: undefined }
+        );
         expect(getFieldsForWildcardMock).not.toHaveBeenCalled();
 
         expect(response.indexFields).toHaveLength(0);

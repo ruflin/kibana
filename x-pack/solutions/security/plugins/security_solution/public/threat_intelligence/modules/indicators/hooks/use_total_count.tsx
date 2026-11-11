@@ -6,11 +6,22 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { IKibanaSearchResponse, IEsSearchRequest } from '@kbn/search-types';
-import { isRunningResponse } from '@kbn/data-plugin/common';
+import { esql } from '@elastic/esql';
+import { getESQLResults } from '@kbn/esql-utils';
+import { esqlResponseToRecords } from '../../../../common/utils/esql';
 import { useKibana } from '../../../../common/lib/kibana';
 import { useTIDataView } from './use_ti_data_view';
-import type { RawIndicatorsResponse } from '../services/fetch_indicators';
+
+// Indicators carry `event.category` and `event.type` as arrays, and an ES|QL `WHERE` equality
+// does not match a multi-valued field, so the two terms stay a Query DSL `filter`.
+const INDICATOR_FILTER = {
+  bool: {
+    must: [
+      { term: { 'event.category': { value: 'threat' } } },
+      { term: { 'event.type': { value: 'indicator' } } },
+    ],
+  },
+};
 
 export const useIndicatorsTotalCount = () => {
   const {
@@ -24,45 +35,23 @@ export const useIndicatorsTotalCount = () => {
   const { selectedPatterns, loading: loadingDataView } = useTIDataView();
 
   useEffect(() => {
-    const query = {
-      bool: {
-        must: [
-          {
-            term: {
-              'event.category': {
-                value: 'threat',
-              },
-            },
-          },
-          {
-            term: {
-              'event.type': {
-                value: 'indicator',
-              },
-            },
-          },
-        ],
-      },
-    };
-    const req = {
-      params: {
-        index: selectedPatterns,
-        size: 0,
-        query,
-      },
-    };
+    if (selectedPatterns.length === 0) return;
+    // The total is exact here, where the search it replaces stopped counting at 10,000.
+    const esqlQuery = esql.from(selectedPatterns).pipe`STATS total = COUNT(*)`.print('basic');
 
-    searchService
-      .search<IEsSearchRequest, IKibanaSearchResponse<RawIndicatorsResponse>>(req)
-      .subscribe({
-        next: (res) => {
-          if (!isRunningResponse(res)) {
-            const returnedCount = res.rawResponse.hits.total || 0;
-
-            setCount(returnedCount);
-            setIsLoading(false);
-          }
-        },
+    getESQLResults({
+      esqlQuery,
+      search: searchService.search,
+      filter: INDICATOR_FILTER,
+    })
+      .then(({ response }) => {
+        const [row] = esqlResponseToRecords<{ total: number }>(response);
+        setCount(row?.total ?? 0);
+        setIsLoading(false);
+      })
+      .catch(() => {
+        // The count stays at its last value and the hook keeps loading, as it did when the
+        // search observable errored.
       });
   }, [searchService, selectedPatterns]);
 

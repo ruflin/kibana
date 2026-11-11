@@ -113,11 +113,28 @@ const successResponse = (
 
 /**
  * Response for the pre-flight source check that `resetRelationshipsBeforeRun`
- * runs before clearing. `hits.total.value > 0` means "the source has documents
+ * runs before clearing, an ES|QL count. A total above 0 means "the source has documents
  * to repopulate from", which is what allows the reset to proceed.
  */
-const sourcePresenceResponse = (total: number): SearchResponse =>
-  ({ hits: { total: { value: total, relation: 'eq' }, hits: [] } } as unknown as SearchResponse);
+const sourcePresenceResponse = (total: number): EsqlResponse => ({
+  columns: [{ name: 'total', type: 'long' }],
+  values: [[total]],
+});
+
+// What ES|QL answers when the source index does not exist.
+const esqlUnknownIndexError = () =>
+  new esErrors.ResponseError({
+    statusCode: 400,
+    body: {
+      error: {
+        type: 'verification_exception',
+        reason: 'Found 1 problem\nline 1:1: Unknown index [logs-workday-default]',
+      },
+    },
+    warnings: null,
+    headers: {},
+    meta: {} as never,
+  });
 
 const indexNotFoundError = () =>
   new esErrors.ResponseError({
@@ -1699,17 +1716,18 @@ describe('runRelationshipMaintainer', () => {
       });
 
       it('attributes a target-validation search rejection to entity-write, not fetch-actors', async () => {
-        // The validation lookup is an esClient.search inside writeEntityIds — the
-        // same API the actor fetch uses. Attribution must follow the call site,
+        // The validation lookup is an ES|QL read inside writeEntityIds — the
+        // same API the target queries use. Attribution must follow the call site,
         // not the API, or operators chase the wrong stage.
         const { esClient, search, esql } = makeEsClient();
         const { crudClient, entityMetadataClient, relationshipsClient, bulkUpdate } = makeClients();
         const collector = collect();
 
-        search
-          .mockResolvedValueOnce(successResponse([{ key: { 'user.name': 'alice' }, doc_count: 5 }]))
-          .mockRejectedValueOnce(new Error('validation boom'));
+        search.mockResolvedValueOnce(
+          successResponse([{ key: { 'user.name': 'alice' }, doc_count: 5 }])
+        );
         oneActorOneTarget(esql);
+        esql.mockRejectedValueOnce(new Error('validation boom'));
 
         await runRelationshipMaintainer({
           esClient,
@@ -2145,9 +2163,9 @@ describe('runRelationshipMaintainer', () => {
         return [];
       });
 
-      // First search is the pre-flight source check, then the composite agg:
+      // The first ES|QL query is the pre-flight source check, then the composite agg:
       // one bucket, one esql record so the write path is exercised.
-      search.mockResolvedValueOnce(sourcePresenceResponse(1));
+      esql.mockResolvedValueOnce(sourcePresenceResponse(1));
       search.mockResolvedValueOnce(
         successResponse([{ key: { 'user.name': 'alice' }, doc_count: 1 }])
       );
@@ -2191,12 +2209,12 @@ describe('runRelationshipMaintainer', () => {
     });
 
     it('clears both threshold keys for a bucketed config with resetRelationshipsBeforeRun', async () => {
-      const { esClient, search } = makeEsClient();
+      const { esClient, search, esql } = makeEsClient();
       const { crudClient, entityMetadataClient, relationshipsClient } = makeClients();
       const clearMock = (relationshipsClient as unknown as { clearRelationshipIds: jest.Mock })
         .clearRelationshipIds;
       // Pre-flight source check passes, then the composite agg returns no buckets.
-      search.mockResolvedValueOnce(sourcePresenceResponse(1));
+      esql.mockResolvedValueOnce(sourcePresenceResponse(1));
       search.mockResolvedValue(successResponse([]));
 
       await runRelationshipMaintainer({
@@ -2228,7 +2246,7 @@ describe('runRelationshipMaintainer', () => {
     });
 
     it('skips the integration when the clear fails, without touching writes', async () => {
-      const { esClient, search } = makeEsClient();
+      const { esClient, search, esql } = makeEsClient();
       const { crudClient, entityMetadataClient, relationshipsClient } = makeClients();
       const clearMock = (relationshipsClient as unknown as { clearRelationshipIds: jest.Mock })
         .clearRelationshipIds;
@@ -2236,7 +2254,7 @@ describe('runRelationshipMaintainer', () => {
         .bulkUpdateEntity;
       clearMock.mockRejectedValue(new Error('boom'));
       // Pre-flight passes so the run reaches the clear, which is what fails here.
-      search.mockResolvedValueOnce(sourcePresenceResponse(1));
+      esql.mockResolvedValueOnce(sourcePresenceResponse(1));
       search.mockResolvedValue(successResponse([]));
 
       const result = await runRelationshipMaintainer({
@@ -2273,14 +2291,14 @@ describe('runRelationshipMaintainer', () => {
     };
 
     it('does not clear when the source has no documents to repopulate from', async () => {
-      const { esClient, search } = makeEsClient();
+      const { esClient, esql } = makeEsClient();
       const { crudClient, entityMetadataClient, relationshipsClient } = makeClients();
       const clearMock = (relationshipsClient as unknown as { clearRelationshipIds: jest.Mock })
         .clearRelationshipIds;
       // A feed that has stopped emitting is not evidence that every
       // relationship ended — clearing here would destroy data with nothing
       // left to restore it.
-      search.mockResolvedValue(sourcePresenceResponse(0));
+      esql.mockResolvedValue(sourcePresenceResponse(0));
 
       await runRelationshipMaintainer({
         esClient,
@@ -2297,11 +2315,11 @@ describe('runRelationshipMaintainer', () => {
     });
 
     it('does not clear when the source index is missing', async () => {
-      const { esClient, search } = makeEsClient();
+      const { esClient, esql } = makeEsClient();
       const { crudClient, entityMetadataClient, relationshipsClient } = makeClients();
       const clearMock = (relationshipsClient as unknown as { clearRelationshipIds: jest.Mock })
         .clearRelationshipIds;
-      search.mockRejectedValue(indexNotFoundError());
+      esql.mockRejectedValue(esqlUnknownIndexError());
 
       await runRelationshipMaintainer({
         esClient,
@@ -2318,13 +2336,13 @@ describe('runRelationshipMaintainer', () => {
     });
 
     it('does not clear when the source cannot be reached', async () => {
-      const { esClient, search } = makeEsClient();
+      const { esClient, esql } = makeEsClient();
       const { crudClient, entityMetadataClient, relationshipsClient } = makeClients();
       const clearMock = (relationshipsClient as unknown as { clearRelationshipIds: jest.Mock })
         .clearRelationshipIds;
       // A transport failure tells us nothing about the source's contents, so
       // the destructive path must not be taken.
-      search.mockRejectedValue(realEsError());
+      esql.mockRejectedValue(realEsError());
 
       await runRelationshipMaintainer({
         esClient,

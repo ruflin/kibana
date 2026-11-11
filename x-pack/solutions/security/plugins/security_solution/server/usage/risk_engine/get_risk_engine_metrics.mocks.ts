@@ -4,7 +4,7 @@
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
-import type { SearchResponse, IndicesStatsResponse } from '@elastic/elasticsearch/lib/api/types';
+import type { EsqlEsqlResult, IndicesStatsResponse } from '@elastic/elasticsearch/lib/api/types';
 
 export const getAggregationResultMock = ({
   user,
@@ -12,22 +12,12 @@ export const getAggregationResultMock = ({
 }: {
   user: number;
   host: number;
-}): SearchResponse<
-  never,
-  {
-    user_name: {
-      value: number;
-    };
-    host_name: {
-      value: number;
-    };
-  }
-> => ({
-  took: 171,
-  timed_out: false,
-  _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-  hits: { total: { value: 10000, relation: 'gte' }, max_score: null, hits: [] },
-  aggregations: { user_name: { value: user }, host_name: { value: host } },
+}): EsqlEsqlResult => ({
+  columns: [
+    { name: 'user_name', type: 'long' },
+    { name: 'host_name', type: 'long' },
+  ],
+  values: [[user, host]],
 });
 
 export const getStatsResultMock = ({ size }: { size: number }): IndicesStatsResponse => ({

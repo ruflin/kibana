@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { errors } from '@elastic/elasticsearch';
 import { loggingSystemMock } from '@kbn/core-logging-server-mocks';
 import type { UsageCollectorDeps } from './trial_companion_nba_detectors';
 import {
@@ -27,7 +28,7 @@ import { Milestone } from '../../../../common/trial_companion/types';
 import type { PackageClient, PackageService } from '@kbn/fleet-plugin/server';
 import { lazyObject } from '@kbn/lazy-object';
 import type { PackageListItem } from '@kbn/fleet-plugin/common';
-import type { CountResponse } from '@elastic/elasticsearch/lib/api/types';
+import type { EsqlEsqlResult } from '@elastic/elasticsearch/lib/api/types';
 import { CASE_SAVED_OBJECT } from '@kbn/cases-plugin/common/constants';
 
 describe('Trial companion NBA detectors', () => {
@@ -59,13 +60,9 @@ describe('Trial companion NBA detectors', () => {
     jest.clearAllMocks();
   });
 
-  const buildCountResponse = (count: number): CountResponse => ({
-    count,
-    _shards: {
-      failed: 0,
-      successful: 0,
-      total: 0,
-    },
+  const buildCountResponse = (count: number): EsqlEsqlResult => ({
+    columns: [{ name: 'total', type: 'long' }],
+    values: [[count]],
   });
 
   it.each([
@@ -152,7 +149,7 @@ describe('Trial companion NBA detectors', () => {
       'returns milestone based on packages in %s',
       async (_tcName, packageList, esResponse, expected) => {
         packageClient.getPackages.mockResolvedValueOnce(packageList);
-        esClient.count.mockResolvedValueOnce(esResponse);
+        esClient.esql.query.mockResolvedValueOnce(esResponse);
         await expect(installedPackagesM1(deps.logger, packageService, esClient)()).resolves.toEqual(
           expected
         );
@@ -213,6 +210,48 @@ describe('Trial companion NBA detectors', () => {
     });
 
     describe('aiFeaturesM5', () => {
+      it('counts the last 30 days in each index and stops at the first one with documents', async () => {
+        (esClient.esql.query as jest.Mock)
+          .mockResolvedValueOnce(buildCountResponse(0))
+          .mockResolvedValueOnce(buildCountResponse(4));
+        await expect(aiFeaturesM5(esClient)()).resolves.toBeUndefined();
+        expect(esClient.esql.query).toHaveBeenCalledTimes(2);
+        expect(esClient.esql.query).toHaveBeenNthCalledWith(
+          1,
+          expect.objectContaining({
+            query:
+              'FROM .alerts-security.attack.discovery.alerts-* | WHERE @timestamp >= NOW() - 30 days | STATS total = COUNT(*)',
+          }),
+          expect.anything()
+        );
+        expect(esClient.esql.query).toHaveBeenNthCalledWith(
+          2,
+          expect.objectContaining({
+            query:
+              'FROM .kibana-elastic-ai-assistant-conversations-* | WHERE @timestamp >= NOW() - 30 days | STATS total = COUNT(*)',
+          }),
+          expect.anything()
+        );
+      });
+
+      it('counts an index that does not exist as empty', async () => {
+        (esClient.esql.query as jest.Mock).mockRejectedValue(
+          new errors.ResponseError({
+            statusCode: 400,
+            body: {
+              error: {
+                type: 'verification_exception',
+                reason: 'Found 1 problem\nline 1:1: Unknown index [.chat-conversations*]',
+              },
+            },
+            headers: {},
+            warnings: [],
+            meta: {} as never,
+          })
+        );
+        await expect(aiFeaturesM5(esClient)()).resolves.toEqual(Milestone.M5);
+      });
+
       it.each([
         ['0 alerts, 0 conversations, 0 charts', 0, 0, 0, Milestone.M5],
         ['0 alerts, 3 conversations, 0 charts', 0, 3, 0, undefined],
@@ -223,9 +262,9 @@ describe('Trial companion NBA detectors', () => {
       ])(
         'compares count of attack discovery alerts and assistant conversations - %s',
         async (_tcName, alerts, assistant, chart, expected) => {
-          (esClient.count as jest.Mock).mockResolvedValueOnce(buildCountResponse(alerts));
-          (esClient.count as jest.Mock).mockResolvedValueOnce(buildCountResponse(assistant));
-          (esClient.count as jest.Mock).mockResolvedValueOnce(buildCountResponse(chart));
+          (esClient.esql.query as jest.Mock).mockResolvedValueOnce(buildCountResponse(alerts));
+          (esClient.esql.query as jest.Mock).mockResolvedValueOnce(buildCountResponse(assistant));
+          (esClient.esql.query as jest.Mock).mockResolvedValueOnce(buildCountResponse(chart));
           await expect(aiFeaturesM5(esClient)()).resolves.toEqual(expected);
         }
       );

@@ -7,11 +7,11 @@
 
 import type { ElasticsearchClient } from '@kbn/core/server';
 import { findRelatedAlerts } from './find_related_alerts';
-import { RELATED_ALERT_ENTITY_SOURCE_INCLUDES } from './utils/entity_utils';
 
 describe('findRelatedAlerts', () => {
   const esClient = {
     search: jest.fn(),
+    esql: { query: jest.fn() },
   } as unknown as ElasticsearchClient;
 
   beforeEach(() => {
@@ -19,10 +19,9 @@ describe('findRelatedAlerts', () => {
   });
 
   const mockSourceAlert = (source?: Record<string, unknown>) => {
-    (esClient.search as jest.Mock).mockResolvedValueOnce({
-      hits: {
-        hits: source ? [{ _source: source }] : [],
-      },
+    (esClient.esql.query as jest.Mock).mockResolvedValueOnce({
+      columns: [{ name: '_source', type: '_source' }],
+      values: source ? [[source]] : [],
     });
   };
 
@@ -57,11 +56,12 @@ describe('findRelatedAlerts', () => {
       expect(result.reason).toBe('alert_not_found');
       expect(result.message).toContain('missing-alert');
     }
-    expect(esClient.search).toHaveBeenCalledTimes(1);
+    expect(esClient.esql.query).toHaveBeenCalledTimes(1);
+    expect(esClient.search).not.toHaveBeenCalled();
   });
 
   it('returns search_failed when loading the source alert fails', async () => {
-    (esClient.search as jest.Mock).mockRejectedValueOnce({
+    (esClient.esql.query as jest.Mock).mockRejectedValueOnce({
       meta: { statusCode: 403 },
       message: 'security_exception',
     });
@@ -77,7 +77,8 @@ describe('findRelatedAlerts', () => {
       expect(result.reason).toBe('search_failed');
       expect(result.message).toContain('Failed to find related alerts');
     }
-    expect(esClient.search).toHaveBeenCalledTimes(1);
+    expect(esClient.esql.query).toHaveBeenCalledTimes(1);
+    expect(esClient.search).not.toHaveBeenCalled();
   });
 
   it('extracts entities from nested ECS fields on the source alert', async () => {
@@ -95,13 +96,14 @@ describe('findRelatedAlerts', () => {
       timeWindowHours: 24,
     });
 
-    expect(esClient.search).toHaveBeenNthCalledWith(1, {
-      index: '.alerts-security.alerts-default',
-      size: 1,
-      query: { ids: { values: ['alert-1'] } },
-      _source: [...RELATED_ALERT_ENTITY_SOURCE_INCLUDES],
-      ignore_unavailable: true,
-    });
+    expect(esClient.esql.query).toHaveBeenCalledWith(
+      {
+        query:
+          'FROM .alerts-security.alerts-default METADATA _id, _source | WHERE _id == ?alertId | KEEP _source | LIMIT 1',
+        params: [{ alertId: 'alert-1' }],
+      },
+      { signal: undefined }
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.sourceEntities.hostNames).toEqual(['host-from-alert']);
@@ -109,17 +111,16 @@ describe('findRelatedAlerts', () => {
   });
 
   it('continues with provided entities when loading the source alert fails', async () => {
-    (esClient.search as jest.Mock)
-      .mockRejectedValueOnce({
-        meta: { statusCode: 400 },
-        message: 'source alert lookup failed',
-      })
-      .mockResolvedValueOnce({
-        hits: {
-          total: { value: 0, relation: 'eq' },
-          hits: [],
-        },
-      });
+    (esClient.esql.query as jest.Mock).mockRejectedValueOnce({
+      meta: { statusCode: 400 },
+      message: 'source alert lookup failed',
+    });
+    (esClient.search as jest.Mock).mockResolvedValueOnce({
+      hits: {
+        total: { value: 0, relation: 'eq' },
+        hits: [],
+      },
+    });
 
     const result = await findRelatedAlerts(esClient, {
       alertId: 'alert-1',
@@ -132,7 +133,8 @@ describe('findRelatedAlerts', () => {
     if (result.ok) {
       expect(result.sourceEntities.hostNames).toEqual(['host-from-model']);
     }
-    expect(esClient.search).toHaveBeenCalledTimes(2);
+    expect(esClient.esql.query).toHaveBeenCalledTimes(1);
+    expect(esClient.search).toHaveBeenCalledTimes(1);
   });
 
   it('merges partial entity shortcut params with alert source entities', async () => {
@@ -180,7 +182,7 @@ describe('findRelatedAlerts', () => {
     });
 
     expect(esClient.search).toHaveBeenNthCalledWith(
-      2,
+      1,
       expect.objectContaining({
         index: '.alerts-security.alerts-default',
         query: {
@@ -221,7 +223,7 @@ describe('findRelatedAlerts', () => {
     });
 
     expect(esClient.search).toHaveBeenNthCalledWith(
-      2,
+      1,
       expect.objectContaining({
         size: 25,
         _source: expect.arrayContaining(['@timestamp', 'message', 'host.name']),

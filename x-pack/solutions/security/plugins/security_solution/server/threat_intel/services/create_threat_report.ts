@@ -7,11 +7,13 @@
 
 import { createHash } from 'crypto';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 import {
   GLOBAL_SPACE_ID,
   THREAT_REPORTS_INDEX,
   type SeverityLevel,
 } from '../../../common/threat_intel';
+import { esqlRows, runEsqlRead } from '../../utils/esql/esql_read';
 import { buildReportContent } from './report_content';
 import { normalizeProvenanceUrl } from './provenance_url';
 import { severityScore } from './severity';
@@ -66,31 +68,25 @@ export const createThreatReport = async (
   // Dedup is scoped to the current space + the global sentinel: the same
   // advisory in another space is *not* a duplicate (per-space isolation),
   // but a global-tagged seed is everyone's canonical copy.
-  const existing = await esClient.search({
-    index: THREAT_REPORTS_INDEX,
-    // Bootstrap creates the companion index after the templates land. Keep
-    // `ignore_unavailable` so a missing index (bootstrap incomplete, deleted)
-    // does not throw `index_not_found_exception` and 500 the precheck. A missing
-    // index means "no duplicate", which is this path.
-    ignore_unavailable: true,
-    size: 1,
-    _source: false,
-    query: {
-      bool: {
-        filter: [
-          { term: { content_fingerprint: fp } },
-          { terms: { space_id: [spaceId, GLOBAL_SPACE_ID] } },
-        ],
-      },
-    },
+  // Bootstrap creates the companion index after the templates land. A missing index is an error
+  // in ES|QL, and `runEsqlRead` turns it into no rows so it does not 500 the precheck. A missing
+  // index means "no duplicate", which is this path.
+  const existing = await runEsqlRead({
+    esClient,
+    query: esql.from([THREAT_REPORTS_INDEX], ['_id']).pipe`WHERE content_fingerprint == ${{
+      fp,
+    }} AND space_id IN (${{ spaceId }}, ${{
+      globalSpaceId: GLOBAL_SPACE_ID,
+    }})`
+      .keep('_id')
+      .limit(1),
   });
 
-  const total =
-    typeof existing.hits.total === 'number' ? existing.hits.total : existing.hits.total?.value ?? 0;
+  const [duplicate] = esqlRows(existing);
 
-  if (total > 0) {
-    const existingId = existing.hits.hits[0]._id;
-    if (!existingId) {
+  if (duplicate) {
+    const existingId = duplicate._id;
+    if (typeof existingId !== 'string' || !existingId) {
       throw new Error('Duplicate report match returned without an _id.');
     }
     logger.debug(`create_threat_report dedup hit fingerprint=${fp} report_id=${existingId}`);

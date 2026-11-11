@@ -6,9 +6,11 @@
  */
 
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 import {
   LIST_SOURCES_API_PATH,
   SOURCE_BY_ID_API_PATH,
+  GLOBAL_SPACE_ID,
   THREAT_INTEL_SOURCES_INDEX,
   THREAT_REPORTS_INDEX_PATTERN,
   APPROVED_SOURCE_IDS,
@@ -26,6 +28,7 @@ import {
   resolveCurrentSpaceId,
 } from '../lib/space_filter';
 import { HIDDEN_INDEX_SEARCH_OPTIONS } from '../lib/es_options';
+import { esqlRows, runEsqlRead } from '../../utils/esql/esql_read';
 import { redactUrl } from '../adapters/http_client';
 import { THREAT_INTEL_READ_AUTHZ, THREAT_INTEL_WRITE_AUTHZ } from './lib/authz';
 import { rejectUntilBootstrapped } from './lib/bootstrap_ready';
@@ -296,16 +299,14 @@ export const registerListSourcesRoute = ({
             spacesWithEnsuredAlias.add(spaceId);
           }
           const [searchResponse, reportStatsByAdapterId] = await Promise.all([
-            esClient.search<ThreatIntelSourceDoc>({
-              index: THREAT_INTEL_SOURCES_INDEX,
-              ignore_unavailable: true,
-              size,
-              sort: [{ name: { order: 'asc' } }],
-              query: {
-                bool: {
-                  filter: [buildSpaceFilterTerms(spaceId)],
-                },
-              },
+            // A missing index lists no sources, as `ignore_unavailable` did.
+            runEsqlRead({
+              esClient,
+              query: esql.from([THREAT_INTEL_SOURCES_INDEX], ['_id', '_source'])
+                .pipe`WHERE space_id IN (${{ spaceId }}, ${{ globalSpaceId: GLOBAL_SPACE_ID }})`
+                .pipe`SORT name ASC NULLS LAST`
+                .keep('_id', '_source')
+                .limit(size),
             }),
             loadSourceReportStatsByAdapterId({
               esClient,
@@ -315,7 +316,11 @@ export const registerListSourcesRoute = ({
             }),
           ]);
 
-          const sources = (searchResponse.hits.hits ?? [])
+          const sources = esqlRows(searchResponse)
+            .map((row) => ({
+              _id: typeof row._id === 'string' ? row._id : undefined,
+              _source: (row._source ?? undefined) as ThreatIntelSourceDoc | undefined,
+            }))
             .filter((hit) => hit._id && APPROVED_SOURCE_IDS.has(hit._id))
             .map((hit) => {
               const base = mapSourceHit(hit);

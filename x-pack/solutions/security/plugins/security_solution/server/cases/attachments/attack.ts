@@ -20,8 +20,10 @@ import {
   toReadableAttackIndexPattern,
   transformInternalReplacements,
 } from '@kbn/elastic-assistant-common';
+import { esql } from '@elastic/esql';
 import { isResponseError } from '@kbn/es-errors';
 import { z } from '@kbn/zod/v4';
+import { esqlRows, runEsqlRead, toInListParams } from '../../utils/esql/esql_read';
 import { AttackAttachmentPayloadSchema } from '../../../common/cases/attachments/attack';
 import { validateAttackWorkflowTargets } from './workflow_validation';
 import { getCaseAlertAttachments, resolveRemovableAlertIds } from './resolve_removable_alerts';
@@ -97,15 +99,21 @@ const getAlertIdsByAttackId = async ({
   const alertIdsByAttackId = new Map<string, string[]>();
   for (const [index, attackIds] of attackIdsByIndex) {
     try {
-      const { hits } = await esClient.search<AttackAlertIdsSource>({
-        index,
-        size: attackIds.length,
-        query: { ids: { values: attackIds } },
-        _source: [ALERT_ATTACK_DISCOVERY_ALERT_IDS, ALERT_ATTACK_DISCOVERY_REPLACEMENTS],
-        ignore_unavailable: true,
+      // `_source` carries the alert ids and replacements whichever way the attack indices map
+      // them. An unreadable or missing index is an empty result, as `ignore_unavailable` made it.
+      const { placeholders, params } = toInListParams('attackId', attackIds);
+      const response = await runEsqlRead({
+        esClient,
+        query: esql
+          .from([index], ['_id', '_source'])
+          .pipe(`WHERE _id IN (${placeholders})`, params)
+          .keep('_id', '_source')
+          .limit(attackIds.length),
       });
 
-      for (const { _id: id, _source: source } of hits.hits) {
+      for (const row of esqlRows(response)) {
+        const id = typeof row._id === 'string' ? row._id : undefined;
+        const source = (row._source ?? undefined) as AttackAlertIdsSource | undefined;
         const storedAlertIds = source?.[ALERT_ATTACK_DISCOVERY_ALERT_IDS];
 
         // Without its alert ids an attack cannot be told apart from one claiming no alerts, which

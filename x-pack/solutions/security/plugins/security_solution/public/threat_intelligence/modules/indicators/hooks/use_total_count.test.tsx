@@ -5,15 +5,18 @@
  * 2.0.
  */
 
-import { renderHook, act } from '@testing-library/react';
-import { BehaviorSubject } from 'rxjs';
+import { renderHook, act, waitFor } from '@testing-library/react';
+import { getESQLResults } from '@kbn/esql-utils';
 import { useIndicatorsTotalCount } from './use_total_count';
 import { TestProvidersComponent, mockedSearchService } from '../../../mocks/test_providers';
 import { useKibana } from '../../../../common/lib/kibana';
 
 jest.mock('../../../../common/lib/kibana');
+jest.mock('@kbn/esql-utils', () => ({ getESQLResults: jest.fn() }));
 
-const indicatorsResponse = { rawResponse: { hits: { hits: [], total: 0 } } };
+const indicatorsResponse = {
+  response: { columns: [{ name: 'total', type: 'long' }], values: [[7]] },
+};
 
 describe('useIndicatorsTotalCount()', () => {
   beforeEach(() => {
@@ -21,10 +24,8 @@ describe('useIndicatorsTotalCount()', () => {
       services: { data: { search: mockedSearchService } },
     } as unknown as ReturnType<typeof useKibana>);
 
-    jest
-      .mocked(mockedSearchService.search)
-      .mockReturnValue(new BehaviorSubject(indicatorsResponse));
     jest.clearAllMocks();
+    jest.mocked(getESQLResults).mockResolvedValue(indicatorsResponse as never);
   });
 
   describe('when mounted', () => {
@@ -37,7 +38,23 @@ describe('useIndicatorsTotalCount()', () => {
     });
 
     it('should query the database for threat indicators', async () => {
-      expect(mockedSearchService.search).toHaveBeenCalledTimes(1);
+      expect(getESQLResults).toHaveBeenCalledTimes(1);
+    });
+
+    it('counts with ES|QL and keeps the multi-valued event terms in the DSL filter', async () => {
+      expect(getESQLResults).toHaveBeenCalledWith(
+        expect.objectContaining({
+          esqlQuery: expect.stringMatching(/^FROM .+ \| STATS total = COUNT\(\*\)$/),
+          filter: {
+            bool: {
+              must: [
+                { term: { 'event.category': { value: 'threat' } } },
+                { term: { 'event.type': { value: 'indicator' } } },
+              ],
+            },
+          },
+        })
+      );
     });
   });
 
@@ -49,7 +66,7 @@ describe('useIndicatorsTotalCount()', () => {
 
       rerender();
 
-      expect(mockedSearchService.search).toHaveBeenCalledTimes(1);
+      expect(getESQLResults).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -59,7 +76,7 @@ describe('useIndicatorsTotalCount()', () => {
         wrapper: TestProvidersComponent,
       });
 
-      expect(result.current.count).toEqual(indicatorsResponse.rawResponse.hits.total);
+      await waitFor(() => expect(result.current.count).toEqual(7));
       expect(result.current.isLoading).toEqual(false);
     });
   });

@@ -5,15 +5,13 @@
  * 2.0.
  */
 
-import type {
-  AggregationsAggregationContainer,
-  SearchRequest,
-} from '@elastic/elasticsearch/lib/api/types';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 import { DATA_STREAM_NAME } from '@kbn/change-history';
 import { RuleChangeTrackingAction } from '@kbn/alerting-types';
 import { SecurityRuleChangeTrackingAction } from '../../../common/detection_engine/rule_management/rule_change_tracking';
 import type { ChangesHistoryUsage } from '../detections/rules/types';
+import { esqlRows, runEsqlRead, toCount, toInListParams } from '../../utils/esql/esql_read';
 
 /**
  * The `event.action` values that count as a "revision saved" for SBT-01.
@@ -32,11 +30,6 @@ export const REVISION_SAVED_ACTIONS: readonly string[] = [
   SecurityRuleChangeTrackingAction.ruleRevert,
   SecurityRuleChangeTrackingAction.ruleRestore,
 ];
-
-interface ChangesHistoryUsageAggs {
-  revision_saved?: { doc_count: number };
-  rule_restored?: { doc_count: number };
-}
 
 /**
  * Derives the SBT-01 ("revision saved") and SBT-02 ("rule restored") usage
@@ -61,41 +54,27 @@ export const getChangesHistoryUsage = async ({
   logger: Logger;
 }): Promise<ChangesHistoryUsage> => {
   try {
-    const requestAggs: Record<string, AggregationsAggregationContainer> = {
-      revision_saved: {
-        filter: { terms: { 'event.action': [...REVISION_SAVED_ACTIONS] } },
-      },
-      rule_restored: {
-        filter: { term: { 'event.action': SecurityRuleChangeTrackingAction.ruleRestore } },
-      },
-    };
-    const query: SearchRequest = {
-      index: DATA_STREAM_NAME,
-      size: 0,
-      track_total_hits: false,
-      query: {
-        bool: {
-          filter: [
-            { term: { 'event.module': 'security' } },
-            { term: { 'event.dataset': 'alerting-rules' } },
-            { term: { 'object.type': 'alert' } },
-            { range: { '@timestamp': { gte: 'now-24h', lte: 'now' } } },
-          ],
-        },
-      },
-      aggs: requestAggs,
-    };
-    logger.debug(() => `Getting changes-history usage with query: ${JSON.stringify(query)}`);
+    const { placeholders, params } = toInListParams('revision', REVISION_SAVED_ACTIONS);
+    // The `.kibana_change_history` fields are scalar keywords and a date, so plain `WHERE` works.
+    const query = esql(
+      `FROM ${DATA_STREAM_NAME}
+        | WHERE event.module == "security" AND event.dataset == "alerting-rules" AND object.type == "alert"
+            AND @timestamp >= NOW() - 24 hours AND @timestamp <= NOW()
+        | STATS revision_saved = COUNT(*) WHERE event.action IN (${placeholders}),
+            rule_restored = COUNT(*) WHERE event.action == ?restored`,
+      { ...params, restored: SecurityRuleChangeTrackingAction.ruleRestore }
+    );
+    logger.debug(() => `Getting changes-history usage with query: ${query.print('basic')}`);
 
-    const response = await esClient.search<never, ChangesHistoryUsageAggs>(query);
+    const response = await runEsqlRead({ esClient, query, tolerateUnknownIndex: false });
 
-    logger.debug(() => `Raw search results of changes-history usage: ${JSON.stringify(response)}`);
+    logger.debug(() => `Raw ES|QL results of changes-history usage: ${JSON.stringify(response)}`);
 
-    const responseAggs = response.aggregations;
+    const [row] = esqlRows(response);
 
     return {
-      revision_saved: responseAggs?.revision_saved?.doc_count ?? 0,
-      rule_restored: responseAggs?.rule_restored?.doc_count ?? 0,
+      revision_saved: toCount(row?.revision_saved),
+      rule_restored: toCount(row?.rule_restored),
     };
   } catch (error) {
     logger.debug(

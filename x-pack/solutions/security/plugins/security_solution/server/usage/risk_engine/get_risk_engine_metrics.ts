@@ -6,8 +6,9 @@
  */
 
 import type { Logger, ElasticsearchClient } from '@kbn/core/server';
-import type { SearchRequest } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { RiskEngineMetrics } from './types';
+import { esqlRows, runEsqlRead } from '../../utils/esql/esql_read';
 
 interface GetRiskEngineMetricsOptions {
   esClient: ElasticsearchClient;
@@ -18,21 +19,8 @@ interface GetRiskEngineMetricsOptions {
   };
 }
 
-const allEnititiesByTypeAggregationBody = {
-  size: 0,
-  aggs: {
-    user_name: {
-      value_count: {
-        field: 'user.name',
-      },
-    },
-    host_name: {
-      value_count: {
-        field: 'host.name',
-      },
-    },
-  },
-};
+const toNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' ? value : undefined;
 
 const getEntitiesAggregationData = async ({
   esClient,
@@ -52,41 +40,19 @@ const getEntitiesAggregationData = async ({
   lastDay: boolean;
 }) => {
   try {
-    const bodyRequest: SearchRequest = {
-      ...allEnititiesByTypeAggregationBody,
-    };
-    if (lastDay) {
-      bodyRequest.query = {
-        range: {
-          '@timestamp': {
-            gte: 'now-24h',
-            lt: 'now',
-          },
-        },
-      };
-    }
-    const riskScoreAggsResponse = await esClient.search<
-      never,
-      {
-        user_name: {
-          value: number;
-        };
-        host_name: {
-          value: number;
-        };
-        service_name: {
-          value: number;
-        };
-      }
-    >({
-      index,
-      ...bodyRequest,
-    });
+    // `value_count` counted the values of each field, which is what `COUNT(field)` does.
+    const sourceQuery = esql.from([index]);
+    const query = (lastDay
+      ? sourceQuery.pipe`WHERE @timestamp >= NOW() - 24 hours AND @timestamp < NOW()`
+      : sourceQuery
+    ).pipe`STATS user_name = COUNT(user.name), host_name = COUNT(host.name)`;
+    const response = await runEsqlRead({ esClient, query, tolerateUnknownIndex: false });
+    const [row] = esqlRows(response);
 
     return {
-      [userMetricField]: riskScoreAggsResponse?.aggregations?.user_name?.value,
-      [hostMetricField]: riskScoreAggsResponse?.aggregations?.host_name?.value,
-      [serviceMetricField]: riskScoreAggsResponse?.aggregations?.service_name?.value,
+      [userMetricField]: toNumber(row?.user_name),
+      [hostMetricField]: toNumber(row?.host_name),
+      [serviceMetricField]: undefined,
     };
   } catch (err) {
     logger.error(

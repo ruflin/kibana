@@ -6,7 +6,7 @@
  */
 
 import { renderHook, waitFor } from '@testing-library/react';
-import { of } from 'rxjs';
+import { getESQLResults } from '@kbn/esql-utils';
 import { useAssetInventoryStatus } from './use_asset_inventory_status';
 import { createTestProviderWrapper } from '../test/test_provider';
 
@@ -21,6 +21,8 @@ const mockIsExperimentalFeatureEnabled = jest.fn();
 const mockFetchEntityStoreV2Privileges = jest.fn();
 const mockSearch = jest.fn();
 const mockPostInstallAssetInventoryDataView = jest.fn();
+
+jest.mock('@kbn/esql-utils', () => ({ getESQLResults: jest.fn() }));
 
 jest.mock('../../common/lib/kibana', () => ({
   useKibana: () => ({
@@ -64,15 +66,9 @@ const setUiSettings = ({ assetInventory }: { assetInventory: boolean }) => {
 };
 
 const setHasDocs = (hasDocs: boolean) => {
-  mockSearch.mockReturnValue(
-    of({
-      rawResponse: {
-        hits: {
-          total: { value: hasDocs ? 1 : 0, relation: 'eq' },
-        },
-      },
-    })
-  );
+  jest.mocked(getESQLResults).mockResolvedValue({
+    response: { columns: [{ name: 'total', type: 'long' }], values: [[hasDocs ? 1 : 0]] },
+  } as unknown as Awaited<ReturnType<typeof getESQLResults>>);
 };
 
 const setPrivileges = (privileges: { has_all_required: boolean } | undefined) => {
@@ -132,6 +128,24 @@ describe('useAssetInventoryStatus', () => {
       expect(result.current.data).toEqual({ status: 'ready' });
     });
     expect(mockPostInstallAssetInventoryDataView).toHaveBeenCalled();
+  });
+
+  it('checks for entity docs with a LIMIT 1 count, and no matching index means no docs', async () => {
+    jest
+      .mocked(getESQLResults)
+      .mockRejectedValue(new Error('verification_exception: Unknown index [entities-latest-*]'));
+    setEntityStoreStatus({ status: 'not_installed', engines: [] });
+
+    const { result } = renderStatusHook();
+
+    await waitFor(() => {
+      expect(result.current.data).toEqual({ status: 'disabled' });
+    });
+    expect(getESQLResults).toHaveBeenCalledWith(
+      expect.objectContaining({
+        esqlQuery: 'FROM entities-latest-* | LIMIT 1 | STATS total = COUNT(*)',
+      })
+    );
   });
 
   it('returns insufficient_privileges when the user is missing entity-store privileges and there are no docs', async () => {

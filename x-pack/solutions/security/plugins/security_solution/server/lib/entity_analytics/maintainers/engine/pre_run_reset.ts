@@ -5,13 +5,16 @@
  * 2.0.
  */
 
+import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
 import type { ElasticsearchClient } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 import type { Logger } from '@kbn/logging';
 import type { RelationshipsClient } from '@kbn/entity-store/server';
 
 import type { RelationshipIntegrationConfig } from './types';
 import { buildActorDiscoveryQuery } from './build_actor_discovery_query';
-import { isIndexNotFound, errMsg } from './es_errors';
+import { esqlRows, runEsqlRead, toCount } from '../../../../utils/esql/esql_read';
+import { errMsg } from './es_errors';
 
 /** What the caller should do after the reset step. */
 export type PreRunResetOutcome = 'proceed' | 'empty' | 'error';
@@ -28,8 +31,8 @@ interface TransportOptions {
  *
  * Reuses `buildActorDiscoveryQuery` rather than re-deriving the filters: the
  * guard must agree with Step 1 exactly, or it could pass while Step 1 finds
- * nothing and the run still clears everything. `terminate_after: 1` stops each
- * shard at the first hit — presence is all that matters.
+ * nothing and the run still clears everything. The discovery query goes in the request
+ * `filter`, and `LIMIT 1` before the count stops at the first hit — presence is all that matters.
  *
  * A missing index or a failed request both return `false`: a stopped feed is
  * not evidence that every relationship ended.
@@ -43,30 +46,26 @@ const hasRepopulatableSource = async (
   logPrefix: string
 ): Promise<boolean> => {
   const { query } = buildActorDiscoveryQuery(config, undefined) as {
-    query: Record<string, unknown>;
+    query: QueryDslQueryContainer;
   };
 
   try {
-    const result = await esClient.search(
-      {
-        index: config.indexPattern(namespace),
-        size: 0,
-        terminate_after: 1,
-        track_total_hits: 1,
-        query,
-      },
-      transportOpts
-    );
-    const total = result.hits.total;
-    const count = typeof total === 'number' ? total : total?.value ?? 0;
-    return count > 0;
-  } catch (err) {
-    if (isIndexNotFound(err)) {
+    const result = await runEsqlRead({
+      esClient,
+      query: esql.from([config.indexPattern(namespace)]).pipe`LIMIT 1`.pipe`STATS total = COUNT(*)`,
+      filter: query,
+      signal: transportOpts?.signal,
+      requestTimeout: transportOpts?.requestTimeout,
+    });
+    // ES|QL answers a missing index with an error that `runEsqlRead` turns into no response.
+    if (result === undefined) {
       logger.info(
         `${logPrefix} Index "${config.indexPattern(namespace)}" not found; skipping reset`
       );
       return false;
     }
+    return toCount(esqlRows(result)[0]?.total) > 0;
+  } catch (err) {
     logger.error(`${logPrefix} Could not verify source before reset: ${errMsg(err)}`);
     return false;
   }

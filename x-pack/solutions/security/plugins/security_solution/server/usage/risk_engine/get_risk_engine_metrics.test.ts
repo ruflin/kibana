@@ -42,25 +42,25 @@ describe('risk engine metrics', () => {
     });
 
     it('should return metrics object', async () => {
-      esClient.search.mockResponseOnce(
+      esClient.esql.query.mockResponseOnce(
         getAggregationResultMock({
           user: 100,
           host: 200,
         })
       );
-      esClient.search.mockResponseOnce(
+      esClient.esql.query.mockResponseOnce(
         getAggregationResultMock({
           user: 10,
           host: 20,
         })
       );
-      esClient.search.mockResponseOnce(
+      esClient.esql.query.mockResponseOnce(
         getAggregationResultMock({
           user: 1000,
           host: 2000,
         })
       );
-      esClient.search.mockResponseOnce(
+      esClient.esql.query.mockResponseOnce(
         getAggregationResultMock({
           user: 500,
           host: 600,
@@ -95,26 +95,43 @@ describe('risk engine metrics', () => {
       });
     });
 
+    it('counts the user and host values, only over the last day for the day metrics', async () => {
+      esClient.esql.query.mockResponse(getAggregationResultMock({ user: 1, host: 2 }));
+      esClient.indices.stats.mockResponse(getStatsResultMock({ size: 1 }));
+
+      await getRiskEngineMetrics({ esClient, logger, riskEngineIndexPatterns });
+
+      const queries = esClient.esql.query.mock.calls.map(
+        ([request]) => (request as unknown as { query: string }).query
+      );
+      expect(queries).toEqual([
+        'FROM another-index-pattern | STATS user_name = COUNT(user.name), host_name = COUNT(host.name)',
+        'FROM another-index-pattern | WHERE @timestamp >= NOW() - 24 hours AND @timestamp < NOW() | STATS user_name = COUNT(user.name), host_name = COUNT(host.name)',
+        'FROM an-index-pattern | STATS user_name = COUNT(user.name), host_name = COUNT(host.name)',
+        'FROM an-index-pattern | WHERE @timestamp >= NOW() - 24 hours AND @timestamp < NOW() | STATS user_name = COUNT(user.name), host_name = COUNT(host.name)',
+      ]);
+    });
+
     it('should still return metrics object if some request return error', async () => {
-      esClient.search.mockResponseOnce(
+      esClient.esql.query.mockResponseOnce(
         getAggregationResultMock({
           user: 100,
           host: 200,
         })
       );
-      esClient.search.mockResponseOnce(
+      esClient.esql.query.mockResponseOnce(
         getAggregationResultMock({
           user: 10,
           host: 20,
         })
       );
-      esClient.search.mockResponseOnce(
+      esClient.esql.query.mockResponseOnce(
         getAggregationResultMock({
           user: 1000,
           host: 2000,
         })
       );
-      esClient.search.mockImplementationOnce(() => {
+      esClient.esql.query.mockImplementationOnce(() => {
         throw new Error('Connection Error');
       });
 
