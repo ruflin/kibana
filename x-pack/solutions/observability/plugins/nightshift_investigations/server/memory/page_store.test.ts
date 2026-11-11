@@ -46,6 +46,101 @@ const source = {
   },
 };
 
+interface EsqlRequest {
+  query: string;
+  params?: Array<Record<string, unknown>>;
+  filter?: { bool: { filter?: object[]; must_not?: object[] } };
+}
+
+interface PageHit {
+  _id: string;
+  _source: typeof source;
+  sort?: [string, string];
+}
+
+const pageResponse = (hits: PageHit[]) => ({
+  columns: [
+    { name: '_id', type: 'keyword' },
+    { name: '_source', type: '_source' },
+    { name: 'sort_updated_at', type: 'keyword' },
+    { name: 'sort_slug', type: 'keyword' },
+  ],
+  values: hits.map(({ _id, _source, sort }) => [
+    _id,
+    _source,
+    sort?.[0] ?? _source.attributes.updated_at,
+    sort?.[1] ?? _source.attributes.slug,
+  ]),
+});
+
+const idsResponse = (ids: string[]) => ({
+  columns: [{ name: '_id', type: 'keyword' }],
+  values: ids.map((id) => [id]),
+});
+
+const countResponse = (total: number) => ({
+  columns: [{ name: 'total', type: 'long' }],
+  values: [[total]],
+});
+
+const kafkaHit: PageHit = { _id: 'space-a:memory_kafka-lag', _source: source };
+
+const isCountQuery = ({ query }: EsqlRequest) => query.includes('STATS total = COUNT(*)');
+
+// The filter keeps only archived pages when it asserts the reason (an `exists` clause in the list).
+const requiresArchived = ({ filter }: EsqlRequest) =>
+  (filter?.bool.filter ?? []).some((clause) => 'exists' in clause);
+
+// The filter drops archived pages when it negates the reason.
+const excludesArchived = (request: EsqlRequest) =>
+  /must_not[^\]]*archive_reason/.test(JSON.stringify(request.filter));
+
+/** Answers pages from `rows` and counts from the filter: `active` and `archived` pages are in scope. */
+const countingEsql = ({
+  active,
+  archived,
+  rows = [],
+}: {
+  active: number;
+  archived: number;
+  rows?: PageHit[];
+}) =>
+  jest.fn((request: EsqlRequest) => {
+    if (!isCountQuery(request)) return Promise.resolve(pageResponse(rows));
+    if (requiresArchived(request)) return Promise.resolve(countResponse(archived));
+    if (excludesArchived(request)) return Promise.resolve(countResponse(active));
+    return Promise.resolve(countResponse(active + archived));
+  });
+
+const requestsOf = (query: jest.Mock): EsqlRequest[] =>
+  query.mock.calls.map(([request]) => request as EsqlRequest);
+
+const ARCHIVED_SCOPE = {
+  bool: {
+    filter: [
+      { term: { tags: 'memory' } },
+      { term: { 'attributes.space_id': 'space-a' } },
+      { exists: { field: 'attributes.archive_reason' } },
+    ],
+  },
+};
+
+const createStore = (esClient: object) =>
+  createMemoryPageStore({
+    esClient: esClient as never,
+    logger: loggerMock.create(),
+    spaceId: 'space-a',
+    now: () => T0,
+  });
+
+const unknownIndexError = () =>
+  new errors.ResponseError({
+    statusCode: 400,
+    body: {
+      error: { type: 'verification_exception', reason: 'Unknown index [ai-index-idx-x]' },
+    },
+  } as never);
+
 describe('canonicalizeSlug / toMemoryKiId', () => {
   it('strips a memory- prefix copied from document ids', () => {
     expect(canonicalizeSlug('memory-kafka-lag')).toBe('kafka-lag');
@@ -74,16 +169,9 @@ describe('createMemoryPageStore', () => {
   const logger = loggerMock.create();
 
   it('lists pages with raw counters and space-scoped ids', async () => {
-    const esClient = {
-      search: jest.fn().mockResolvedValue({
-        hits: {
-          hits: [{ _id: 'space-a:memory_kafka-lag', _source: source }],
-        },
-      }),
-    };
-
+    const query = jest.fn().mockResolvedValue(pageResponse([kafkaHit]));
     const store = createMemoryPageStore({
-      esClient: esClient as never,
+      esClient: { esql: { query } } as never,
       logger,
       spaceId: 'space-a',
       now: () => T0 + HALF_LIFE_SEC,
@@ -100,9 +188,10 @@ describe('createMemoryPageStore', () => {
     });
     expect(result.stats.total).toBe(1);
     expect(result.stats.archived).toBe(0);
-    expect(esClient.search).toHaveBeenCalledWith(
+    // The space and tag scope is the request filter, so Elasticsearch applies it as a pre-filter.
+    expect(query).toHaveBeenCalledWith(
       expect.objectContaining({
-        query: {
+        filter: {
           bool: {
             filter: [{ term: { tags: 'memory' } }, { term: { 'attributes.space_id': 'space-a' } }],
           },
@@ -117,21 +206,18 @@ describe('createMemoryPageStore', () => {
       ...source,
       attributes: { ...source.attributes, archive_reason: 'harmful' as const },
     };
-    // The store delegates filtering to Elasticsearch, so the mock answers per
-    // query. `active` nests the archive_reason check under a `must_not`; that is
-    // the difference between excluding archived pages and selecting them.
-    const search = jest.fn(({ query }: { query: { bool: Record<string, unknown> } }) => {
-      const bool = query.bool ?? {};
-      // `active` is the only filter that *excludes* archived pages, and it does
-      // so by negating an `exists` check. `all` omits the check entirely and
-      // `archived` asserts it, so both still return the page.
-      const clause = JSON.stringify(bool);
-      const excludesArchived = /must_not[^\]]*archive_reason/.test(clause);
-      const hit = { _id: 'space-a:memory_kafka-lag', _source: archived };
-      return Promise.resolve({ hits: { hits: excludesArchived ? [] : [hit] } });
-    });
+    // The store delegates filtering to Elasticsearch, so the mock answers per request filter.
+    // `active` nests the archive_reason check under a `must_not`; that is the difference between
+    // excluding archived pages and selecting them.
+    const query = jest.fn((request: EsqlRequest) =>
+      Promise.resolve(
+        pageResponse(
+          excludesArchived(request) ? [] : [{ _id: 'space-a:memory_kafka-lag', _source: archived }]
+        )
+      )
+    );
     const esClient = {
-      search,
+      esql: { query },
       get: jest.fn().mockResolvedValue({
         found: true,
         _id: 'space-a:memory_kafka-lag',
@@ -139,12 +225,7 @@ describe('createMemoryPageStore', () => {
       }),
     };
 
-    const store = createMemoryPageStore({
-      esClient: esClient as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const store = createStore(esClient);
 
     await expect(store.list({ filter: 'active' })).resolves.toMatchObject({ pages: [] });
 
@@ -163,17 +244,11 @@ describe('createMemoryPageStore', () => {
   });
 
   it('sends one shared archived clause everywhere, not just an exists check', async () => {
-    const search = jest.fn().mockResolvedValue({ hits: { hits: [] } });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = jest.fn().mockResolvedValue(pageResponse([]));
+    const store = createStore({ esql: { query } });
 
     await store.list({ filter: 'active' });
-    const activeClause = JSON.stringify(search.mock.calls[0][0]);
-    expect(activeClause).toContain('attributes.archive_reason');
+    expect(JSON.stringify(requestsOf(query)[0].filter)).toContain('attributes.archive_reason');
   });
 
   it('excludes an archived document in every query and counts it once', async () => {
@@ -181,217 +256,142 @@ describe('createMemoryPageStore', () => {
       ...source,
       attributes: { ...source.attributes, archive_reason: 'manual' as const },
     };
-    const search = jest.fn(() =>
-      Promise.resolve({ hits: { hits: [{ _id: 'space-a:memory_kafka-lag', _source: archived }] } })
-    );
-    const store = createMemoryPageStore({
-      esClient: {
-        search,
-        get: jest.fn().mockResolvedValue({
-          found: true,
-          _id: 'space-a:memory_kafka-lag',
-          _source: archived,
-        }),
-      } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
+    const query = countingEsql({
+      active: 0,
+      archived: 1,
+      rows: [{ _id: 'space-a:memory_kafka-lag', _source: archived }],
+    });
+    const store = createStore({
+      esql: { query },
+      get: jest.fn().mockResolvedValue({
+        found: true,
+        _id: 'space-a:memory_kafka-lag',
+        _source: archived,
+      }),
     });
 
     expect((await store.get('memory_kafka-lag'))?.archived).toBe(true);
 
     await store.list({ filter: 'active' });
-    await store.listPaginated({ filter: 'archived' });
+    const listing = await store.listPaginated({ filter: 'archived' });
     await store.retrieve();
 
-    const calls = search.mock.calls as unknown as Array<[Record<string, never>]>;
-    const serialized = calls.map(([request]) => JSON.stringify(request));
-    // 0: active listing. 1: archived listing, with the archived count hung off it.
-    // 2: recall.
-    expect(serialized[0]).toContain('attributes.archive_reason');
-    expect(serialized[1]).toContain('attributes.archive_reason');
-    expect(serialized[2]).toContain('attributes.archive_reason');
-    const statsQuery = calls[1][0] as unknown as {
-      aggs: { archived: { global: unknown; aggs: { inScope: { filter: unknown } } } };
-    };
-    expect(statsQuery.aggs.archived.global).toEqual({});
-    expect(statsQuery.aggs.archived.aggs.inScope.filter).toEqual({
-      bool: {
-        filter: [
-          { term: { tags: 'memory' } },
-          { term: { 'attributes.space_id': 'space-a' } },
-          { exists: { field: 'attributes.archive_reason' } },
-        ],
-      },
-    });
+    // Active listing, archived listing (page, total, archived count) and recall all name the reason.
+    const requests = requestsOf(query);
+    for (const request of requests) {
+      expect(JSON.stringify(request.filter)).toContain('attributes.archive_reason');
+    }
+    // The archived page is counted once, by the Space-wide count, not once per query.
+    expect(listing.stats.archived).toBe(1);
+    expect(requests.map(({ filter }) => filter)).toContainEqual(ARCHIVED_SCOPE);
   });
 
   it('counts every archived memory in scope whatever the list filter is', async () => {
-    // The header's "N archived" describes the Archived list, which the
-    // Active/Archived/All choice does not narrow. Counting inside the active
-    // listing reported 0 for every Space that had any archived memory at all.
-    const search = jest.fn().mockResolvedValue({
-      hits: { total: { value: 9 }, hits: [] },
-      aggregations: { archived: { inScope: { doc_count: 4 } } },
-    });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    // The header's "N archived" describes the Archived list, which the Active/Archived/All choice
+    // does not narrow. Counting inside the active listing reported 0 for every Space that had any
+    // archived memory at all.
+    const query = countingEsql({ active: 5, archived: 4 });
+    const store = createStore({ esql: { query } });
 
+    const totals = { active: 5, archived: 4, all: 9 };
     for (const filter of ['active', 'archived', 'all'] as const) {
-      search.mockClear();
+      query.mockClear();
       const result = await store.listPaginated({ filter });
       // `total` follows the listing; `archived` is the Space's own count.
-      expect(result.stats).toEqual({ total: 9, archived: 4 });
+      expect(result.stats).toEqual({ total: totals[filter], archived: 4 });
 
-      // One search carries both the page and the counts.
-      expect(search.mock.calls).toHaveLength(1);
-
-      const statsQuery = search.mock.calls[0][0] as unknown as {
-        query: { bool: { filter: object[] } };
-        aggs: {
-          archived: {
-            global: unknown;
-            aggs: { inScope: { filter: { bool: { filter: object[] } } } };
-          };
-        };
-      };
-      // The listing query carries the active/archived choice...
-      const listingFilter = JSON.stringify(statsQuery.query.bool.filter);
-      expect(listingFilter.includes('"attributes.archive_reason"')).toBe(filter !== 'all');
-      // ...and the archived count does not: it hangs off a `global` aggregation
-      // and filters the tenancy scope itself, with no `must_not` to exclude them.
-      const archivedFilter = statsQuery.aggs.archived.aggs.inScope.filter.bool.filter;
-      expect(archivedFilter).toHaveLength(3);
-      expect(archivedFilter[0]).toEqual({ term: { tags: 'memory' } });
-      expect(archivedFilter[1]).toEqual({ term: { 'attributes.space_id': 'space-a' } });
-      expect(archivedFilter[2]).toEqual({ exists: { field: 'attributes.archive_reason' } });
+      const requests = requestsOf(query);
+      // The listing carries the active/archived choice...
+      expect(JSON.stringify(requests[0].filter).includes('"attributes.archive_reason"')).toBe(
+        filter !== 'all'
+      );
+      // ...and the archived count does not: it filters the tenancy scope itself, with no
+      // `must_not` to exclude archived pages.
+      expect(requests.map(({ filter: scope }) => scope)).toContainEqual(ARCHIVED_SCOPE);
     }
   });
 
   it('leaves the archived count at the Space, whatever the keywords select', async () => {
-    const search = jest.fn().mockResolvedValue({
-      hits: { total: { value: 2 }, hits: [] },
-      aggregations: { archived: { inScope: { doc_count: 1 } } },
-    });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = countingEsql({ active: 1, archived: 1 });
+    const store = createStore({ esql: { query } });
 
     const result = await store.listPaginated({ tags: ['invoke-agent'] });
 
     expect(result.stats).toEqual({ total: 2, archived: 1 });
-    expect(search.mock.calls).toHaveLength(1);
-    const statsQuery = search.mock.calls[0][0] as unknown as {
-      query: unknown;
-      aggs: { archived: { aggs: { inScope: { filter: unknown } } } };
-    };
+    const requests = requestsOf(query);
     // The keyword narrows the listing the total counts...
-    expect(JSON.stringify(statsQuery.query)).toContain('"tags":"invoke-agent"');
-    // ...and nothing else. The header's archived number describes the sidebar's
-    // Archived list, which the client does not filter by keyword, so narrowing
-    // this count would describe a list nobody is looking at.
-    expect(JSON.stringify(statsQuery.aggs.archived.aggs.inScope.filter)).not.toContain(
-      '"tags":"invoke-agent"'
+    expect(JSON.stringify(requests[0].filter)).toContain('"tags":"invoke-agent"');
+    // ...and nothing else. The header's archived number describes the sidebar's Archived list,
+    // which the client does not filter by keyword, so narrowing this count would describe a list
+    // nobody is looking at.
+    const archivedCount = requests.find(
+      (request) => isCountQuery(request) && requiresArchived(request)
     );
+    expect(JSON.stringify(archivedCount?.filter)).not.toContain('"tags":"invoke-agent"');
   });
 
   it('ANDs a lexical search on title and description without narrowing the archived count', async () => {
-    const search = jest.fn().mockResolvedValue({
-      hits: { total: { value: 1 }, hits: [] },
-      aggregations: { archived: { inScope: { doc_count: 1 } } },
-    });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = countingEsql({ active: 1, archived: 1 });
+    const store = createStore({ esql: { query } });
 
     await store.listPaginated({ filter: 'active', search: 'checkout lag' });
 
-    const request = search.mock.calls[0][0] as unknown as {
-      query: { bool: { filter: object[] } };
-      aggs: { archived: { aggs: { inScope: { filter: object } } } };
-    };
-    expect(JSON.stringify(request.query)).toContain('"multi_match"');
-    expect(JSON.stringify(request.query)).toContain('"query":"checkout lag"');
-    expect(JSON.stringify(request.query)).toContain('"fields":["title","description"]');
-    expect(JSON.stringify(request.query)).toContain('"operator":"and"');
-    expect(JSON.stringify(request.query)).toContain('"attributes.archive_reason"');
-    // The header's archived count describes the whole Space, so the search does
-    // not narrow it either.
-    expect(JSON.stringify(request.aggs.archived.aggs.inScope.filter)).not.toContain('checkout lag');
+    const requests = requestsOf(query);
+    const [page] = requests;
+    // One `match` per field with every term required, any field: what `multi_match` with
+    // `operator: and` meant.
+    expect(page.query).toContain('MATCH(title, ?text, {"operator": "AND"}) OR MATCH(description, ');
+    expect(page.query).toContain('{"operator": "AND"})');
+    // The text is bound, never spliced into the query.
+    expect(page.query).not.toContain('checkout lag');
+    expect(page.params).toEqual(expect.arrayContaining([{ text: 'checkout lag' }]));
+    expect(JSON.stringify(page.filter)).toContain('"attributes.archive_reason"');
+    // The header's archived count describes the whole Space, so the search does not narrow it
+    // either.
+    const archivedCount = requests.find(
+      (request) => isCountQuery(request) && requiresArchived(request)
+    );
+    expect(archivedCount).toBeDefined();
+    expect(JSON.stringify(archivedCount)).not.toContain('checkout lag');
   });
 
   it('ignores a blank search rather than filtering on whitespace', async () => {
-    const search = jest.fn().mockResolvedValue({
-      hits: { total: { value: 1 }, hits: [] },
-      aggregations: { archived: { inScope: { doc_count: 0 } } },
-    });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = countingEsql({ active: 1, archived: 0 });
+    const store = createStore({ esql: { query } });
 
     await store.listPaginated({ search: '   ' });
 
-    expect(JSON.stringify(search.mock.calls[0][0])).not.toContain('"match"');
+    for (const request of requestsOf(query)) {
+      expect(request.query).not.toContain('MATCH');
+    }
   });
 
   it('paginates on a total order so no row is skipped or repeated', async () => {
-    // Every row shares an `updated_at`, so the slug tiebreaker is what keeps the
-    // order total. Sorting on `_id` instead is not an option: Elasticsearch
-    // rejects it (`indices.id_field_data.enabled`).
-    const sort = { '@timestamp': '2026-01-01T00:00:00.000Z' };
-    const page = (ids: string[]) => ({
-      hits: {
-        total: { value: 3, relation: 'eq' },
-        hits: ids.map((id) => {
-          // The sort values mirror what Elasticsearch returns for the sort
-          // clause: `updated_at`, then the slug tiebreaker (not `_id`).
+    // Every row shares an `updated_at`, so the slug tiebreaker is what keeps the order total.
+    // Sorting on `_id` instead is not an option: Elasticsearch rejects it
+    // (`indices.id_field_data.enabled`).
+    const updatedAt = '2026-01-01T00:00:00.000Z';
+    const page = (ids: string[]) =>
+      pageResponse(
+        ids.map((id) => {
           const slug = id.replace('memory_', '');
           return {
             _id: `space-a:${id}`,
             _source: {
               ...source,
-              '@timestamp': sort['@timestamp'],
-              attributes: { ...source.attributes, slug },
+              '@timestamp': updatedAt,
+              attributes: { ...source.attributes, slug, updated_at: updatedAt },
             },
-            sort: [sort['@timestamp'], slug],
           };
-        }),
-      },
+        })
+      );
+    // The mock answers by whether the request resumes from a cursor.
+    const query = jest.fn((request: EsqlRequest) => {
+      if (isCountQuery(request)) return Promise.resolve(countResponse(3));
+      const resumes = (request.params ?? []).some((param) => 'cursorUpdatedAt' in param);
+      return Promise.resolve(resumes ? page(['memory_c']) : page(['memory_a', 'memory_b']));
     });
-    // `listPaginated` answers the page and the counts from one request, so the
-    // mock answers by whether the request resumes from a cursor.
-    interface PageRequest {
-      search_after?: unknown[];
-    }
-    const search = jest.fn((request: PageRequest) => {
-      if (!request.search_after) {
-        return Promise.resolve({
-          ...page(['memory_a', 'memory_b']),
-          aggregations: { archived: { inScope: { doc_count: 1 } } },
-        });
-      }
-      return Promise.resolve(page(['memory_c']));
-    });
-
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const store = createStore({ esql: { query } });
 
     const first = await store.listPaginated({ size: 2 });
     expect(first.pages.map((row) => row.id)).toEqual(['memory_a', 'memory_b']);
@@ -404,11 +404,15 @@ describe('createMemoryPageStore', () => {
     // A short page means the result set is exhausted.
     expect(second.cursor).toBeUndefined();
 
-    // The second request must resume from the *first page's last row*, which is
-    // what `search_after` means — not an offset, and not the second page's own
-    // values. The tiebreaker is the slug, never `_id`.
-    const secondQuery = (search.mock.calls as [PageRequest][]).find((call) => call[0].search_after);
-    expect(secondQuery?.[0].search_after).toEqual([sort['@timestamp'], 'b']);
+    // The second request must resume from the *first page's last row*, which is what keyset paging
+    // means: not an offset, and not the second page's own values. The tiebreaker is the slug.
+    const resumed = requestsOf(query).find(
+      (request) =>
+        !isCountQuery(request) && (request.params ?? []).some((p) => 'cursorUpdatedAt' in p)
+    );
+    expect(resumed?.params).toEqual(
+      expect.arrayContaining([{ cursorUpdatedAt: updatedAt }, { cursorSlug: 'b' }])
+    );
     // Together the two pages cover every id exactly once.
     expect([...first.pages, ...second.pages].map((row) => row.id)).toEqual([
       'memory_a',
@@ -418,65 +422,40 @@ describe('createMemoryPageStore', () => {
   });
 
   it('ignores a malformed cursor rather than failing the listing', async () => {
-    const search = jest
-      .fn()
-      .mockResolvedValue({ hits: { total: { value: 0, relation: 'eq' }, hits: [] } });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = countingEsql({ active: 0, archived: 0 });
+    const store = createStore({ esql: { query } });
 
     const result = await store.listPaginated({ cursor: 'not-a-cursor' });
     expect(result.pages).toEqual([]);
-    expect(search.mock.calls[0][0].search_after).toBeUndefined();
+    expect(JSON.stringify(requestsOf(query))).not.toContain('cursorUpdatedAt');
   });
 
   it('rejects a cursor that decodes to the wrong shape, not just an unparseable one', async () => {
-    const search = jest
-      .fn()
-      .mockResolvedValue({ hits: { total: { value: 0, relation: 'eq' }, hits: [] } });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = countingEsql({ active: 0, archived: 0 });
+    const store = createStore({ esql: { query } });
     const encode = (value: unknown) =>
       Buffer.from(JSON.stringify(value), 'utf8').toString('base64');
 
-    // A token of the wrong arity would resume from a partial sort key, and one
-    // carrying a nested object is not a `search_after` value at all.
+    // A token of the wrong arity would resume from a partial sort key, and one carrying a nested
+    // object or a number is not a keyset position at all.
     for (const cursor of [
       encode(['2026-01-01T00:00:00.000Z']),
       encode([{ at: '2026-01-01T00:00:00.000Z' }, 'kafka-lag']),
       encode([123, null]),
       Buffer.from('not json at all', 'utf8').toString('base64'),
     ]) {
+      query.mockClear();
       const result = await store.listPaginated({ cursor });
       expect(result.pages).toEqual([]);
-      expect(search.mock.calls[0][0].search_after).toBeUndefined();
+      expect(JSON.stringify(requestsOf(query))).not.toContain('cursorUpdatedAt');
     }
   });
 
   it('takes total and stats from the whole filtered set, not from the page slice', async () => {
-    // The request returns one row out of many and carries the counts alongside,
-    // so if the header numbers came from the page slice they would shrink as the
-    // operator scrolls.
-    const search = jest.fn().mockResolvedValue({
-      hits: {
-        total: { value: 137, relation: 'eq' },
-        hits: [{ _id: 'space-a:memory_a', _source: source }],
-      },
-      aggregations: { archived: { inScope: { doc_count: 12 } } },
-    });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    // The page holds one row out of many, so if the header numbers came from the page slice they
+    // would shrink as the operator scrolls.
+    const query = countingEsql({ active: 125, archived: 12, rows: [kafkaHit] });
+    const store = createStore({ esql: { query } });
 
     const result = await store.listPaginated({ size: 25 });
 
@@ -489,18 +468,12 @@ describe('createMemoryPageStore', () => {
   });
 
   it('ANDs one exact term per canonical keyword', async () => {
-    const search = jest.fn().mockResolvedValue({ hits: { total: { value: 0 }, hits: [] } });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = jest.fn().mockResolvedValue(pageResponse([]));
+    const store = createStore({ esql: { query } });
 
     await store.list({ filter: 'active', tags: ['invoke-agent', 'cart-cache'] });
 
-    const query = (search.mock.calls[0][0] as { query: { bool: { filter: unknown[] } } }).query;
-    expect(query.bool.filter).toEqual([
+    expect(requestsOf(query)[0].filter?.bool.filter).toEqual([
       { term: { tags: 'memory' } },
       { term: { 'attributes.space_id': 'space-a' } },
       expect.objectContaining({ bool: { must_not: expect.anything() } }),
@@ -510,55 +483,35 @@ describe('createMemoryPageStore', () => {
   });
 
   it('canonicalizes the selected keywords and drops duplicates', async () => {
-    const search = jest.fn().mockResolvedValue({ hits: { total: { value: 0 }, hits: [] } });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = jest.fn().mockResolvedValue(pageResponse([]));
+    const store = createStore({ esql: { query } });
 
     await store.list({ tags: ['Invoke Agent', 'invoke_agent'] });
 
-    const filter = (search.mock.calls[0][0] as { query: { bool: { filter: unknown[] } } }).query
-      .bool.filter;
-    expect(filter[2]).toEqual({ term: { tags: 'invoke-agent' } });
+    expect(requestsOf(query)[0].filter?.bool.filter?.[2]).toEqual({
+      term: { tags: 'invoke-agent' },
+    });
   });
 
   it('counts the filtered set in the stats, so the header cannot drift from the rows', async () => {
-    const search = jest.fn().mockResolvedValue({
-      hits: { total: { value: 2 }, hits: [] },
-      aggregations: { archived: { inScope: { doc_count: 0 } } },
-    });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = countingEsql({ active: 2, archived: 0 });
+    const store = createStore({ esql: { query } });
 
     const result = await store.listPaginated({ tags: ['kafka'] });
 
     expect(result.total).toBe(2);
     expect(result.stats).toEqual({ total: 2, archived: 0 });
-    // The page query carries the tag clause, and the archived count on it does not.
-    const serialized = search.mock.calls.map(([request]) => JSON.stringify(request));
-    expect(serialized).toHaveLength(1);
-    expect(serialized[0]).toContain('"tags":"kafka"');
+    // The listing request carries the tag clause.
+    expect(JSON.stringify(requestsOf(query)[0].filter)).toContain('"tags":"kafka"');
   });
 
   it('leaves the query untagged when no keyword was selected', async () => {
-    const search = jest.fn().mockResolvedValue({ hits: { total: { value: 0 }, hits: [] } });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = jest.fn().mockResolvedValue(pageResponse([]));
+    const store = createStore({ esql: { query } });
 
     await store.list({ tags: [] });
 
-    expect((search.mock.calls[0][0] as { query: unknown }).query).toEqual({
+    expect(requestsOf(query)[0].filter).toEqual({
       bool: {
         filter: [{ term: { tags: 'memory' } }, { term: { 'attributes.space_id': 'space-a' } }],
       },
@@ -566,13 +519,8 @@ describe('createMemoryPageStore', () => {
   });
 
   it('refuses more keywords than the cap, rather than silently narrowing the AND', async () => {
-    const search = jest.fn().mockResolvedValue({ hits: { total: { value: 0 }, hits: [] } });
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = jest.fn().mockResolvedValue(pageResponse([]));
+    const store = createStore({ esql: { query } });
 
     // More keywords than the cap is refused rather than answered for the first
     // `MAX_TAG_FILTER_KEYWORDS` of them: a silently narrowed AND filter returns
@@ -593,28 +541,31 @@ describe('createMemoryPageStore', () => {
     ).resolves.toBeDefined();
   });
 
-  it('reports empty stats rather than failing when the index does not exist yet', async () => {
-    const search = jest.fn().mockRejectedValue(
-      new errors.ResponseError({
-        statusCode: 404,
-        body: { error: { type: 'index_not_found_exception' } },
-      } as never)
-    );
-    const store = createMemoryPageStore({
-      esClient: { search } as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+  it.each([
+    ['an ES|QL unknown index (400)', unknownIndexError],
+    [
+      'a 404 index_not_found_exception',
+      () =>
+        new errors.ResponseError({
+          statusCode: 404,
+          body: { error: { type: 'index_not_found_exception' } },
+        } as never),
+    ],
+  ])(
+    'reports empty stats rather than failing when the index does not exist yet: %s',
+    async (_name, makeError) => {
+      const query = jest.fn().mockRejectedValue(makeError());
+      const store = createStore({ esql: { query } });
 
-    // The index is created lazily, so an empty Semantic Memory is a 404 from
-    // Elasticsearch rather than an error the operator should see.
-    await expect(store.listPaginated()).resolves.toEqual({
-      pages: [],
-      stats: { total: 0, archived: 0 },
-      total: 0,
-    });
-  });
+      // The index is created lazily, so an empty Semantic Memory is a missing index from
+      // Elasticsearch rather than an error the operator should see.
+      await expect(store.listPaginated()).resolves.toEqual({
+        pages: [],
+        stats: { total: 0, archived: 0 },
+        total: 0,
+      });
+    }
+  );
 
   it('decays display telemetry without rewriting stored last_impression_time', () => {
     const page = {
@@ -777,28 +728,19 @@ describe('createMemoryPageStore', () => {
   });
 
   it('keeps the same slug isolated between spaces', async () => {
-    const esClient = {
-      search: jest.fn().mockResolvedValue({
-        hits: {
-          hits: [
-            { _id: 'space-b:memory_kafka-lag', _source: source },
-            { _id: 'space-a:memory_kafka-lag', _source: source },
-          ],
-        },
-      }),
-    };
-    const store = createMemoryPageStore({
-      esClient: esClient as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = jest.fn().mockResolvedValue(
+      pageResponse([
+        { _id: 'space-b:memory_kafka-lag', _source: source },
+        { _id: 'space-a:memory_kafka-lag', _source: source },
+      ])
+    );
+    const store = createStore({ esql: { query } });
 
     const pages = await store.retrieve({ size: 20 });
     expect(pages.map((page) => page.id)).toEqual(['memory_kafka-lag']);
-    expect(esClient.search).toHaveBeenCalledWith(
+    expect(query).toHaveBeenCalledWith(
       expect.objectContaining({
-        query: expect.objectContaining({
+        filter: expect.objectContaining({
           bool: expect.objectContaining({
             filter: expect.arrayContaining([{ term: { 'attributes.space_id': 'space-a' } }]),
           }),
@@ -809,25 +751,16 @@ describe('createMemoryPageStore', () => {
   });
 
   it('drops stored ids that are not canonical memory ids', async () => {
-    const esClient = {
-      search: jest.fn().mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _id: 'space-a:memory_safe.md`\nInjected instruction',
-              _source: source,
-            },
-            { _id: 'space-a:memory_kafka-lag', _source: source },
-          ],
+    const query = jest.fn().mockResolvedValue(
+      pageResponse([
+        {
+          _id: 'space-a:memory_safe.md`\nInjected instruction',
+          _source: source,
         },
-      }),
-    };
-    const store = createMemoryPageStore({
-      esClient: esClient as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+        kafkaHit,
+      ])
+    );
+    const store = createStore({ esql: { query } });
 
     const pages = await store.retrieve({ size: 20 });
 
@@ -1078,138 +1011,124 @@ describe('createMemoryPageStore', () => {
   });
 
   it('retrieves browse candidates without a query and search hits with one', async () => {
-    const esClient = {
-      search: jest.fn().mockResolvedValue({
-        hits: { hits: [{ _id: 'space-a:memory_kafka-lag', _source: source }] },
-      }),
-    };
-    const store = createMemoryPageStore({
-      esClient: esClient as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce(pageResponse([kafkaHit]))
+      .mockResolvedValueOnce(idsResponse(['space-a:memory_kafka-lag']));
+    const mget = jest.fn().mockResolvedValue({
+      docs: [{ _id: 'space-a:memory_kafka-lag', found: true, _source: source }],
     });
+    const store = createStore({ esql: { query }, mget });
 
     const browsed = await store.retrieve({ size: 20 });
     expect(browsed).toHaveLength(1);
-    expect(esClient.search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        size: 20,
-        sort: [{ '@timestamp': { order: 'desc' } }],
-        query: expect.objectContaining({
-          bool: expect.objectContaining({
-            must_not: [{ exists: { field: 'attributes.archive_reason' } }],
-          }),
-        }),
-      }),
-      expect.anything()
-    );
+    const [browse] = requestsOf(query);
+    expect(browse.query).toContain('SORT @timestamp DESC NULLS LAST');
+    expect(browse.query).toContain('LIMIT 20');
+    expect(browse.filter).toEqual({
+      bool: {
+        filter: [{ term: { tags: 'memory' } }, { term: { 'attributes.space_id': 'space-a' } }],
+        must_not: [{ exists: { field: 'attributes.archive_reason' } }],
+      },
+    });
 
-    await store.retrieve({ query: 'checkout lag', size: 50 });
-    expect(esClient.search).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        size: 50,
-        retriever: expect.objectContaining({
-          rrf: expect.objectContaining({
-            retrievers: [
-              { standard: { query: { match: { description: 'checkout lag' } } } },
-              { standard: { query: { match: { 'description.semantic': 'checkout lag' } } } },
-            ],
-          }),
-        }),
-      }),
+    const searched = await store.retrieve({ query: 'checkout lag', size: 50 });
+    expect(searched.map(({ id }) => id)).toEqual(['memory_kafka-lag']);
+    const hybrid = requestsOf(query)[1];
+    // A lexical and a semantic branch, fused. `MATCH` leads each branch, ahead of its `LIMIT`.
+    expect(hybrid.query).toContain('FORK (WHERE MATCH(description, ?text) | SORT _score DESC');
+    expect(hybrid.query).toContain('(WHERE MATCH(description.semantic, ');
+    expect(hybrid.query).toContain('FUSE RRF WITH {"rank_constant": 60}');
+    expect(hybrid.query).not.toContain('checkout lag');
+    expect(hybrid.params).toEqual(
+      expect.arrayContaining([{ text: 'checkout lag' }, { window: 50 }])
+    );
+    expect(hybrid.filter).toEqual(browse.filter);
+    // `_source` does not survive FUSE, so the ranked ids are loaded by id.
+    expect(mget).toHaveBeenCalledWith(
+      { index: MEMORY_INDEX, ids: ['space-a:memory_kafka-lag'] },
       expect.anything()
     );
-    expect(esClient.search.mock.calls[1][0].query).toBeUndefined();
-    expect(esClient.search.mock.calls[1][0].sort).toBeUndefined();
   });
 
   it('falls back to BM25 when a semantic retriever returns a generic 404', async () => {
-    const esClient = {
-      search: jest
-        .fn()
-        .mockRejectedValueOnce({
-          statusCode: 404,
-          meta: { body: { error: { type: 'resource_not_found_exception' } } },
-        })
-        .mockResolvedValueOnce({
-          hits: { hits: [{ _id: 'space-a:memory_kafka-lag', _source: source }] },
-        }),
-    };
-    const store = createMemoryPageStore({
-      esClient: esClient as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = jest
+      .fn()
+      .mockRejectedValueOnce({
+        statusCode: 404,
+        meta: { body: { error: { type: 'resource_not_found_exception' } } },
+      })
+      .mockResolvedValueOnce(pageResponse([kafkaHit]));
+    const store = createStore({ esql: { query } });
 
     await expect(store.retrieve({ query: 'checkout lag', size: 50 })).resolves.toEqual([
       expect.objectContaining({ id: 'memory_kafka-lag' }),
     ]);
-    expect(esClient.search).toHaveBeenCalledTimes(2);
-    expect(esClient.search.mock.calls[1][0]).toEqual(
-      expect.objectContaining({
-        query: expect.objectContaining({
-          bool: expect.objectContaining({ must: [{ match: { description: 'checkout lag' } }] }),
-        }),
-      })
-    );
+    expect(query).toHaveBeenCalledTimes(2);
+    const fallback = requestsOf(query)[1];
+    expect(fallback.query).toContain('MATCH(description, ?text)');
+    expect(fallback.query).toContain('SORT _score DESC');
+    expect(fallback.query).not.toContain('FORK');
   });
 
   it('returns no hits for an index_not_found_exception without attempting BM25', async () => {
-    const esClient = {
-      search: jest.fn().mockRejectedValue(
-        new errors.ResponseError({
-          statusCode: 404,
-          body: { error: { type: 'index_not_found_exception' } },
-        } as never)
-      ),
-    };
-    const store = createMemoryPageStore({
-      esClient: esClient as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = jest.fn().mockRejectedValue(unknownIndexError());
+    const store = createStore({ esql: { query } });
 
     await expect(store.retrieve({ query: 'checkout lag', size: 50 })).resolves.toEqual([]);
-    expect(esClient.search).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(1);
   });
 
   it('retrieves catalog duplicates against title and content, not context', async () => {
-    const esClient = {
-      search: jest.fn().mockResolvedValue({
-        hits: { hits: [{ _id: 'space-a:memory_kafka-lag', _source: source }] },
-      }),
-    };
-    const store = createMemoryPageStore({
-      esClient: esClient as never,
-      logger,
-      spaceId: 'space-a',
-      now: () => T0,
-    });
+    const query = jest.fn().mockResolvedValue(pageResponse([kafkaHit]));
+    const store = createStore({ esql: { query } });
 
     await store.retrieve({ query: 'Checkout Redis', size: 5, match: 'content' });
-    expect(esClient.search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        size: 5,
-        query: expect.objectContaining({
-          bool: expect.objectContaining({
-            must: [
-              expect.objectContaining({
-                bool: expect.objectContaining({
-                  should: [
-                    { match: { title: 'Checkout Redis' } },
-                    { match: { content: 'Checkout Redis' } },
-                  ],
-                }),
-              }),
-            ],
-          }),
-        }),
-      }),
-      expect.anything()
-    );
+    const [request] = requestsOf(query);
+    expect(request.query).toContain('MATCH(title, ?text) OR MATCH(content, ');
+    expect(request.query).not.toContain('description');
+    expect(request.query).toContain('LIMIT 5');
+    expect(request.params).toEqual(expect.arrayContaining([{ text: 'Checkout Redis' }]));
+  });
+
+  it('returns the hybrid hits in rank order and drops ranked ids that no longer exist', async () => {
+    const other = {
+      ...source,
+      title: 'Redis eviction',
+      attributes: { ...source.attributes, slug: 'redis' },
+    };
+    const query = jest
+      .fn()
+      .mockResolvedValue(
+        idsResponse(['space-a:memory_redis', 'space-a:memory_gone', 'space-a:memory_kafka-lag'])
+      );
+    // `mget` answers in the order it was asked, so ranking survives the load.
+    const mget = jest.fn().mockResolvedValue({
+      docs: [
+        { _id: 'space-a:memory_redis', found: true, _source: other },
+        { _id: 'space-a:memory_gone', found: false },
+        { _id: 'space-a:memory_kafka-lag', found: true, _source: source },
+      ],
+    });
+    const store = createStore({ esql: { query }, mget });
+
+    const pages = await store.retrieve({ query: 'cache', size: 10 });
+
+    expect(pages.map(({ id }) => id)).toEqual(['memory_redis', 'memory_kafka-lag']);
+    expect(mget.mock.calls[0][0].ids).toEqual([
+      'space-a:memory_redis',
+      'space-a:memory_gone',
+      'space-a:memory_kafka-lag',
+    ]);
+  });
+
+  it('does not mask a failure to load the ranked documents with a BM25 fallback', async () => {
+    const query = jest.fn().mockResolvedValue(idsResponse(['space-a:memory_kafka-lag']));
+    const mget = jest.fn().mockRejectedValue(new Error('mget failed'));
+    const store = createStore({ esql: { query }, mget });
+
+    await expect(store.retrieve({ query: 'cache', size: 10 })).rejects.toThrow('mget failed');
+    expect(query).toHaveBeenCalledTimes(1);
   });
 
   it('upserts the task into context and does not write search_embedding', async () => {
