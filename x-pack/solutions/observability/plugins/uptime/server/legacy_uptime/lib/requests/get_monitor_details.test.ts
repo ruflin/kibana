@@ -5,27 +5,49 @@
  * 2.0.
  */
 
-import { mockSearchResult } from './test_helpers';
+import { getUptimeESMockClient, mockSearchResult } from './test_helpers';
 import { getMonitorAlerts, getMonitorDetails } from './get_monitor_details';
 import * as statusCheck from '../alerts/status_check';
 import { CLIENT_ALERT_TYPES } from '../../../../common/constants/uptime_alerts';
 
 describe('getMonitorDetails', () => {
   it('getMonitorDetails will provide expected calls', async () => {
-    expect.assertions(2);
+    expect.assertions(3);
 
-    const uptimeEsClient = mockSearchResult([{ _source: { id: 1 } }]);
+    const { esClient, uptimeEsClient } = getUptimeESMockClient();
+    esClient.esql.query.mockResolvedValue({
+      columns: [{ name: '_source', type: '_source' }],
+      values: [[{ '@timestamp': '2021-10-20T20:52:20.050Z', error: { message: 'boom' } }]],
+    } as any);
 
-    await getMonitorDetails({
+    const details = await getMonitorDetails({
       uptimeEsClient,
       monitorId: 'fooID',
       dateStart: 'now-15m',
       dateEnd: 'now',
       rulesClient: { find: jest.fn().mockReturnValue({ data: [] }) },
     });
-    expect(uptimeEsClient.baseESClient.search).toHaveBeenCalledTimes(1);
+    expect(esClient.esql.query).toHaveBeenCalledTimes(1);
 
-    expect((uptimeEsClient.baseESClient.search as jest.Mock).mock.calls[0]).toMatchSnapshot();
+    expect(esClient.esql.query.mock.calls[0][0]).toEqual({
+      query:
+        'FROM heartbeat-* METADATA _source | WHERE monitor.id == ?monitorId | SORT @timestamp DESC NULLS LAST | KEEP _source | LIMIT 1',
+      params: [{ monitorId: 'fooID' }],
+      filter: {
+        bool: {
+          filter: [
+            { exists: { field: 'error' } },
+            { range: { '@timestamp': { gte: 'now-15m', lte: 'now' } } },
+          ],
+        },
+      },
+    });
+    expect(details).toEqual({
+      monitorId: 'fooID',
+      error: { message: 'boom' },
+      timestamp: '2021-10-20T20:52:20.050Z',
+      alerts: [],
+    });
   });
 
   describe('getMonitorAlerts', () => {

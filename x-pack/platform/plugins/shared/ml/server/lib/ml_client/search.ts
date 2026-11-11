@@ -8,6 +8,7 @@
 import Boom from '@hapi/boom';
 import type { IScopedClusterClient } from '@kbn/core/server';
 import type { estypes } from '@elastic/elasticsearch';
+import type { ComposerQuery } from '@elastic/esql';
 import type {
   TransportResult,
   TransportRequestOptions,
@@ -20,6 +21,7 @@ import type { MLSavedObjectService } from '../../saved_objects';
 import { ML_RESULTS_INDEX_PATTERN } from '../../../common/constants/index_patterns';
 import type { ServerlessInfo } from '../../types';
 import { DEFAULT_ML_PROJECT_ROUTING } from '../../../common/constants/cps';
+import { runEsql, esqlRows, type EsqlRow } from '../esql/esql_read';
 
 export function searchProvider(
   client: IScopedClusterClient,
@@ -71,5 +73,22 @@ export function searchProvider(
     return resp;
   }
 
-  return { anomalySearch };
+  /**
+   * ES|QL counterpart of `anomalySearch`: same job-ID space check, internal user and CPS routing.
+   * The query must read `FROM ${ML_RESULTS_INDEX_PATTERN}`. Returns the rows keyed by column name.
+   * Like the wildcard search, it returns no rows when no results index exists yet.
+   */
+  async function anomalyEsql(query: ComposerQuery, jobIds: string[]): Promise<EsqlRow[]> {
+    await jobIdsCheck('anomaly-detector', jobIds);
+    const response = await runEsql({
+      esClient: client.asInternalUser,
+      query,
+      emptyOnUnknownIndex: true,
+      projectRouting:
+        serverless.isServerless && serverless.cpsEnabled ? DEFAULT_ML_PROJECT_ROUTING : undefined,
+    });
+    return esqlRows(response);
+  }
+
+  return { anomalySearch, anomalyEsql };
 }

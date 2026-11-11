@@ -45,6 +45,7 @@ export interface MlInferTrainedModelRequest extends estypes.MlInferTrainedModelR
 export interface MlClient
   extends Omit<OrigMlClient, 'stopTrainedModelDeployment' | 'inferTrainedModel'> {
   anomalySearch: ReturnType<typeof searchProvider>['anomalySearch'];
+  anomalyEsql: ReturnType<typeof searchProvider>['anomalyEsql'];
   updateTrainedModelDeployment: (
     payload: UpdateTrainedModelDeploymentRequest
   ) => Promise<UpdateTrainedModelDeploymentResponse>;

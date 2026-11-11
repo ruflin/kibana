@@ -2,37 +2,14 @@
 
 exports[`error distribution queries fetches an error distribution 1`] = `
 Object {
-  "aggs": Object {
-    "distribution": Object {
-      "histogram": Object {
-        "extended_bounds": Object {
-          "max": 50000,
-          "min": 0,
-        },
-        "field": "@timestamp",
-        "interval": 3333,
-        "min_doc_count": 0,
-      },
-    },
-  },
   "apm": Object {
     "events": Array [
       "error",
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
-        Object {
-          "term": Object {
-            "error.type": "crash",
-          },
-        },
-        Object {
-          "term": Object {
-            "service.name": "serviceName",
-          },
-        },
         Object {
           "range": Object {
             "@timestamp": Object {
@@ -45,44 +22,31 @@ Object {
       ],
     },
   },
-  "size": 0,
-  "track_total_hits": false,
+  "params": Array [
+    Object {
+      "error_type_value": "crash",
+    },
+    Object {
+      "service_name_value": "serviceName",
+    },
+    Object {
+      "intervalMs": 3333,
+    },
+  ],
+  "query": "FROM myIndex | WHERE \`error.type\` == ?error_type_value | WHERE \`service.name\` == ?service_name_value | EVAL bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ?intervalMs | STATS doc_count = COUNT(*) BY bucket | LIMIT 16",
 }
 `;
 
 exports[`error distribution queries fetches an error distribution with a group id 1`] = `
 Object {
-  "aggs": Object {
-    "distribution": Object {
-      "histogram": Object {
-        "extended_bounds": Object {
-          "max": 50000,
-          "min": 0,
-        },
-        "field": "@timestamp",
-        "interval": 3333,
-        "min_doc_count": 0,
-      },
-    },
-  },
   "apm": Object {
     "events": Array [
       "error",
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
-        Object {
-          "term": Object {
-            "error.type": "crash",
-          },
-        },
-        Object {
-          "term": Object {
-            "service.name": "serviceName",
-          },
-        },
         Object {
           "range": Object {
             "@timestamp": Object {
@@ -92,15 +56,23 @@ Object {
             },
           },
         },
-        Object {
-          "term": Object {
-            "error.grouping_key": "foo",
-          },
-        },
       ],
     },
   },
-  "size": 0,
-  "track_total_hits": false,
+  "params": Array [
+    Object {
+      "error_type_value": "crash",
+    },
+    Object {
+      "service_name_value": "serviceName",
+    },
+    Object {
+      "error_grouping_key_value": "foo",
+    },
+    Object {
+      "intervalMs": 3333,
+    },
+  ],
+  "query": "FROM myIndex | WHERE \`error.type\` == ?error_type_value | WHERE \`service.name\` == ?service_name_value | WHERE \`error.grouping_key\` == ?error_grouping_key_value | EVAL bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ?intervalMs | STATS doc_count = COUNT(*) BY bucket | LIMIT 16",
 }
 `;

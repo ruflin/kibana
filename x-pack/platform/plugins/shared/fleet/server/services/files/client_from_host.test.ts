@@ -89,20 +89,31 @@ describe('FleetFromHostFilesClient', () => {
       },
     };
 
-    esClientMock.search.mockImplementation(async (searchRequest = {}) => {
+    esClientMock.esql.query.mockImplementation((async (request: { query: string }) => {
       // File metadata
-      if ((searchRequest.index as string).startsWith('.fleet-fileds-fromhost-meta-')) {
-        return fleetFilesIndexSearchResponse;
+      if (request.query.startsWith('FROM .fleet-fileds-fromhost-meta-foo ')) {
+        const [hit] = fleetFilesIndexSearchResponse.hits.hits;
+        return {
+          columns: [
+            { name: '_id', type: 'keyword' },
+            { name: '_index', type: 'keyword' },
+            { name: '_source', type: '_source' },
+          ],
+          values: hit ? [[hit._id, hit._index, hit._source]] : [],
+        };
       }
 
-      if ((searchRequest.index as string).startsWith('.fleet-fileds-fromhost-data-')) {
-        return fleetFileDataIndexSearchResponse;
+      if (request.query.startsWith('FROM .fleet-fileds-fromhost-data-foo ')) {
+        return {
+          columns: [{ name: 'bid', type: 'keyword' }],
+          values: fleetFileDataIndexSearchResponse.hits.hits.map(() => ['123']),
+        };
       }
 
       throw new Error(
-        `esClientMock.search(): no mock implemented for route: ${JSON.stringify(searchRequest)}`
+        `esClientMock.esql.query(): no mock implemented for route: ${JSON.stringify(request)}`
       );
-    });
+    }) as any);
   });
 
   it('should create internal ES File client with expected arguments', () => {
@@ -132,6 +143,24 @@ describe('FleetFromHostFilesClient', () => {
       });
     });
 
+    it('should look the file up by id in the metadata index', async () => {
+      await getFleetFilesInstance().get('123');
+
+      expect(esClientMock.esql.query).toHaveBeenCalledWith({
+        query:
+          'FROM .fleet-fileds-fromhost-meta-foo METADATA _id, _index, _source | WHERE _id == ?fileId | KEEP _id, _index, _source | LIMIT 1',
+        params: [{ fileId: '123' }],
+      });
+    });
+
+    it('should throw not found when the file has no document', async () => {
+      fleetFilesIndexSearchResponse.hits.hits = [];
+
+      await expect(getFleetFilesInstance().get('123')).rejects.toThrow(
+        'File with id [123] not found in index [.fleet-fileds-fromhost-meta-foo]'
+      );
+    });
+
     it('should adjust `status` if no data exists for file', async () => {
       (fleetFileDataIndexSearchResponse.hits.total as estypes.SearchTotalHits).value = 0;
       fleetFileDataIndexSearchResponse.hits.hits = [];
@@ -144,21 +173,9 @@ describe('FleetFromHostFilesClient', () => {
     it('should search data index for file id', async () => {
       await getFleetFilesInstance().doesFileHaveData('123');
 
-      expect(esClientMock.search).toHaveBeenCalledWith({
-        _source: false,
-        query: {
-          bool: {
-            filter: [
-              {
-                term: {
-                  bid: '123',
-                },
-              },
-            ],
-          },
-        },
-        index: '.fleet-fileds-fromhost-data-foo',
-        size: 0,
+      expect(esClientMock.esql.query).toHaveBeenCalledWith({
+        query: 'FROM .fleet-fileds-fromhost-data-foo | WHERE bid == ?fileId | KEEP bid | LIMIT 1',
+        params: [{ fileId: '123' }],
       });
     });
 

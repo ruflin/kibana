@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { PROFILING_EVENTS_INDEX_BY_SCHEMA, ProfilingSchema } from '@kbn/profiling-utils';
 import type { ProfilingESClient } from '../../../utils/profiling_es_client';
 
@@ -13,14 +14,12 @@ export async function hasOtelProfilingData({
 }: {
   client: ProfilingESClient;
 }): Promise<boolean> {
-  const response = await client.search('has_any_otel_profiling_data', {
-    index: PROFILING_EVENTS_INDEX_BY_SCHEMA[ProfilingSchema.OTEL],
-    size: 0,
-    track_total_hits: 1,
-    terminate_after: 1,
-    ignore_unavailable: true,
-    allow_no_indices: true,
-  });
+  // Only existence matters (the DSL search used `terminate_after: 1`), so one row is enough. A
+  // missing index yields an empty response.
+  const response = await client.esql(
+    'has_any_otel_profiling_data',
+    esql.from([PROFILING_EVENTS_INDEX_BY_SCHEMA[ProfilingSchema.OTEL]]).limit(1)
+  );
 
-  return response.hits.total.value > 0;
+  return response.values.length > 0;
 }

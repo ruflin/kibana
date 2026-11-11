@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { getSampleProbability } from '@kbn/ml-random-sampler-utils';
 import type { ISearchGeneric } from '@kbn/search-types';
 import { lastValueFrom } from 'rxjs';
@@ -24,14 +25,15 @@ export const countDocuments = ({ search }: { search: ISearchGeneric }) =>
       input: { index, endTimestamp, startTimestamp, timeField, messageField, documentFilters },
       signal,
     }) => {
-      const { rawResponse: totalHitsResponse } = await lastValueFrom(
+      // The exists, range and document filters stay a request `filter`: the document filters come
+      // from Discover as Query DSL.
+      const { rawResponse } = await lastValueFrom(
         search(
           {
             params: {
-              index,
-              size: 0,
-              track_total_hits: true,
-              query: createCategorizationQuery({
+              query: esql.from(index.split(',').map((source) => source.trim()))
+                .pipe`STATS total = COUNT(*)`.toRequest().query,
+              filter: createCategorizationQuery({
                 messageField,
                 timeField,
                 startTimestamp,
@@ -40,16 +42,16 @@ export const countDocuments = ({ search }: { search: ISearchGeneric }) =>
               }),
             },
           },
-          { abortSignal: signal }
+          { abortSignal: signal, strategy: 'esql_async' }
         )
       );
 
-      const documentCount =
-        totalHitsResponse.hits.total == null
-          ? 0
-          : typeof totalHitsResponse.hits.total === 'number'
-          ? totalHitsResponse.hits.total
-          : totalHitsResponse.hits.total.value;
+      const { columns, values } = rawResponse as unknown as {
+        columns: Array<{ name: string }>;
+        values: unknown[][];
+      };
+      const totalColumn = columns.findIndex(({ name }) => name === 'total');
+      const documentCount = Number(values[0]?.[totalColumn] ?? 0);
       const samplingProbability = getSampleProbability(documentCount);
 
       return {

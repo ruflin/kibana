@@ -23,6 +23,7 @@ import {
   getUnmappedFields,
   UNMAPPED_SAMPLE_SIZE,
 } from '../../../lib/streams/helpers/unmapped_fields';
+import { fetchLatestHits } from '../../../lib/streams/helpers/esql';
 import { getEffectiveLifecycle } from '../../../lib/streams/lifecycle/get_effective_lifecycle';
 import type { IlmPoliciesResponse } from '../../../lib/streams/lifecycle/ilm_policies';
 import { getEsqlView } from '../../../lib/streams/esql_views/manage_esql_views';
@@ -288,13 +289,9 @@ const buildStreamEntry = async ({
     const convention = getStreamConvention(definition);
     const conventionHint = getConventionHint(convention);
 
-    const [ancestors, sampleDocs, fieldCapsResponse, mappingResponse] = await Promise.all([
+    const [ancestors, sampleHits, fieldCapsResponse, mappingResponse] = await Promise.all([
       streamsClient.getAncestors(streamName),
-      esClient.search({
-        index: streamName,
-        sort: [{ '@timestamp': { order: 'desc' } }],
-        size: UNMAPPED_SAMPLE_SIZE,
-      }),
+      fetchLatestHits({ esClient, index: streamName, size: UNMAPPED_SAMPLE_SIZE }),
       isClassic
         ? esClient.fieldCaps({ index: streamName, fields: ['*'], include_unmapped: false })
         : (undefined as unknown as FieldCapsResponse),
@@ -308,7 +305,7 @@ const buildStreamEntry = async ({
       const { mappedFields, unmappedFields } = buildClassicSchemaWithFieldCaps(
         definition as Streams.ClassicStream.Definition,
         fieldCapsResponse,
-        sampleDocs
+        sampleHits
       );
       entry.schema = {
         field_convention: convention,
@@ -322,7 +319,7 @@ const buildStreamEntry = async ({
       };
     } else {
       const mappedFields = buildFieldMappings(definition, ancestors);
-      const unmappedFields = getUnmappedFields({ definition, ancestors, sampleDocs });
+      const unmappedFields = getUnmappedFields({ definition, ancestors, sampleHits });
       entry.schema = {
         field_convention: convention,
         field_convention_hint: conventionHint,
@@ -563,7 +560,7 @@ const getFieldCapsType = (
 const buildClassicSchemaWithFieldCaps = (
   definition: Streams.ClassicStream.Definition,
   fieldCapsResponse: FieldCapsResponse,
-  sampleDocs: { hits: { hits: Array<{ _source?: unknown }> } }
+  sampleHits: Array<{ _source?: unknown }>
 ): { mappedFields: ClassicMappedField[]; unmappedFields: string[] } => {
   const overrides = definition.ingest.classic.field_overrides || {};
   const overrideNames = new Set(Object.keys(overrides));
@@ -597,7 +594,7 @@ const buildClassicSchemaWithFieldCaps = (
 
   const allMappedNames = new Set([...overrideNames, ...esFieldNames]);
   const unmappedFields: string[] = [];
-  for (const hit of sampleDocs.hits.hits) {
+  for (const hit of sampleHits) {
     if (!hit._source || typeof hit._source !== 'object') continue;
     const flat = flattenKeys(hit._source as Record<string, unknown>);
     for (const key of flat) {

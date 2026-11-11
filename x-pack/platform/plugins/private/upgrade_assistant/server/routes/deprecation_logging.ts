@@ -6,6 +6,8 @@
  */
 
 import moment from 'moment-timezone';
+import { esql } from '@elastic/esql';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
 import { schema } from '@kbn/config-schema';
 import { versionCheckHandlerWrapper } from '@kbn/upgrade-assistant-pkg-server';
 import {
@@ -110,28 +112,24 @@ export function registerDeprecationLoggingRoutes({
 
         const now = moment().toISOString();
 
-        const body = await client.asCurrentUser.count({
-          index: DEPRECATION_LOGS_INDEX,
-          query: {
-            bool: {
-              must: {
-                range: {
-                  '@timestamp': {
-                    gte: request.query.from,
-                    lte: now,
-                  },
-                },
-              },
-              must_not: {
-                terms: {
-                  [DEPRECATION_LOGS_ORIGIN_FIELD]: [...APPS_WITH_DEPRECATION_LOGS],
-                },
-              },
-            },
-          },
-        });
+        // Documents without an origin count too, as with the `must_not` terms query of the DSL.
+        const { query, params } = esql.from([DEPRECATION_LOGS_INDEX])
+          .where`@timestamp >= TO_DATETIME(${{
+          from: request.query.from,
+        }}) AND @timestamp <= TO_DATETIME(${{ now }}) AND (${esql.col(
+          DEPRECATION_LOGS_ORIGIN_FIELD
+        )} IS NULL OR NOT ${esql.col(DEPRECATION_LOGS_ORIGIN_FIELD)} IN (${{
+          origins: [...APPS_WITH_DEPRECATION_LOGS],
+        }}))`.pipe`STATS count = COUNT(*)`.toRequest();
 
-        return response.ok({ body: { count: body.count } });
+        const result = await client.asCurrentUser.esql.query({
+          query,
+          params,
+        } as unknown as EsqlQueryRequest);
+        const countColumn = result.columns.findIndex((column) => column.name === 'count');
+        const count = (result.values[0]?.[countColumn] as number | undefined) ?? 0;
+
+        return response.ok({ body: { count } });
       } catch (error) {
         return handleEsError({ error, response });
       }

@@ -6,19 +6,14 @@
  */
 
 import { errors } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import { rangeQuery } from '@kbn/observability-plugin/server';
-import {
-  unwrapEsResponse,
-  WrappedElasticsearchClientError,
-} from '@kbn/observability-plugin/server';
-import type { ESSearchResponse } from '@kbn/es-types';
-import type { Annotation as ESAnnotation } from '@kbn/observability-plugin/common/annotations';
 import type { ScopedAnnotationsClient } from '@kbn/observability-plugin/server';
 import { environmentQuery } from '../../../../common/utils/environment_query';
 import type { Annotation } from '../../../../common/annotations';
 import { AnnotationType } from '../../../../common/annotations';
-import { SERVICE_NAME } from '../../../../common/es_fields/apm';
+import { esqlRows, runEsqlRead } from '../../../lib/helpers/esql_read';
 import { withApmSpan } from '../../../utils/with_apm_span';
 
 export function getStoredAnnotations({
@@ -39,48 +34,40 @@ export function getStoredAnnotations({
   end: number;
 }): Promise<Annotation[]> {
   return withApmSpan('get_stored_annotations', async () => {
-    const body = {
-      size: 50,
-      query: {
-        bool: {
-          filter: [
-            { term: { 'annotation.type': 'deployment' } },
-            { term: { tags: 'apm' } },
-            { term: { [SERVICE_NAME]: serviceName } },
-            ...rangeQuery(start, end),
-            ...environmentQuery(environment),
-          ],
-        },
+    // `tags` is multi-valued, so it stays in the request `filter` with the range and environment.
+    const filter = {
+      bool: {
+        filter: [
+          { term: { tags: 'apm' } },
+          ...rangeQuery(start, end),
+          ...environmentQuery(environment),
+        ],
       },
     };
 
     try {
-      const response: ESSearchResponse<ESAnnotation, typeof body> = (await unwrapEsResponse(
-        client.search(
-          {
-            index: annotationsClient.index,
-            ...body,
-          },
-          { meta: true }
-        )
-      )) as any;
+      const response = await runEsqlRead({
+        esClient: client,
+        query: esql.from(annotationsClient.index.split(','), ['_id'])
+          .pipe`WHERE annotation.type == "deployment" AND service.name == ${{ serviceName }}`
+          .keep('_id', '@timestamp', 'message')
+          .limit(50),
+        filter,
+      });
 
-      return response.hits.hits.map((hit) => {
+      return esqlRows(response).map((row) => {
         return {
           type: AnnotationType.VERSION,
-          id: hit._id as string,
-          '@timestamp': new Date(hit._source['@timestamp']).getTime(),
-          text: hit._source.message,
+          id: String(row._id),
+          '@timestamp': new Date(String(row['@timestamp'])).getTime(),
+          text: String(row.message),
         };
       });
     } catch (error) {
       // index is only created when an annotation has been indexed,
       // so we should handle this error gracefully
-      if (
-        error instanceof WrappedElasticsearchClientError &&
-        error.originalError instanceof errors.ResponseError
-      ) {
-        const type = error.originalError.body.error.type;
+      if (error instanceof errors.ResponseError) {
+        const type = error.body?.error?.type;
 
         if (type === 'index_not_found_exception') {
           return [];

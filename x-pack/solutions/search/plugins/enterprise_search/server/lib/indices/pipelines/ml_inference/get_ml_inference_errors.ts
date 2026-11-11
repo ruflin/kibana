@@ -5,21 +5,16 @@
  * 2.0.
  */
 
-import type {
-  AggregationsMultiBucketAggregateBase,
-  AggregationsStringRareTermsBucketKeys,
-} from '@elastic/elasticsearch/lib/api/types';
-
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 
 import type { MlInferenceError } from '../../../../../common/types/pipelines';
-
-export interface ErrorAggregationBucket extends AggregationsStringRareTermsBucketKeys {
-  max_error_timestamp: {
-    value: number | null;
-    value_as_string?: string;
-  };
-}
+import {
+  esqlRows,
+  isEsqlUnknownColumnException,
+  runEsql,
+  toEsqlSource,
+} from '../../../../utils/esql_helpers';
 
 /**
  * Fetches an aggregate of distinct ML inference errors from the target index, along with the most
@@ -31,45 +26,33 @@ export const getMlInferenceErrors = async (
   indexName: string,
   esClient: ElasticsearchClient
 ): Promise<MlInferenceError[]> => {
-  const searchResult = await esClient.search<
-    unknown,
-    {
-      errors: AggregationsMultiBucketAggregateBase<ErrorAggregationBucket>;
+  let response;
+  try {
+    response = await runEsql(
+      esClient,
+      esql.from([toEsqlSource(indexName)])
+        .pipe`STATS doc_count = COUNT(*), max_error_timestamp = MAX(${esql.col(
+        '_ingest.inference_errors.timestamp'
+      )}) BY message = ${esql.col('_ingest.inference_errors.message.enum')}`
+        .pipe`SORT max_error_timestamp DESC`.limit(20)
+    );
+  } catch (error) {
+    // An index that never ran an inference processor maps neither field: no errors.
+    if (isEsqlUnknownColumnException(error)) {
+      return [];
     }
-  >({
-    index: indexName,
-    aggs: {
-      errors: {
-        terms: {
-          field: '_ingest.inference_errors.message.enum',
-          order: {
-            max_error_timestamp: 'desc',
-          },
-          size: 20,
-        },
-        aggs: {
-          max_error_timestamp: {
-            max: {
-              field: '_ingest.inference_errors.timestamp',
-            },
-          },
-        },
-      },
-    },
-    size: 0,
-  });
-
-  const errorBuckets = searchResult.aggregations?.errors.buckets;
-  if (!errorBuckets) {
-    return [];
+    throw error;
   }
 
-  // Buckets are either in an array or in a Record, we transform them to an array
-  const buckets = Array.isArray(errorBuckets) ? errorBuckets : Object.values(errorBuckets);
-
-  return buckets.map((bucket) => ({
-    message: bucket.key,
-    doc_count: bucket.doc_count,
-    timestamp: bucket.max_error_timestamp?.value_as_string,
-  }));
+  return esqlRows(response).flatMap(({ message, doc_count: docCount, max_error_timestamp }) =>
+    message === null || message === undefined
+      ? []
+      : [
+          {
+            message: message as string,
+            doc_count: docCount as number,
+            timestamp: (max_error_timestamp as string | null) ?? undefined,
+          },
+        ]
+  );
 };

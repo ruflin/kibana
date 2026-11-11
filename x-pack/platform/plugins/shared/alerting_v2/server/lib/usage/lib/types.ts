@@ -58,10 +58,6 @@ export type ActionPolicyStatsResults = Pick<
   | 'action_policies_count_with_multiple_workflows'
 >;
 
-export interface ExecutionStatsAggregations {
-  count_by_status: { buckets: TermsBucket[] };
-  delay_percentiles: { values: Record<string, number | null> };
-}
 export type ExecutionStatsResults = Pick<
   LatestTaskStateSchema,
   | 'executions_count_24hr'

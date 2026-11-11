@@ -42,42 +42,23 @@ describe('files service', () => {
   describe('#getFilesByStatus()', () => {
     it('should return expected values', async () => {
       const status = 'READY';
-      esClientMock.search.mockResolvedValueOnce({
-        took: 5,
-        timed_out: false,
-        _shards: {
-          total: 1,
-          successful: 1,
-          skipped: 0,
-          failed: 0,
-        },
-        hits: {
-          hits: [
-            {
-              _index: ENDPOINT_FILE_METADATA_BACKING_INDEX,
-              _id: 'someid1',
-            },
-            {
-              _index: ENDPOINT_FILE_METADATA_BACKING_INDEX,
-              _id: 'someid2',
-            },
-          ],
-        },
+      esClientMock.esql.query.mockResolvedValueOnce({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_index', type: 'keyword' },
+        ],
+        values: [
+          ['someid1', ENDPOINT_FILE_METADATA_BACKING_INDEX],
+          ['someid2', ENDPOINT_FILE_METADATA_BACKING_INDEX],
+        ],
       });
 
       const result = await getFilesByStatus(esClientMock, signal, status);
 
-      expect(esClientMock.search).toHaveBeenCalledWith(
+      expect(esClientMock.esql.query).toHaveBeenCalledWith(
         {
-          index: [FILE_STORAGE_METADATA_INDEX_PATTERN, FILE_STORAGE_TO_HOST_METADATA_INDEX_PATTERN],
-          size: ES_SEARCH_LIMIT,
-          query: {
-            term: {
-              'file.Status': status,
-            },
-          },
-          _source: false,
-          ignore_unavailable: true,
+          query: `FROM ${FILE_STORAGE_METADATA_INDEX_PATTERN}, ${FILE_STORAGE_TO_HOST_METADATA_INDEX_PATTERN} METADATA _id, _index | WHERE file.Status == ?status | KEEP _id, _index | LIMIT ${ES_SEARCH_LIMIT}`,
+          params: [{ status }],
         },
         { signal }
       );
@@ -90,33 +71,15 @@ describe('files service', () => {
 
   describe('#fileIdsWithoutChunks()', () => {
     it('should return expected values', async () => {
-      esClientMock.search.mockResolvedValueOnce({
-        took: 5,
-        timed_out: false,
-        _shards: {
-          total: 2,
-          successful: 2,
-          skipped: 0,
-          failed: 0,
-        },
-        hits: {
-          hits: [
-            {
-              _index: ENDPOINT_FILE_BACKING_INDEX,
-              _id: 'keep1',
-              _source: {
-                bid: 'keep1',
-              },
-            },
-            {
-              _index: ENDPOINT_FILE_BACKING_INDEX,
-              _id: 'keep2',
-              _source: {
-                bid: 'keep2',
-              },
-            },
-          ],
-        },
+      esClientMock.esql.query.mockResolvedValueOnce({
+        columns: [
+          { name: 'bid', type: 'keyword' },
+          { name: '_index', type: 'keyword' },
+        ],
+        values: [
+          ['keep1', ENDPOINT_FILE_BACKING_INDEX],
+          ['keep2', ENDPOINT_FILE_BACKING_INDEX],
+        ],
       });
 
       const files = [
@@ -128,28 +91,10 @@ describe('files service', () => {
       const { fileIdsByIndex: deletedFileIdsByIndex, allFileIds: allDeletedFileIds } =
         await fileIdsWithoutChunksByIndex(esClientMock, signal, files);
 
-      expect(esClientMock.search).toHaveBeenCalledWith(
+      expect(esClientMock.esql.query).toHaveBeenCalledWith(
         {
-          ignore_unavailable: true,
-          index: [FILE_STORAGE_DATA_INDEX_PATTERN, FILE_STORAGE_TO_HOST_DATA_INDEX_PATTERN],
-          size: ES_SEARCH_LIMIT,
-          query: {
-            bool: {
-              must: [
-                {
-                  terms: {
-                    bid: Array.from(files.map((file) => file._id)),
-                  },
-                },
-                {
-                  term: {
-                    last: true,
-                  },
-                },
-              ],
-            },
-          },
-          _source: ['bid'],
+          query: `FROM ${FILE_STORAGE_DATA_INDEX_PATTERN}, ${FILE_STORAGE_TO_HOST_DATA_INDEX_PATTERN} METADATA _index | WHERE (bid IN (?fileIds)) AND \`last\` == TRUE | KEEP bid, _index | LIMIT ${ES_SEARCH_LIMIT}`,
+          params: [{ fileIds: files.map((file) => file._id) }],
         },
         { signal }
       );

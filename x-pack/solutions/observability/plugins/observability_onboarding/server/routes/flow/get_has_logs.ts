@@ -6,25 +6,16 @@
  */
 
 import type { ElasticsearchClient } from '@kbn/core/server';
-import { termQuery } from '@kbn/observability-plugin/server';
-import type { estypes } from '@elastic/elasticsearch';
 import { AGENT_ID } from '../../../common/es_fields';
+import { hasDocuments } from '../../lib/esql';
 
 export async function getHasLogs(esClient: ElasticsearchClient, agentId: string) {
   try {
-    const result = await esClient.search({
-      index: ['logs-*', 'metrics-*', 'logs.*'],
-      ignore_unavailable: true,
-      size: 0,
-      terminate_after: 1,
-      query: {
-        bool: {
-          filter: termQuery(AGENT_ID, agentId),
-        },
-      },
+    return await hasDocuments({
+      esClient,
+      indices: ['logs-*', 'metrics-*', 'logs.*'],
+      terms: [{ field: AGENT_ID, value: agentId }],
     });
-    const { value } = result.hits.total as estypes.SearchTotalHits;
-    return value > 0;
   } catch (error) {
     if (error.statusCode === 404) {
       return false;

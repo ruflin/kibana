@@ -49,6 +49,6 @@ export const syntheticsGetPingHeatmapRoute: SyntheticsRestApiRouteFactory = () =
       remoteName,
     });
 
-    return { result: result.body.aggregations?.heatmap?.buckets as MonitorStatusHeatmapBucket[] };
+    return { result };
   },
 });

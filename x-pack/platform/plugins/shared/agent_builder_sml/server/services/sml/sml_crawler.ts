@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import pLimit from 'p-limit';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 import type { ISavedObjectsRepository } from '@kbn/core-saved-objects-api-server';
@@ -24,6 +25,7 @@ import {
 } from './sml_crawler_state_storage';
 import { INGESTION_METHOD_FIELD, reconcileSmlIndex, smlIndexName } from './sml_storage';
 import { smlEntryIdFromOriginUri, smlOriginUriFromEntryId } from './sml_origin';
+import { runSmlEsql } from './sml_esql';
 
 export type { SmlCrawler };
 
@@ -442,26 +444,20 @@ export class SmlCrawlerImpl implements SmlCrawler {
     if (originUris.length === 0) return result;
 
     try {
-      const response = await esClient.search<{ id?: string }>({
-        index: smlIndexName,
-        ignore_unavailable: true,
-        allow_no_indices: true,
-        size: originUris.length,
-        track_total_hits: false,
-        _source: ['id'],
-        query: {
-          bool: {
-            filter: [
-              { terms: { id: originUris.map(smlEntryIdFromOriginUri) } },
-              { term: { [INGESTION_METHOD_FIELD]: 'manual' } },
-            ],
-          },
-        },
+      // The ingestion method sits in a flattened field, so it stays a Query DSL request filter.
+      const rows = await runSmlEsql({
+        esClient,
+        query: esql.from([smlIndexName]).pipe`WHERE id IN (${{
+          ids: originUris.map(smlEntryIdFromOriginUri),
+        }})`
+          .keep('id')
+          .limit(originUris.length),
+        filter: { term: { [INGESTION_METHOD_FIELD]: 'manual' } },
       });
 
-      for (const hit of response.hits.hits) {
-        if (hit._source?.id) {
-          result.add(smlOriginUriFromEntryId(hit._source.id));
+      for (const row of rows) {
+        if (typeof row.id === 'string' && row.id) {
+          result.add(smlOriginUriFromEntryId(row.id));
         }
       }
     } catch (error) {
@@ -488,15 +484,14 @@ export class SmlCrawlerImpl implements SmlCrawler {
     attachmentType: string;
   }): Promise<number> {
     try {
-      const response = await esClient.count({
-        index: smlIndexName,
-        ignore_unavailable: true,
-        allow_no_indices: true,
-        query: {
-          term: { type: attachmentType },
-        },
+      // `type` is a normalized keyword, so the term stays a Query DSL request filter.
+      const rows = await runSmlEsql({
+        esClient,
+        query: esql.from([smlIndexName]).pipe`STATS total = COUNT(*)`,
+        filter: { term: { type: attachmentType } },
       });
-      return response.count;
+      const total = rows[0]?.total;
+      return typeof total === 'number' ? total : 0;
     } catch {
       // Index doesn't exist yet — that's fine, return 0
       return 0;
@@ -660,16 +655,12 @@ export class SmlCrawlerImpl implements SmlCrawler {
     attachmentType: string;
   }): Promise<number> {
     try {
-      const response = await stateClient.search({
-        track_total_hits: true,
-        query: {
-          bool: {
-            filter: [{ term: { type_id: attachmentType } }],
-          },
-        },
-        size: 0,
+      const response = await stateClient.esql({
+        pipeline: esql`WHERE type_id == ${{ attachmentType }} | STATS total = COUNT(*)`,
       });
-      return (response.hits.total as { value: number })?.value ?? 0;
+      const totalColumn = response.columns.findIndex((column) => column.name === 'total');
+      const total = response.values[0]?.[totalColumn];
+      return typeof total === 'number' ? total : 0;
     } catch {
       return 0;
     }

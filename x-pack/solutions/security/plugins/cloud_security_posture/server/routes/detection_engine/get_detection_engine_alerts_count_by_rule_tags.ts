@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import type { SearchResponse } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import { schema } from '@kbn/config-schema';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 import { transformError } from '@kbn/securitysolution-es-utils';
@@ -14,6 +14,7 @@ import {
   GET_DETECTION_RULE_ALERTS_STATUS_PATH,
 } from '../../../common/constants';
 import type { CspRouter } from '../../types';
+import { esqlRows, runEsql } from '../../lib/esql_read';
 
 const DEFAULT_ALERTS_INDEX = '.alerts-security.alerts-default' as const;
 
@@ -27,10 +28,12 @@ const RULE_TAGS_MAX_SIZE = 100;
 export const getDetectionEngineAlertsCountByRuleTags = async (
   esClient: ElasticsearchClient,
   tags: string[]
-) => {
-  return await esClient.search<unknown, SearchResponse>({
-    size: 0,
-    query: {
+): Promise<number> => {
+  // `kibana.alert.rule.tags` is multi-valued, so the tag terms stay in the request filter
+  const response = await runEsql({
+    esClient,
+    query: esql.from([DEFAULT_ALERTS_INDEX]).pipe`STATS total = COUNT(*)`,
+    filter: {
       bool: {
         filter: [
           { term: { 'kibana.alert.rule.tags': 'Cloud Security' } },
@@ -38,18 +41,13 @@ export const getDetectionEngineAlertsCountByRuleTags = async (
         ],
       },
     },
-    sort: '@timestamp:desc',
-    index: DEFAULT_ALERTS_INDEX,
   });
+  const total = esqlRows(response)[0]?.total;
+  return typeof total === 'number' ? total : 0;
 };
 
 const getDetectionEngineAlertsStatus = async (esClient: ElasticsearchClient, tags: string[]) => {
-  const alertsCountByTags = await getDetectionEngineAlertsCountByRuleTags(esClient, tags);
-
-  const total =
-    typeof alertsCountByTags.hits.total === 'number'
-      ? alertsCountByTags.hits.total
-      : alertsCountByTags.hits.total?.value;
+  const total = await getDetectionEngineAlertsCountByRuleTags(esClient, tags);
 
   return {
     total,

@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import Boom from '@hapi/boom';
 import { i18n } from '@kbn/i18n';
 import { errors } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { SavedObjectsClientContract, ElasticsearchClient } from '@kbn/core/server';
 
 import { toElasticsearchQuery, escapeQuotes } from '@kbn/es-query';
@@ -21,7 +22,7 @@ import type { EnrollmentAPIKey, FleetServerEnrollmentAPIKey } from '../../types'
 import { FleetError, EnrollmentKeyNameExistsError, EnrollmentKeyNotFoundError } from '../../errors';
 import { ENROLLMENT_API_KEYS_INDEX } from '../../constants';
 import { agentPolicyService } from '../agent_policy';
-import { escapeSearchQueryPhrase } from '../saved_object';
+import { esqlRows, runEsqlRead } from '../esql_read';
 import { auditLoggingService } from '../audit_logging';
 import { _joinFilters } from '../agents';
 import { appContextService } from '../app_context';
@@ -540,14 +541,24 @@ function getQueryForExistingKeyNameOnPolicy(agentPolicyId: string, providedKeyNa
 }
 
 export async function getEnrollmentAPIKeyById(esClient: ElasticsearchClient, apiKeyId: string) {
-  const res = await esClient.search<FleetServerEnrollmentAPIKey>({
-    index: ENROLLMENT_API_KEYS_INDEX,
-    ignore_unavailable: true,
-    q: `api_key_id:${escapeSearchQueryPhrase(apiKeyId)}`,
+  const res = await runEsqlRead({
+    esClient,
+    query: esql.from([ENROLLMENT_API_KEYS_INDEX], ['_id', '_source']).where`api_key_id == ${{
+      apiKeyId,
+    }}`
+      .keep('_id', '_source')
+      .limit(1),
+    // A missing index finds no key, as the DSL `ignore_unavailable` did.
+    ignoreUnknownIndex: true,
   });
 
-  // @ts-expect-error esDocToEnrollmentApiKey doesn't accept optional _source
-  const [enrollmentAPIKey] = res.hits.hits.map(esDocToEnrollmentApiKey);
+  const [row] = esqlRows(res);
+  const enrollmentAPIKey = row
+    ? esDocToEnrollmentApiKey({
+        _id: row._id as string,
+        _source: (row._source ?? {}) as FleetServerEnrollmentAPIKey,
+      })
+    : undefined;
 
   if (enrollmentAPIKey?.api_key_id !== apiKeyId) {
     throw new FleetError(

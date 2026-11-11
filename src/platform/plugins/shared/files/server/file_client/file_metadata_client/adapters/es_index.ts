@@ -12,7 +12,12 @@ import { pipe } from 'lodash/fp';
 import type { Logger } from '@kbn/core/server';
 import { toElasticsearchQuery } from '@kbn/es-query';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
-import type { MappingProperty, SearchTotalHits } from '@elastic/elasticsearch/lib/api/types';
+import type {
+  EsqlQueryRequest,
+  MappingProperty,
+  SearchTotalHits,
+} from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import pLimit from 'p-limit';
 
 import { wrapErrorAndReThrow } from '../../utils';
@@ -94,24 +99,24 @@ export class EsIndexFilesMetadataClient<M = unknown> implements FileMetadataClie
       return this.index;
     }
 
-    const doc = await this.esClient
-      .search({
-        index: this.index,
-        size: 1,
-        query: {
-          term: {
-            _id: id,
-          },
-        },
-        _source: false, // suppress the document content
-      })
-      .catch(
-        wrapErrorAndReThrow.withMessagePrefix('EsIndexFilesMetadataClient.getBackingIndex(): ')
-      );
+    const { query, params } = esql.from([this.index], ['_id', '_index']).where`_id == ${{ id }}`
+      .pipe`KEEP _index`
+      .limit(1)
+      .toRequest();
+    const doc = await (
+      this.esClient.esql.query({
+        query,
+        params,
+      } as unknown as EsqlQueryRequest) as unknown as Promise<{
+        values: unknown[][];
+      }>
+    ).catch(
+      wrapErrorAndReThrow.withMessagePrefix('EsIndexFilesMetadataClient.getBackingIndex(): ')
+    );
 
-    const docIndex = doc.hits.hits?.[0]?._index;
+    const docIndex = doc.values[0]?.[0];
 
-    if (!docIndex) {
+    if (typeof docIndex !== 'string' || !docIndex) {
       const err = new Error(
         `Unable to determine backing index for file id [${id}] in index (alias) [${this.index}]`
       );

@@ -5,9 +5,10 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 import type { Logger } from '@kbn/logging';
-import { ALERT_INSTANCE_ID, ALERT_RULE_UUID } from '@kbn/rule-data-utils';
+import { runEsqlRows } from '../../lib/esql_read';
 
 export interface IsExistingAlertParams {
   indices: string[];
@@ -28,25 +29,19 @@ export async function isExistingAlert({
   esClient,
 }: IsExistingAlertParamsWithDeps): Promise<boolean> {
   try {
-    const response = await esClient.search({
-      index: indices,
-      allow_no_indices: true,
-      size: 0,
-      query: {
-        bool: {
-          must: [{ term: { [ALERT_RULE_UUID]: ruleId } }],
-          filter: [{ term: { [ALERT_INSTANCE_ID]: alertId } }],
-        },
-      },
+    if (indices.length === 0) {
+      return false;
+    }
+    const rows = await runEsqlRows({
+      esClient,
+      query: esql.from(indices).pipe`WHERE kibana.alert.rule.uuid == ${{
+        ruleId,
+      }} AND kibana.alert.instance.id == ${{
+        alertId,
+      }}`.limit(1),
     });
-    const total =
-      response.hits.total == null
-        ? 0
-        : typeof response.hits.total === 'number'
-        ? response.hits.total
-        : response.hits.total.value;
 
-    return total > 0;
+    return rows.length > 0;
   } catch (error) {
     logger.error(
       `Error checking for existing alert with alertId: ${alertId} and ruleId: ${ruleId} - ${error.message}`

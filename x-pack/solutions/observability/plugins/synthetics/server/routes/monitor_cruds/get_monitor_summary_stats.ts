@@ -6,6 +6,8 @@
  */
 
 import { z } from '@kbn/zod';
+import { esql } from '@elastic/esql';
+import { esqlRows } from '../../lib/esql_read';
 import { routeId, MAX_DATE_RANGE_LENGTH, MAX_ROUTE_ID_LENGTH } from '../zod_query';
 import { SYNTHETICS_API_URLS } from '../../../common/constants';
 import {
@@ -47,41 +49,39 @@ export const getMonitorSummaryStatsRoute: SyntheticsRestApiRouteFactory<
       remoteName?: string;
     };
 
-    const { body: result } = await syntheticsEsClient.search({
-      index: getSyntheticsScopedIndex(remoteName, syntheticsEsClient.heartbeatIndices),
-      size: 0,
-      query: {
-        bool: {
-          filter: [
-            FINAL_SUMMARY_FILTER,
-            EXCLUDE_RUN_ONCE_FILTER,
-            { term: { 'monitor.id': monitorId } },
-            ...getHeartbeatLocationFilter({ field: 'observer.geo.name', value: locationLabel }),
-            { range: { '@timestamp': { gte: from, lte: to } } },
-          ],
+    // Date math range, `must_not exists` locations and `exists` clauses stay in the Query DSL filter.
+    const response = await syntheticsEsClient.esql(
+      esql.from(
+        getSyntheticsScopedIndex(remoteName, syntheticsEsClient.heartbeatIndices).split(',')
+      ).pipe`STATS
+          total = COUNT(summary.up),
+          up = COUNT(*) WHERE monitor.status == "up",
+          down = COUNT(*) WHERE monitor.status == "down",
+          median_duration = PERCENTILE(monitor.duration.us, 50)`,
+      {
+        operationName: 'getMonitorSummaryStats',
+        filter: {
+          bool: {
+            filter: [
+              FINAL_SUMMARY_FILTER,
+              EXCLUDE_RUN_ONCE_FILTER,
+              { term: { 'monitor.id': monitorId } },
+              ...getHeartbeatLocationFilter({ field: 'observer.geo.name', value: locationLabel }),
+              { range: { '@timestamp': { gte: from, lte: to } } },
+            ],
+          },
         },
-      },
-      aggs: {
-        total: { value_count: { field: 'summary.up' } },
-        up: {
-          filter: { term: { 'monitor.status': 'up' } },
-        },
-        down: {
-          filter: { term: { 'monitor.status': 'down' } },
-        },
-        median_duration: {
-          percentiles: { field: 'monitor.duration.us', percents: [50] },
-        },
-      },
-    });
+      }
+    );
 
-    const aggs = (result as any).aggregations;
-    const total = aggs?.total?.value ?? 0;
-    const upCount = aggs?.up?.doc_count ?? 0;
-    const downCount = aggs?.down?.doc_count ?? 0;
+    const row = esqlRows(response)[0];
+    const toNumber = (value: unknown): number => (typeof value === 'number' ? value : 0);
+    const total = toNumber(row?.total);
+    const upCount = toNumber(row?.up);
+    const downCount = toNumber(row?.down);
 
     const availability = total > 0 ? (upCount / total) * 100 : 0;
-    const medianUs = aggs?.median_duration?.values?.['50.0'] ?? 0;
+    const medianUs = toNumber(row?.median_duration);
 
     return {
       availability: Math.round(availability * 1000) / 1000,

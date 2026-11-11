@@ -5,12 +5,14 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { rangeQuery } from '@kbn/observability-plugin/server';
 import type { ServiceTransactionTypesResponse } from '@kbn/apm-api-shared';
 import type { ApmServiceTransactionDocumentType } from '../../../common/document_type';
 import { SERVICE_NAME, TRANSACTION_TYPE } from '../../../common/es_fields/apm';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
 import type { RollupInterval } from '../../../common/rollup';
+import { esqlRows } from '../../lib/helpers/esql_read';
 
 export async function getServiceTransactionTypes({
   apmEventClient,
@@ -27,35 +29,19 @@ export async function getServiceTransactionTypes({
   documentType: ApmServiceTransactionDocumentType;
   rollupInterval: RollupInterval;
 }): Promise<ServiceTransactionTypesResponse> {
-  const params = {
-    apm: {
-      sources: [
-        {
-          documentType,
-          rollupInterval,
-        },
-      ],
-    },
-    track_total_hits: false,
-    size: 0,
-    query: {
-      bool: {
-        filter: [{ term: { [SERVICE_NAME]: serviceName } }, ...rangeQuery(start, end)],
-      },
-    },
-    aggs: {
-      types: {
-        terms: { field: TRANSACTION_TYPE, size: 100 },
-      },
-    },
-  };
+  const response = await apmEventClient.esql('get_service_transaction_types', {
+    apm: { sources: [{ documentType, rollupInterval }] },
+    query: (index) =>
+      esql.from(index).pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ serviceName }}`
+        .pipe`STATS doc_count = COUNT(*) BY ${esql.col(TRANSACTION_TYPE)}`
+        .pipe`SORT doc_count DESC, ${esql.col(TRANSACTION_TYPE)} ASC`.limit(100),
+    filter: { bool: { filter: rangeQuery(start, end) } },
+  });
 
-  const { aggregations } = await apmEventClient.search('get_service_transaction_types', params);
-  const transactionTypes =
-    aggregations?.types.buckets
-      .map((bucket) => bucket.key as string)
-      // we exclude page-exit transactions because they are not relevant for the apm app
-      // and are only used for the INP values
-      .filter((value) => value !== 'page-exit') || [];
+  const transactionTypes = esqlRows(response)
+    .map((row) => row[TRANSACTION_TYPE] as string)
+    // we exclude page-exit transactions because they are not relevant for the apm app
+    // and are only used for the INP values
+    .filter((value) => value !== 'page-exit');
   return { transactionTypes };
 }

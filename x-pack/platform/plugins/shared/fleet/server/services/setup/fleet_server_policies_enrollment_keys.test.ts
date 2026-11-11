@@ -29,7 +29,7 @@ const mockedAppContextService = jest.mocked(appContextService);
 
 // Provide the data setup reads: the latest deployed revision per policy (via
 // `agentPolicyService.getLatestFleetPolicyRevisions`) and the policies that already have an
-// enrollment API key (via an aggregation on `.fleet-enrollment-api-keys`).
+// enrollment API key (via an ES|QL query on `.fleet-enrollment-api-keys`).
 const mockSetupQueries = (
   esClient: ReturnType<typeof elasticsearchServiceMock.createInternalClient>,
   {
@@ -40,16 +40,10 @@ const mockSetupQueries = (
   mockedAgentPolicyService.getLatestFleetPolicyRevisions.mockResolvedValue(
     new Map(Object.entries(revisions))
   );
-  esClient.search.mockImplementation((async (params: any) => {
-    if (params.index === ENROLLMENT_API_KEYS_INDEX) {
-      return {
-        aggregations: {
-          policies: { buckets: policiesWithKeys.map((key) => ({ key })) },
-        },
-      };
-    }
-    return {};
-  }) as any);
+  esClient.esql.query.mockResolvedValue({
+    columns: [{ name: 'policy_id', type: 'keyword' }],
+    values: policiesWithKeys.map((key) => [key]),
+  } as any);
 };
 
 describe('ensureAgentPoliciesFleetServerKeysAndPolicies', () => {
@@ -121,6 +115,10 @@ describe('ensureAgentPoliciesFleetServerKeysAndPolicies', () => {
       esClient,
       expect.objectContaining({ agentPolicyId: 'policy2', name: 'Default', forceRecreate: true })
     );
+    expect(esClient.esql.query).toHaveBeenCalledWith({
+      query: `FROM ${ENROLLMENT_API_KEYS_INDEX} | WHERE policy_id IN (?agentPolicyIds) | STATS BY policy_id | LIMIT 2`,
+      params: [{ agentPolicyIds: ['policy1', 'policy2'] }],
+    });
   });
 
   it('should do deploy policies out of sync', async () => {

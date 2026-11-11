@@ -28,6 +28,7 @@ import type { AggregationsAggregate, SearchResponse } from '@elastic/elasticsear
 import { getRoot } from '@kbn/streams-schema/src/shared/hierarchy';
 import { Builder } from '@elastic/esql';
 import type { ESQLAstItem } from '@elastic/esql/types';
+import { fetchLatestHits } from '../../../../lib/streams/helpers/esql';
 import { MAX_PRIORITY } from '../../../../lib/streams/index_templates/generate_index_template';
 import { getProcessingPipelineName } from '../../../../lib/streams/ingest_pipelines/name';
 import { STREAMS_API_PRIVILEGES } from '../../../../../common/constants';
@@ -114,16 +115,16 @@ export const unmappedFieldsRoute = createServerRoute({
       };
     }
 
-    const [ancestors, sampleDocs] = await Promise.all([
+    const [ancestors, sampleHits] = await Promise.all([
       streamsClient.getAncestors(params.path.name),
-      scopedClusterClient.asCurrentUser.search({
+      fetchLatestHits({
+        esClient: scopedClusterClient.asCurrentUser,
         index: params.path.name,
-        sort: [{ '@timestamp': { order: 'desc' as const } }],
         size: UNMAPPED_SAMPLE_SIZE,
       }),
     ]);
 
-    const unmappedFields = getUnmappedFields({ definition, ancestors, sampleDocs });
+    const unmappedFields = getUnmappedFields({ definition, ancestors, sampleHits });
 
     return { unmappedFields };
   },

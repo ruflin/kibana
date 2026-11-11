@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ServiceMixedIngestionResponse } from '@kbn/apm-api-shared';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
@@ -14,6 +15,8 @@ import {
   TELEMETRY_SDK_NAME,
 } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import { toEpochMillis } from '../../lib/helpers/esql_values';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
 
 export async function getServiceMixedIngestion({
@@ -31,62 +34,45 @@ export async function getServiceMixedIngestion({
   environment: string;
   kuery: string;
 }): Promise<ServiceMixedIngestionResponse> {
-  const params = {
+  const response = await apmEventClient.esql('get_service_mixed_ingestion', {
     apm: {
       events: [ProcessorEvent.error, ProcessorEvent.transaction, ProcessorEvent.metric],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
+    // The SDK fields are not mapped in every index, so unmapped fields read as null.
+    query: (index) =>
+      esql.from(index).addSetCommand('unmapped_fields', 'nullify').pipe`WHERE ${esql.col(
+        SERVICE_NAME
+      )} == ${{ serviceName }}`.pipe`EVAL ingestion_type = CASE(${esql.col(
+        TELEMETRY_SDK_NAME
+      )} IS NOT NULL OR ${esql.col(
+        TELEMETRY_SDK_LANGUAGE
+      )} IS NOT NULL, "otel_native", "classic_apm")`
+        .pipe`STATS doc_count = COUNT(*), min_timestamp = MIN(@timestamp), max_timestamp = MAX(@timestamp) BY ingestion_type`.limit(
+        2
+      ),
+    filter: {
       bool: {
-        filter: [
-          { term: { [SERVICE_NAME]: serviceName } },
-          ...rangeQuery(start, end),
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-        ],
+        filter: [...rangeQuery(start, end), ...environmentQuery(environment), ...kqlQuery(kuery)],
       },
     },
-    aggs: {
-      ingestion_type: {
-        filters: {
-          filters: {
-            otel_native: {
-              bool: {
-                should: [
-                  { exists: { field: TELEMETRY_SDK_NAME } },
-                  { exists: { field: TELEMETRY_SDK_LANGUAGE } },
-                ],
-                minimum_should_match: 1,
-              },
-            },
-            classic_apm: {
-              bool: {
-                must_not: [
-                  { exists: { field: TELEMETRY_SDK_NAME } },
-                  { exists: { field: TELEMETRY_SDK_LANGUAGE } },
-                ],
-              },
-            },
-          },
-        },
-        aggs: {
-          min_timestamp: { min: { field: '@timestamp' } },
-          max_timestamp: { max: { field: '@timestamp' } },
-        },
+  });
+
+  const ingestionBuckets = Object.fromEntries(
+    esqlRows(response).map((row) => [
+      row.ingestion_type as string,
+      {
+        doc_count: row.doc_count as number,
+        min_timestamp: { value: toEpochMillis(row.min_timestamp) },
+        max_timestamp: { value: toEpochMillis(row.max_timestamp) },
       },
-    },
-  };
-
-  const response = await apmEventClient.search('get_service_mixed_ingestion', params);
-
-  const ingestionBuckets = response.aggregations?.ingestion_type?.buckets;
-  const otelCount = ingestionBuckets?.otel_native?.doc_count ?? 0;
-  const classicCount = ingestionBuckets?.classic_apm?.doc_count ?? 0;
+    ])
+  );
+  const otelCount = ingestionBuckets.otel_native?.doc_count ?? 0;
+  const classicCount = ingestionBuckets.classic_apm?.doc_count ?? 0;
   const hasMultipleAgentTypes = otelCount > 0 && classicCount > 0;
 
-  const classicBucket = ingestionBuckets?.classic_apm;
-  const otelBucket = ingestionBuckets?.otel_native;
+  const classicBucket = ingestionBuckets.classic_apm;
+  const otelBucket = ingestionBuckets.otel_native;
 
   const ingestionTimeRanges = hasMultipleAgentTypes
     ? {

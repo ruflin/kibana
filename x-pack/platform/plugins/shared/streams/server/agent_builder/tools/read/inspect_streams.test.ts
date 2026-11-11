@@ -16,12 +16,6 @@ import {
   mockEsMethodResolvedValue,
 } from '../../utils/test_helpers';
 
-const searchResponseDefaults = {
-  took: 0,
-  timed_out: false,
-  _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-} as const;
-
 const wiredStreamDef = (
   name: string,
   steps: StreamlangStep[] = [],
@@ -91,10 +85,7 @@ const mockFieldCapsResponse = (
   ),
 });
 
-const emptySearchResponse = {
-  ...searchResponseDefaults,
-  hits: { hits: [] },
-};
+const emptySampleResponse = { columns: [], values: [] };
 
 interface InspectResultData {
   summary: string;
@@ -409,7 +400,7 @@ describe('createInspectStreamsTool handler', () => {
     it('shows ES-mapped fields with source "index_template" for classic streams', async () => {
       const { tool, context, streamsClient, esClient } = setup();
       streamsClient.getStream.mockResolvedValue(classicWithOverrides('logs-otel'));
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
       mockEsMethodResolvedValue(
         esClient.fieldCaps,
         mockFieldCapsResponse({
@@ -446,7 +437,7 @@ describe('createInspectStreamsTool handler', () => {
     it('marks non-Streams types as overridable: false', async () => {
       const { tool, context, streamsClient, esClient } = setup();
       streamsClient.getStream.mockResolvedValue(classicWithOverrides('logs-otel'));
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
       mockEsMethodResolvedValue(
         esClient.fieldCaps,
         mockFieldCapsResponse({
@@ -477,7 +468,7 @@ describe('createInspectStreamsTool handler', () => {
       streamsClient.getStream.mockResolvedValue(
         classicWithOverrides('logs-otel', { my_field: { type: 'keyword' } })
       );
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
       mockEsMethodResolvedValue(
         esClient.fieldCaps,
         mockFieldCapsResponse({
@@ -504,13 +495,9 @@ describe('createInspectStreamsTool handler', () => {
     it('reports truly unmapped fields from _source samples', async () => {
       const { tool, context, streamsClient, esClient } = setup();
       streamsClient.getStream.mockResolvedValue(classicWithOverrides('logs-otel'));
-      mockEsMethodResolvedValue(esClient.search, {
-        ...searchResponseDefaults,
-        hits: {
-          hits: [
-            { _index: 'logs-otel', _id: '1', _source: { trace_id: 'abc', dynamic_field: 'hello' } },
-          ],
-        },
+      mockEsMethodResolvedValue(esClient.esql.query, {
+        columns: [{ name: '_source', type: 'object' }],
+        values: [[{ trace_id: 'abc', dynamic_field: 'hello' }]],
       });
       mockEsMethodResolvedValue(
         esClient.fieldCaps,
@@ -530,7 +517,7 @@ describe('createInspectStreamsTool handler', () => {
     it('filters out metadata and multi-field sub-paths from fieldCaps', async () => {
       const { tool, context, streamsClient, esClient } = setup();
       streamsClient.getStream.mockResolvedValue(classicWithOverrides('logs-otel'));
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
       mockEsMethodResolvedValue(
         esClient.fieldCaps,
         mockFieldCapsResponse({
@@ -556,7 +543,7 @@ describe('createInspectStreamsTool handler', () => {
       const { tool, context, streamsClient, esClient } = setup();
       streamsClient.getStream.mockResolvedValue(wiredStreamDef('logs.ecs.nginx'));
       streamsClient.getAncestors.mockResolvedValue([]);
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
 
       const result = await tool.handler(
         { names: ['logs.ecs.nginx'], aspects: ['schema'] },
@@ -603,7 +590,7 @@ describe('createInspectStreamsTool handler', () => {
         })
       );
       streamsClient.getAncestors.mockResolvedValue([]);
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
 
       const result = await tool.handler(
         { names: ['logs.otel.test'], aspects: ['schema'] },
@@ -628,7 +615,7 @@ describe('createInspectStreamsTool handler', () => {
         })
       );
       streamsClient.getAncestors.mockResolvedValue([]);
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
 
       const result = await tool.handler(
         { names: ['logs.otel.test'], aspects: ['schema'] },
@@ -656,7 +643,7 @@ describe('createInspectStreamsTool handler', () => {
       };
       streamsClient.getStream.mockResolvedValue(wiredStreamDef('logs.otel.child', [], childFields));
       streamsClient.getAncestors.mockResolvedValue([wiredStreamDef('logs.otel', [], parentFields)]);
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
 
       const result = await tool.handler(
         { names: ['logs.otel.child'], aspects: ['schema'] },
@@ -702,7 +689,7 @@ describe('createInspectStreamsTool handler', () => {
       const { tool, context, streamsClient, esClient } = setup();
       streamsClient.getStream.mockResolvedValue(wiredStreamDef('logs.ecs.nginx'));
       streamsClient.getAncestors.mockResolvedValue([]);
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
 
       const result = await tool.handler(
         { names: ['logs.ecs.nginx'], aspects: ['schema'] },
@@ -719,7 +706,7 @@ describe('createInspectStreamsTool handler', () => {
     it('reads dynamic_mapping from ES for classic streams', async () => {
       const { tool, context, streamsClient, esClient } = setup();
       streamsClient.getStream.mockResolvedValue(classicStreamDef('logs-nginx'));
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
       mockEsMethodResolvedValue(esClient.fieldCaps, mockFieldCapsResponse({}));
       mockEsMethodResolvedValue(esClient.indices.getMapping, {
         '.ds-logs-nginx-000001': {
@@ -738,7 +725,7 @@ describe('createInspectStreamsTool handler', () => {
     it('returns correct note for classic streams with dynamic: false', async () => {
       const { tool, context, streamsClient, esClient } = setup();
       streamsClient.getStream.mockResolvedValue(classicStreamDef('logs-strict'));
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
       mockEsMethodResolvedValue(esClient.fieldCaps, mockFieldCapsResponse({}));
       mockEsMethodResolvedValue(esClient.indices.getMapping, {
         '.ds-logs-strict-000001': {
@@ -757,7 +744,7 @@ describe('createInspectStreamsTool handler', () => {
     it('returns correct note for classic streams with dynamic: runtime', async () => {
       const { tool, context, streamsClient, esClient } = setup();
       streamsClient.getStream.mockResolvedValue(classicStreamDef('logs-runtime'));
-      mockEsMethodResolvedValue(esClient.search, emptySearchResponse);
+      mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
       mockEsMethodResolvedValue(esClient.fieldCaps, mockFieldCapsResponse({}));
       mockEsMethodResolvedValue(esClient.indices.getMapping, {
         '.ds-logs-runtime-000001': {

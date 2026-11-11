@@ -86,9 +86,13 @@ describe('getAttackRelatedAttachments', () => {
   let getRelated: ReturnType<typeof getAttackRelatedAttachments>;
 
   const mockAttacks = (hits: Array<ReturnType<typeof attackHit>>) =>
-    esClient.search.mockResolvedValue({
-      hits: { hits },
-    } as unknown as Awaited<ReturnType<typeof esClient.search>>);
+    esClient.esql.query.mockResolvedValue({
+      columns: [
+        { name: '_id', type: 'keyword' },
+        { name: '_source', type: '_source' },
+      ],
+      values: hits.map(({ _id, _source }) => [_id, _source]),
+    } as unknown as Awaited<ReturnType<typeof esClient.esql.query>>);
 
   const alerts = (attachmentIds: string[]) => [
     { type: SECURITY_ALERT_ATTACHMENT_TYPE, attachmentIds },
@@ -117,7 +121,7 @@ describe('getAttackRelatedAttachments', () => {
     });
 
     expect(result).toEqual([]);
-    expect(esClient.search).not.toHaveBeenCalled();
+    expect(esClient.esql.query).not.toHaveBeenCalled();
   });
 
   it('returns the alerts of the deleted attack, de-anonymising its alert ids', async () => {
@@ -144,11 +148,12 @@ describe('getAttackRelatedAttachments', () => {
     });
 
     expect(result).toEqual(alerts(['alert-1', 'alert-2']));
-    expect(esClient.search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        index: ATTACK_PATTERN,
-        query: { ids: { values: ['attack-1'] } },
-      })
+    expect(esClient.esql.query).toHaveBeenCalledWith(
+      {
+        query: `FROM ${ATTACK_PATTERN} METADATA _id, _source | WHERE _id IN (?attackId0) | KEEP _id, _source | LIMIT 1`,
+        params: [{ attackId0: 'attack-1' }],
+      },
+      { signal: undefined }
     );
   });
 
@@ -170,7 +175,10 @@ describe('getAttackRelatedAttachments', () => {
       });
 
       expect(result).toEqual(alerts(['alert-1']));
-      expect(esClient.search).toHaveBeenCalledWith(expect.objectContaining({ index: pattern }));
+      expect(esClient.esql.query).toHaveBeenCalledWith(
+        expect.objectContaining({ query: expect.stringContaining(`FROM ${pattern} METADATA`) }),
+        expect.anything()
+      );
     }
   );
 
@@ -230,7 +238,7 @@ describe('getAttackRelatedAttachments', () => {
   });
 
   it('keeps every alert when the attacks cannot be read', async () => {
-    esClient.search.mockRejectedValue(
+    esClient.esql.query.mockRejectedValue(
       new errors.ResponseError({
         statusCode: 403,
         body: { error: { type: 'security_exception' } },
@@ -251,7 +259,7 @@ describe('getAttackRelatedAttachments', () => {
   });
 
   it('fails the deletion when the attacks cannot be read for any other reason', async () => {
-    esClient.search.mockRejectedValue(Object.assign(new Error('timeout'), { statusCode: 504 }));
+    esClient.esql.query.mockRejectedValue(Object.assign(new Error('timeout'), { statusCode: 504 }));
 
     await expect(
       getRelated({

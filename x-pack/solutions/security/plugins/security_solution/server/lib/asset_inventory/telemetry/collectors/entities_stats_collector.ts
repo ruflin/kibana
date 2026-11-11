@@ -7,6 +7,8 @@
 
 import type { Logger } from '@kbn/core/server';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
+import { esql } from '@elastic/esql';
+import { esqlRows, runEsqlRead } from '../../../../utils/esql/esql_read';
 
 export interface EntityStats {
   doc_count: number;
@@ -20,20 +22,15 @@ const getLatestDocTimestamp = async (
   esClient: ElasticsearchClient,
   index: string
 ): Promise<string | null> => {
-  const latestTimestamp = await esClient.search({
-    index,
-    query: {
-      match_all: {},
-    },
-    sort: '@timestamp:desc',
-    size: 1,
-    fields: ['@timestamp'],
-    _source: false,
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([index]).pipe`STATS latest = MAX(@timestamp)`,
+    tolerateUnknownIndex: false,
   });
 
-  const latestEventTimestamp = latestTimestamp.hits?.hits[0]?.fields;
+  const latestEventTimestamp = esqlRows(response)[0]?.latest;
 
-  return latestEventTimestamp ? latestEventTimestamp['@timestamp'][0] : null;
+  return typeof latestEventTimestamp === 'string' ? latestEventTimestamp : null;
 };
 
 export const getEntityStats = async (

@@ -82,9 +82,22 @@ const learning: LearningRecord = {
 
 const createEsClient = () => ({
   get: jest.fn().mockResolvedValue({ found: false }),
-  search: jest.fn().mockResolvedValue({ hits: { hits: [] } }),
+  esql: {
+    query: jest.fn().mockResolvedValue({ columns: [], values: [] }),
+  },
   index: jest.fn().mockResolvedValue({}),
 });
+
+// ES|QL reports a missing index as a 400 `verification_exception`, not the DSL's 404.
+const unknownIndex = () =>
+  new errors.ResponseError({
+    statusCode: 400,
+    body: {
+      error: { type: 'verification_exception', reason: 'Unknown index [ai-index-idx-x]' },
+    },
+    warnings: null,
+    meta: {} as never,
+  });
 
 const createStore = (esClient: ReturnType<typeof createEsClient>) =>
   createDecisionTreeStore({
@@ -302,31 +315,26 @@ describe('commit', () => {
 });
 
 describe('listTreeIdsForInvestigation', () => {
-  it("buckets the investigation's versions by tree instead of reading version hits", async () => {
+  it("groups the investigation's versions by tree instead of reading version rows", async () => {
     const esClient = createEsClient();
-    esClient.search.mockResolvedValue({
-      hits: { hits: [] },
-      aggregations: {
-        tree_ids: {
-          buckets: [
-            { key: 'symptom:checkout-high-latency', doc_count: 600 },
-            { key: 'symptom:payment-errors', doc_count: 1 },
-          ],
-        },
-      },
+    esClient.esql.query.mockResolvedValue({
+      columns: [{ name: 'tree_id', type: 'keyword' }],
+      values: [['symptom:checkout-high-latency'], ['symptom:payment-errors']],
     });
 
     const treeIds = await createStore(esClient).listTreeIdsForInvestigation('inv-1');
 
     expect(treeIds).toEqual(['symptom:checkout-high-latency', 'symptom:payment-errors']);
-    expect(esClient.search).toHaveBeenCalledWith(
+    // Grouping by tree keeps the investigation's other trees in the result however many versions a
+    // single tree has. The limit matches the DSL terms aggregation's size.
+    expect(esClient.esql.query).toHaveBeenCalledWith(
       expect.objectContaining({
-        size: 0,
-        aggs: { tree_ids: { terms: { field: 'attributes.tree_id', size: 500 } } },
-        query: {
+        query: expect.stringContaining(
+          'WHERE type == "decision_tree_version" | STATS versions = COUNT(*) BY tree_id = FIELD_EXTRACT(attributes, "tree_id") | WHERE tree_id IS NOT NULL'
+        ),
+        filter: {
           bool: {
             filter: [
-              { term: { type: 'decision_tree_version' } },
               { term: { 'attributes.conversation_id': 'inv-1' } },
               { term: { 'attributes.space_id': 'default' } },
             ],
@@ -335,10 +343,12 @@ describe('listTreeIdsForInvestigation', () => {
       }),
       expect.anything()
     );
+    expect(esClient.esql.query.mock.calls[0][0].query).toContain('LIMIT 500');
   });
 
   it('returns no trees when the index does not exist yet', async () => {
     const esClient = createEsClient();
+    esClient.esql.query.mockRejectedValue(unknownIndex());
 
     expect(await createStore(esClient).listTreeIdsForInvestigation('inv-1')).toEqual([]);
   });
@@ -347,38 +357,43 @@ describe('listTreeIdsForInvestigation', () => {
 describe('list', () => {
   it('maps head hits to summaries', async () => {
     const esClient = createEsClient();
-    esClient.search.mockResolvedValue({
-      hits: {
-        hits: [
+    esClient.esql.query.mockResolvedValue({
+      columns: [{ name: '_source', type: 'object' }],
+      values: [
+        [
           {
-            _source: {
-              '@timestamp': '2026-09-09T12:00:00.000Z',
-              type: 'decision_tree',
-              title: 'Checkout High Latency',
-              content: MARKDOWN,
-              tags: ['nightshift', 'decision-tree'],
-              attributes: {
-                tree_id: 'symptom:checkout-high-latency',
-                symptom: 'checkout-high-latency',
-                version: 2,
-                status: 'established',
-                node_count: 5,
-                edge_count: 4,
-              },
-              learnings: [learning],
+            '@timestamp': '2026-09-09T12:00:00.000Z',
+            type: 'decision_tree',
+            title: 'Checkout High Latency',
+            content: MARKDOWN,
+            tags: ['nightshift', 'decision-tree'],
+            attributes: {
+              tree_id: 'symptom:checkout-high-latency',
+              symptom: 'checkout-high-latency',
+              version: 2,
+              status: 'established',
+              node_count: 5,
+              edge_count: 4,
             },
+            learnings: [learning],
           },
         ],
-      },
+      ],
     });
 
     const trees = await createStore(esClient).list();
 
-    expect(esClient.search).toHaveBeenCalledWith(
+    // The type is a top-level field and sits in the query; the tag is multi-valued and the space a
+    // flattened subfield, so both stay exact in the request filter.
+    expect(esClient.esql.query).toHaveBeenCalledWith(
       expect.objectContaining({
-        query: {
+        query: expect.stringContaining('WHERE type == "decision_tree" | SORT @timestamp DESC'),
+        filter: {
           bool: {
-            filter: expect.arrayContaining([{ term: { 'attributes.space_id': 'default' } }]),
+            filter: [
+              { term: { tags: 'decision-tree' } },
+              { term: { 'attributes.space_id': 'default' } },
+            ],
           },
         },
       }),
@@ -400,16 +415,15 @@ describe('list', () => {
 describe('listVersions', () => {
   it('filters versions by the flattened tree_id attribute', async () => {
     const esClient = createEsClient();
-    esClient.search.mockResolvedValue({ hits: { hits: [] } });
-
     await createStore(esClient).listVersions('symptom:checkout-high-latency');
 
-    expect(esClient.search).toHaveBeenCalledWith(
+    // The tree id is a flattened subfield, so it is an exact request filter; the type is a WHERE.
+    expect(esClient.esql.query).toHaveBeenCalledWith(
       expect.objectContaining({
-        query: {
+        query: expect.stringContaining('WHERE type == "decision_tree_version"'),
+        filter: {
           bool: {
             filter: [
-              { term: { type: 'decision_tree_version' } },
               { term: { 'attributes.tree_id': 'symptom:checkout-high-latency' } },
               { term: { 'attributes.space_id': 'default' } },
             ],

@@ -802,9 +802,9 @@ describe('BurnRateRuleExecutor', () => {
       esClientMock.search.mockResolvedValueOnce(
         generateEsResponse(ruleParams, [], { instanceId: 'bar' })
       );
-      // Mock summary repository es searches
-      esClientMock.search.mockResolvedValueOnce(generateEsSummaryResponse());
-      esClientMock.search.mockResolvedValueOnce(generateEsSummaryResponse());
+      // Mock summary repository ES|QL queries
+      esClientMock.esql.query.mockResolvedValueOnce(generateEsSummaryResponse());
+      esClientMock.esql.query.mockResolvedValueOnce(generateEsSummaryResponse());
 
       // @ts-ignore
       servicesMock.alertsClient!.report.mockImplementation(({ id }: { id: string }) => ({
@@ -938,7 +938,7 @@ describe('BurnRateRuleExecutor', () => {
       esClientMock.search.mockResolvedValueOnce(
         generateEsResponse(ruleParams, [], { instanceId: '*' })
       );
-      esClientMock.search.mockResolvedValueOnce(generateEsSummaryResponseWithApmFields());
+      esClientMock.esql.query.mockResolvedValueOnce(generateEsSummaryResponseWithApmFields());
 
       // @ts-ignore
       servicesMock.alertsClient!.report.mockImplementation(({ id }: { id: string }) => ({
@@ -1221,48 +1221,40 @@ function generateEsResponse(
 
 function generateEsSummaryResponse() {
   return {
-    ...commonEsResponse,
-    hits: {
-      hits: [
+    columns: [{ name: '_source', type: 'unsupported' }],
+    values: [
+      [
         {
-          _index: '.slo-observability.summary-v3.2',
-          _id: 'X19fX19fJWJbqiqq1WN9x1e_kHkXpwAA',
-          _source: {
-            sliValue: 0.9,
-            status: 'HEALTHY',
-            errorBudgetConsumed: 0.6,
-            errorBudgetRemaining: 0.4,
-          },
+          sliValue: 0.9,
+          status: 'HEALTHY',
+          errorBudgetConsumed: 0.6,
+          errorBudgetRemaining: 0.4,
         },
       ],
-    },
-  };
+    ],
+  } as never;
 }
 
 function generateEsSummaryResponseWithApmFields() {
   return {
-    ...commonEsResponse,
-    hits: {
-      hits: [
+    columns: [{ name: '_source', type: 'unsupported' }],
+    values: [
+      [
         {
-          _index: '.slo-observability.summary-v3.2',
-          _id: 'X19fX19fJWJbqiqq1WN9x1e_kHkXpwAA',
-          _source: {
-            sliValue: 0.9,
-            status: 'HEALTHY',
-            errorBudgetConsumed: 0.6,
-            errorBudgetRemaining: 0.4,
-            service: {
-              environment: 'production',
-              name: 'my-service',
-            },
-            transaction: {
-              name: 'GET /api/endpoint',
-              type: 'request',
-            },
+          sliValue: 0.9,
+          status: 'HEALTHY',
+          errorBudgetConsumed: 0.6,
+          errorBudgetRemaining: 0.4,
+          service: {
+            environment: 'production',
+            name: 'my-service',
+          },
+          transaction: {
+            name: 'GET /api/endpoint',
+            type: 'request',
           },
         },
       ],
-    },
-  };
+    ],
+  } as never;
 }

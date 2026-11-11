@@ -6,6 +6,7 @@
  */
 
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 
 import {
   AGENT_POLICY_INDEX,
@@ -13,6 +14,8 @@ import {
   AGENT_POLICY_VERSION_SEPARATOR,
   AGENT_POLICY_SENTINEL_VERSION,
 } from '../../common/constants';
+
+import { esqlRows, runEsqlRead } from './esql_read';
 
 // Painless: strip version suffix from policy_id and store as policy_base_id.
 // Mirrors removeVersionSuffixFromPolicyId: only strips when the segment after the last
@@ -117,15 +120,15 @@ const countDocumentsToBackfill = async (
   index: string,
   signal?: AbortSignal
 ) => {
-  const { count } = await esClient.count(
-    {
-      index,
-      ignore_unavailable: true,
-      query: BACKFILL_QUERY,
-    },
-    { signal }
-  );
-  return count;
+  // A missing index has nothing to backfill, as the DSL `ignore_unavailable` did.
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([index]).where`policy_id IS NOT NULL AND policy_base_id IS NULL`
+      .pipe`STATS count = COUNT(*)`,
+    ignoreUnknownIndex: true,
+    signal,
+  });
+  return (esqlRows(response)[0]?.count as number | undefined) ?? 0;
 };
 
 export async function backfillIndex(

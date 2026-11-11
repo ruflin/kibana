@@ -6,6 +6,7 @@
  */
 
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import {
   TRANSACTION_DURATION,
   TRANSACTION_DURATION_HISTOGRAM,
@@ -103,14 +104,13 @@ export async function getHasTransactionsEvents({
   apmEventClient: APMEventClient;
   kuery?: string;
 }) {
-  const response = await apmEventClient.search('get_has_aggregated_transactions', {
+  const response = await apmEventClient.esql('get_has_aggregated_transactions', {
     apm: {
       events: [ProcessorEvent.metric],
     },
-    track_total_hits: 1,
-    terminate_after: 1,
-    size: 0,
-    query: {
+    // The histogram field is a Query DSL filter: ES|QL does not read it as a scalar.
+    query: (index) => esql.from(index).pipe`KEEP @timestamp`.limit(1),
+    filter: {
       bool: {
         filter: [
           { exists: { field: TRANSACTION_DURATION_HISTOGRAM } },
@@ -121,5 +121,5 @@ export async function getHasTransactionsEvents({
     },
   });
 
-  return response.hits.total.value > 0;
+  return (response?.values.length ?? 0) > 0;
 }

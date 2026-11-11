@@ -201,9 +201,10 @@ describe('EntityMetadataClient', () => {
 
   describe('getLatestByEntityId', () => {
     const mockSearchHits = (sources: RelationshipMetadataDoc[]) => {
-      esClient.search.mockResolvedValue({
-        hits: { hits: sources.map((s) => ({ _source: s })) },
-      } as unknown as Awaited<ReturnType<typeof esClient.search>>);
+      esClient.esql.query.mockResolvedValue({
+        columns: [{ name: '_source', type: '_source' }],
+        values: sources.map((s) => [s]),
+      } as unknown as Awaited<ReturnType<typeof esClient.esql.query>>);
     };
 
     it('queries the namespace-scoped metadata datastream, latest-wins by @timestamp, size 1', async () => {
@@ -213,10 +214,9 @@ describe('EntityMetadataClient', () => {
         eventAction: 'relationship_observed',
       });
 
-      const [params] = esClient.search.mock.calls[0] as [Record<string, unknown>];
-      expect(params.index).toBe('.entities.v2.metadata.default');
-      expect(params.size).toBe(1);
-      expect(params.sort).toEqual([{ '@timestamp': { order: 'desc', unmapped_type: 'date' } }]);
+      const [params] = esClient.esql.query.mock.calls[0] as [{ query: string }];
+      expect(params.query).toContain('FROM .entities.v2.metadata.default METADATA _source');
+      expect(params.query).toContain('| SORT @timestamp DESC NULLS LAST | LIMIT 1');
     });
 
     it('filters by event.action and entity.id', async () => {
@@ -226,14 +226,20 @@ describe('EntityMetadataClient', () => {
         eventAction: 'relationship_observed',
       });
 
-      const [params] = esClient.search.mock.calls[0] as [{ query: Record<string, any> }];
-      expect(params.query.bool.filter).toEqual([
-        { term: { 'event.action': 'relationship_observed' } },
-        { term: { 'entity.id': 'user:alice@corp' } },
+      const [params] = esClient.esql.query.mock.calls[0] as [
+        { query: string; params: unknown; filter?: unknown }
+      ];
+      expect(params.query).toContain(
+        'WHERE event.action == ?eventAction AND entity.id == ?entityId'
+      );
+      expect(params.params).toEqual([
+        { eventAction: 'relationship_observed' },
+        { entityId: 'user:alice@corp' },
       ]);
+      expect(params.filter).toBeUndefined();
     });
 
-    it('appends caller-supplied filter clauses after the event.action and entity.id terms', async () => {
+    it('sends caller-supplied filter clauses as the request filter, in Query DSL', async () => {
       mockSearchHits([makeDoc()]);
       await client.getLatestByEntityId({
         entityId: 'user:alice@corp',
@@ -241,12 +247,10 @@ describe('EntityMetadataClient', () => {
         filter: [{ term: { 'Ai_summary.variant_id': 'resolved' } }],
       });
 
-      const [params] = esClient.search.mock.calls[0] as [{ query: Record<string, any> }];
-      expect(params.query.bool.filter).toEqual([
-        { term: { 'event.action': 'relationship_observed' } },
-        { term: { 'entity.id': 'user:alice@corp' } },
-        { term: { 'Ai_summary.variant_id': 'resolved' } },
-      ]);
+      const params = esClient.esql.query.mock.calls[0][0] as { filter?: unknown };
+      expect(params.filter).toEqual({
+        bool: { filter: [{ term: { 'Ai_summary.variant_id': 'resolved' } }] },
+      });
     });
 
     it('returns the first (latest) hit _source', async () => {
@@ -269,19 +273,19 @@ describe('EntityMetadataClient', () => {
       expect(result).toBeNull();
     });
 
-    it('omits allow_no_indices / ignore_unavailable so an authz denial is not swallowed as an empty 200', async () => {
+    it('sends no allow_no_indices / ignore_unavailable so an authz denial is not swallowed as an empty 200', async () => {
       mockSearchHits([]);
       await client.getLatestByEntityId({
         entityId: 'user:alice@corp',
         eventAction: 'relationship_observed',
       });
-      const [params] = esClient.search.mock.calls[0] as [Record<string, unknown>];
+      const params = esClient.esql.query.mock.calls[0][0] as unknown as Record<string, unknown>;
       expect(params.allow_no_indices).toBeUndefined();
       expect(params.ignore_unavailable).toBeUndefined();
     });
 
     it('tolerates a missing datastream (404) by returning null', async () => {
-      esClient.search.mockRejectedValueOnce(
+      esClient.esql.query.mockRejectedValueOnce(
         Object.assign(new Error('index_not_found_exception'), { statusCode: 404 })
       );
       const result = await client.getLatestByEntityId({
@@ -304,7 +308,7 @@ describe('EntityMetadataClient', () => {
     });
 
     it('propagates transport/authz errors to the caller', async () => {
-      esClient.search.mockRejectedValueOnce(new Error('security_exception'));
+      esClient.esql.query.mockRejectedValueOnce(new Error('security_exception'));
       await expect(
         client.getLatestByEntityId({
           entityId: 'user:alice@corp',

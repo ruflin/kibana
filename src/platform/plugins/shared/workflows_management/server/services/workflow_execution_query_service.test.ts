@@ -53,6 +53,7 @@ describe('WorkflowExecutionQueryService', () => {
       get: jest.fn(),
       mget: jest.fn(),
       update: jest.fn(),
+      esql: { query: jest.fn() },
     } as any;
     mockWorkflowDataClient = {
       ...createMockWorkflowDataClient(),
@@ -728,12 +729,10 @@ describe('WorkflowExecutionQueryService', () => {
      * search to filter out orphaned docs whose parent has been soft-deleted.
      */
     const mockAliveWorkflowsLookup = (aliveIds: string[]) => {
-      mockEsClient.search.mockResolvedValueOnce({
-        hits: {
-          hits: aliveIds.map((id) => ({ _id: id })),
-          total: { value: aliveIds.length },
-        },
-      } as any);
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValueOnce({
+        columns: [{ name: '_id', type: 'keyword' }],
+        values: aliveIds.map((id) => [id]),
+      });
     };
 
     it('issues a term-only query against keyword-indexed fields and omits stepType', async () => {
@@ -744,7 +743,8 @@ describe('WorkflowExecutionQueryService', () => {
 
       const result = await service.listWaitingForInputSteps('default');
 
-      expect(mockEsClient.search).toHaveBeenCalledTimes(2);
+      expect(mockEsClient.search).toHaveBeenCalledTimes(1);
+      expect(mockEsClient.esql.query).toHaveBeenCalledTimes(1);
       const searchArgs = mockEsClient.search.mock.calls[0][0] as {
         index: string;
         query: {
@@ -886,26 +886,18 @@ describe('WorkflowExecutionQueryService', () => {
 
         await service.listWaitingForInputSteps('default');
 
-        expect(mockEsClient.search).toHaveBeenCalledTimes(2);
-        const lookupArgs = mockEsClient.search.mock.calls[1][0] as {
-          index: string;
-          _source: boolean;
-          query: {
-            bool: {
-              must: Array<Record<string, unknown>>;
-              must_not: Array<Record<string, unknown>>;
-            };
-          };
-          size: number;
+        expect(mockEsClient.search).toHaveBeenCalledTimes(1);
+        expect(mockEsClient.esql.query).toHaveBeenCalledTimes(1);
+        const lookupArgs = (mockEsClient.esql.query as jest.Mock).mock.calls[0][0] as {
+          query: string;
+          params: Array<Record<string, unknown>>;
         };
-        expect(lookupArgs.index).toBe(WORKFLOWS_INDEX);
-        expect(lookupArgs._source).toBe(false);
-        const idsClause = lookupArgs.query.bool.must.find(
-          (c): c is { ids: { values: string[] } } => 'ids' in c
+        expect(lookupArgs.query).toMatch(
+          new RegExp(
+            `^FROM ${WORKFLOWS_INDEX} METADATA _id \\| WHERE \\(_id IN \\("wf-[12]", "wf-[12]"\\)\\) AND spaceId == \\?spaceId AND deleted_at IS NULL \\| KEEP _id \\| LIMIT 2$`
+          )
         );
-        expect(idsClause?.ids.values.sort()).toEqual(['wf-1', 'wf-2']);
-        expect(lookupArgs.query.bool.must).toContainEqual({ term: { spaceId: 'default' } });
-        expect(lookupArgs.query.bool.must_not).toEqual([{ exists: { field: 'deleted_at' } }]);
+        expect(lookupArgs.params).toContainEqual({ spaceId: 'default' });
       });
 
       it('skips the parent-workflow lookup when no step executions match', async () => {
@@ -925,11 +917,10 @@ describe('WorkflowExecutionQueryService', () => {
       });
 
       it('falls back to unfiltered results and warns when the workflow lookup errors', async () => {
-        mockEsClient.search
-          .mockResolvedValueOnce({
-            hits: { hits: [buildHit()], total: { value: 1 } },
-          } as any)
-          .mockRejectedValueOnce(new Error('lookup boom'));
+        mockEsClient.search.mockResolvedValueOnce({
+          hits: { hits: [buildHit()], total: { value: 1 } },
+        } as any);
+        (mockEsClient.esql.query as jest.Mock).mockRejectedValueOnce(new Error('lookup boom'));
 
         const result = await service.listWaitingForInputSteps('default');
 
@@ -942,19 +933,24 @@ describe('WorkflowExecutionQueryService', () => {
       });
 
       it('treats index_not_found on the workflow lookup as "no alive workflows"', async () => {
-        mockEsClient.search
-          .mockResolvedValueOnce({
-            hits: { hits: [buildHit()], total: { value: 1 } },
-          } as any)
-          .mockRejectedValueOnce(
-            new errors.ResponseError({
-              statusCode: 404,
-              body: { error: { type: 'index_not_found_exception' } },
-              headers: {},
-              meta: {} as any,
-              warnings: [],
-            })
-          );
+        mockEsClient.search.mockResolvedValueOnce({
+          hits: { hits: [buildHit()], total: { value: 1 } },
+        } as any);
+        // ES|QL reports a missing index as a 400 `verification_exception`, not a 404.
+        (mockEsClient.esql.query as jest.Mock).mockRejectedValueOnce(
+          new errors.ResponseError({
+            statusCode: 400,
+            body: {
+              error: {
+                type: 'verification_exception',
+                reason: 'Found 1 problem\nline 1:1: Unknown index [.workflows-workflows]',
+              },
+            },
+            headers: {},
+            meta: {} as any,
+            warnings: [],
+          })
+        );
 
         const result = await service.listWaitingForInputSteps('default');
 
@@ -988,12 +984,10 @@ describe('WorkflowExecutionQueryService', () => {
     });
 
     const mockAliveWorkflowsLookup = (aliveIds: string[]) => {
-      mockEsClient.search.mockResolvedValueOnce({
-        hits: {
-          hits: aliveIds.map((id) => ({ _id: id })),
-          total: { value: aliveIds.length },
-        },
-      } as any);
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValueOnce({
+        columns: [{ name: '_id', type: 'keyword' }],
+        values: aliveIds.map((id) => [id]),
+      });
     };
 
     it('matches either terminated steps or audit-stamped (responded but not yet resumed) steps', async () => {
@@ -1004,7 +998,8 @@ describe('WorkflowExecutionQueryService', () => {
 
       const result = await service.listProcessedWaitForInputSteps('default');
 
-      expect(mockEsClient.search).toHaveBeenCalledTimes(2);
+      expect(mockEsClient.search).toHaveBeenCalledTimes(1);
+      expect(mockEsClient.esql.query).toHaveBeenCalledTimes(1);
       const searchArgs = mockEsClient.search.mock.calls[0][0] as {
         index: string;
         query: {
@@ -1224,7 +1219,8 @@ describe('WorkflowExecutionQueryService', () => {
 
         const result = await service.listProcessedWaitForInputSteps('default');
 
-        expect(mockEsClient.search).toHaveBeenCalledTimes(2);
+        expect(mockEsClient.search).toHaveBeenCalledTimes(1);
+        expect(mockEsClient.esql.query).toHaveBeenCalledTimes(1);
         expect(result.reasoningByStepId.size).toBe(0);
       });
 
@@ -1255,7 +1251,7 @@ describe('WorkflowExecutionQueryService', () => {
           includeReasoning: true,
         });
 
-        const reasoningArgs = mockEsClient.search.mock.calls[2][0] as any;
+        const reasoningArgs = mockEsClient.search.mock.calls[1][0] as any;
         expect(reasoningArgs).toMatchObject({
           index: WORKFLOWS_STEP_EXECUTIONS_INDEX,
           _source: { includes: ['workflowRunId', 'finishedAt', 'output.reasoning'] },

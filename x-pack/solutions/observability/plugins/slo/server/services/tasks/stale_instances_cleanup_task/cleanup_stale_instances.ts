@@ -6,6 +6,7 @@
  */
 
 import { errors } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
 import type { ElasticsearchClient, Logger, SavedObjectsClient } from '@kbn/core/server';
 import { isSavedObjectErrorResult } from '@kbn/core-saved-objects-server';
@@ -15,6 +16,7 @@ import {
 } from '../../../../common/constants';
 import type { StoredSLOSettings } from '../../../domain/models';
 import { sloSettingsObjectId, SO_SLO_SETTINGS_TYPE } from '../../../saved_objects/slo_settings';
+import { runEsqlRows } from '../../utils/esql_read';
 import type { QueryContainer, SpaceSloSettings, TaskState } from './types';
 
 interface Dependencies {
@@ -237,16 +239,17 @@ async function hasDocumentsToDelete(
   dependencies: Dependencies
 ): Promise<boolean> {
   const { esClient, signal } = dependencies;
-  const response = await esClient.count(
-    {
-      index: SUMMARY_DESTINATION_INDEX_PATTERN,
-      terminate_after: 1,
-      query: query as QueryDslQueryContainer,
-    },
-    { signal }
-  );
+  // The delete-by-query below runs the same Query DSL, so it is sent as the request filter to keep
+  // both on exactly the same set of documents.
+  const rows = await runEsqlRows({
+    esClient,
+    signal,
+    ignoreUnknownIndex: true,
+    filter: query as QueryDslQueryContainer,
+    query: esql.from([SUMMARY_DESTINATION_INDEX_PATTERN]).limit(1),
+  });
 
-  return response.count > 0;
+  return rows.length > 0;
 }
 
 async function executeDeleteByQuery(

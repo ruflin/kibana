@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { errors } from '@elastic/elasticsearch';
 import { elasticsearchServiceMock, loggingSystemMock } from '@kbn/core/server/mocks';
 import { createThreatReport } from './create_threat_report';
 
@@ -15,16 +16,10 @@ const REPORT_ID_PATTERN = /^[^:]+:[a-f0-9]{64}$/;
 
 const buildEsClient = ({ totalHits = 0 }: { totalHits?: number } = {}) => {
   const esClient = elasticsearchServiceMock.createElasticsearchClient();
-  esClient.search.mockResolvedValue({
-    took: 1,
-    timed_out: false,
-    _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-    hits: {
-      total: { value: totalHits, relation: 'eq' as const },
-      max_score: null,
-      hits: totalHits > 0 ? [{ _id: 'existing-id', _index: '.kibana-threat-reports' }] : [],
-    },
-  } as ReturnType<typeof esClient.search> extends Promise<infer T> ? T : never);
+  esClient.esql.query.mockResolvedValue({
+    columns: [{ name: '_id', type: 'keyword' }],
+    values: totalHits > 0 ? [['existing-id']] : [],
+  } as ReturnType<typeof esClient.esql.query> extends Promise<infer T> ? T : never);
   esClient.create.mockResolvedValue({
     _id: 'ignored-the-id-is-deterministic',
     _index: '.kibana-threat-reports',
@@ -73,17 +68,38 @@ describe('createThreatReport', () => {
   });
 
   it('ignores a missing reports index on the dedup precheck so the first ingest still writes', async () => {
-    // Bootstrap usually creates the companion index, but without
-    // ignore_unavailable a missing index would throw index_not_found_exception
-    // and 500 the precheck before create can run.
+    // Bootstrap usually creates the companion index, but a missing index is a 400
+    // `verification_exception` in ES|QL, which would 500 the precheck before create can run.
     const esClient = buildEsClient();
+    esClient.esql.query.mockRejectedValue(
+      new errors.ResponseError({
+        statusCode: 400,
+        body: {
+          error: {
+            type: 'verification_exception',
+            reason: 'Found 1 problem\nline 1:1: Unknown index [.kibana-threat-reports]',
+          },
+        },
+        headers: {},
+        warnings: [],
+        meta: {} as never,
+      })
+    );
     const result = await createThreatReport(esClient, logger, 'default', BASE_PARAMS);
 
-    expect(esClient.search.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ ignore_unavailable: true })
-    );
     expect(result.status).toBe('ingested');
     expect(esClient.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('looks for a duplicate by fingerprint in the current and the global space', async () => {
+    const esClient = buildEsClient();
+    const result = await createThreatReport(esClient, logger, 'team-a', BASE_PARAMS);
+
+    expect(esClient.esql.query.mock.calls[0][0]).toEqual({
+      query:
+        'FROM .kibana-threat-reports METADATA _id | WHERE content_fingerprint == ?fp AND (space_id IN (?spaceId, ?globalSpaceId)) | KEEP _id | LIMIT 1',
+      params: [{ fp: result.content_fingerprint }, { spaceId: 'team-a' }, { globalSpaceId: '*' }],
+    });
   });
 
   it('reports a duplicate when it loses the create race (409)', async () => {
@@ -141,14 +157,15 @@ describe('createThreatReport', () => {
     expect(source.url).toBe(BASE_PARAMS.source_url);
     expect(source.type).toBe('manual');
     // …and nothing about ingesting a report ever reaches out over the network. The
-    // service only ever talks to Elasticsearch (search for dedup, then create).
+    // service only ever talks to Elasticsearch (an ES|QL read for dedup, then create).
     const esMethodsCalled = Object.entries(esClient)
       .filter(
         ([, value]) =>
           typeof value === 'function' && (value as unknown as jest.Mock).mock?.calls.length
       )
       .map(([name]) => name);
-    expect(esMethodsCalled.sort()).toEqual(['create', 'search']);
+    expect(esMethodsCalled).toEqual(['create']);
+    expect(esClient.esql.query).toHaveBeenCalledTimes(1);
   });
 
   it('removes credentials from source provenance', async () => {

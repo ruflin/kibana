@@ -8,7 +8,10 @@
  */
 
 import type { estypes } from '@elastic/elasticsearch';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import { isResponseError } from '@kbn/es-errors';
 
 import { EXECUTION_IO_FALLBACK_INDEXES, WORKFLOWS_EXECUTIONS_IO_DATA_STREAM } from './constants';
 import { executionIoId, parseExecutionIoId } from './execution_io_id';
@@ -59,6 +62,13 @@ type IoHit = GetExecutionsByIdsResponse<EsExecutionIo>['items'][number];
  * `getByIds` checks the two newest backing indexes, searches the IO data stream
  * for anything older, then the legacy plain execution indexes. Each id is created once.
  */
+const isEsqlUnknownIndexError = (error: unknown): boolean =>
+  isResponseError(error) &&
+  error.statusCode === 400 &&
+  typeof error.body?.error === 'object' &&
+  error.body.error.type === 'verification_exception' &&
+  (error.body.error.reason ?? '').includes('Unknown index');
+
 export class ExecutionsIoDataClient implements ExecutionsIoClient {
   constructor(private readonly deps: ExecutionsIoDataClientDeps) {}
 
@@ -140,14 +150,24 @@ export class ExecutionsIoDataClient implements ExecutionsIoClient {
   }
 
   private async findExistingIds(ids: string[]): Promise<Set<string>> {
-    const response = await this.deps.esClient.search({
-      index: WORKFLOWS_EXECUTIONS_IO_DATA_STREAM,
-      ignore_unavailable: true,
-      size: ids.length,
-      _source: false,
-      query: { ids: { values: ids } },
-    });
-    return new Set(response.hits.hits.flatMap((hit) => (hit._id ? [hit._id] : [])));
+    const { query, params } = esql.from([WORKFLOWS_EXECUTIONS_IO_DATA_STREAM], ['_id'])
+      .where`_id IN (${ids.map((id) => esql.str(id))})`.pipe`KEEP _id`
+      .limit(ids.length)
+      .toRequest();
+    try {
+      const response = (await this.deps.esClient.esql.query({
+        query,
+        params,
+      } as unknown as EsqlQueryRequest)) as unknown as { values: unknown[][] };
+      return new Set(response.values.flatMap(([id]) => (typeof id === 'string' ? [id] : [])));
+    } catch (error) {
+      // The search tolerated a missing data stream (`ignore_unavailable`); ES|QL reports it as a
+      // 400 `verification_exception` ("Unknown index") instead.
+      if (isEsqlUnknownIndexError(error)) {
+        return new Set();
+      }
+      throw error;
+    }
   }
 
   /** mget the two newest IO backing indexes, then search the data stream for the rest. */

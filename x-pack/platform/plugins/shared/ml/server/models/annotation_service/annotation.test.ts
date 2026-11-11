@@ -6,7 +6,6 @@
  */
 
 import Boom from '@hapi/boom';
-import getAnnotationsRequestMock from './__mocks__/get_annotations_request.json';
 import getAnnotationsResponseMock from './__mocks__/get_annotations_response.json';
 
 import { ANNOTATION_TYPE } from '../../../common/constants/annotations';
@@ -26,6 +25,28 @@ const serverlessMock = {
 
 const jobIdMock = 'job-id-mock';
 
+// Answers the annotation ES|QL queries from the response mock: a `COUNT(*)` for the total, the
+// `_id` and `_source` of each hit otherwise.
+const esqlQueryMock = jest.fn(async ({ query }: { query: string }) =>
+  query.includes('STATS total = COUNT(*)')
+    ? {
+        columns: [{ name: 'total', type: 'long' }],
+        values: [[getAnnotationsResponseMock.hits.total.value]],
+      }
+    : {
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_index', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: getAnnotationsResponseMock.hits.hits.map((hit) => [
+          hit._id,
+          hit._index,
+          hit._source,
+        ]),
+      }
+);
+
 describe('annotation_service', () => {
   let mlClusterClientSpy = {} as any;
   let mlClientSpy: Pick<MlClient, 'getJobs'>;
@@ -38,12 +59,13 @@ describe('annotation_service', () => {
     const callAs = {
       delete: jest.fn(() => Promise.resolve(acknowledgedResponseMock)),
       index: jest.fn(() => Promise.resolve(acknowledgedResponseMock)),
-      search: jest.fn(() => Promise.resolve(getAnnotationsResponseMock)),
+      esql: { query: esqlQueryMock },
       ml: {
         getJobs: internalGetJobs,
       },
     };
 
+    esqlQueryMock.mockClear();
     mlClusterClientSpy = {
       asCurrentUser: callAs,
       asInternalUser: callAs,
@@ -93,24 +115,33 @@ describe('annotation_service', () => {
 
       const response: GetResponse = await getAnnotations(indexAnnotationArgsMock);
 
-      expect(mockFunct.asInternalUser.search.mock.calls[0][0]).toStrictEqual(
-        getAnnotationsRequestMock
+      const [rowsRequest, countRequest] = mockFunct.asInternalUser.esql.query.mock.calls.map(
+        ([request]: [{ query: string; params: unknown[] }]) => request
       );
+      expect(rowsRequest.query).toBe(
+        'FROM .ml-annotations-read METADATA _id, _source | WHERE type == ?annotationType AND annotation IS NOT NULL | WHERE NOT (timestamp <= TO_DATETIME(?earliestMs) AND end_timestamp IS NOT NULL AND end_timestamp <= TO_DATETIME(?p2) OR timestamp >= TO_DATETIME(?latestMs) AND end_timestamp IS NOT NULL AND end_timestamp >= TO_DATETIME(?p4)) | WHERE job_id IN (?jobIds) | KEEP _id, _source | LIMIT 500'
+      );
+      expect(rowsRequest.params).toEqual([
+        { annotationType: 'annotation' },
+        { earliestMs: 1454804100000 },
+        { p2: 1454804100000 },
+        { latestMs: 1455233399999 },
+        { p4: 1455233399999 },
+        { jobIds: [jobIdMock] },
+      ]);
+      expect(countRequest.query).toMatch(/\| STATS total = COUNT\(\*\)$/);
+      expect(response.totalCount).toBe(2);
       expect(Object.keys(response.annotations)).toHaveLength(1);
       expect(response.annotations[jobIdMock]).toHaveLength(2);
       expect(isAnnotations(response.annotations[jobIdMock])).toBeTruthy();
     });
 
     it('should throw and catch an error', async () => {
-      const mockEsError = {
-        statusCode: 404,
-        error: 'Not Found',
-        message: 'mock error message',
-      };
+      const mockEsError = new Error('mock error message');
 
       const mlClusterClientSpyError: any = {
         asInternalUser: {
-          search: jest.fn(() => Promise.resolve(mockEsError)),
+          esql: { query: jest.fn(() => Promise.reject(mockEsError)) },
           ml: {
             getJobs: internalGetJobs,
           },
@@ -130,9 +161,7 @@ describe('annotation_service', () => {
         maxAnnotations: 500,
       };
 
-      await expect(getAnnotations(indexAnnotationArgsMock)).rejects.toEqual(
-        Error(`Annotations couldn't be retrieved from Elasticsearch.`)
-      );
+      await expect(getAnnotations(indexAnnotationArgsMock)).rejects.toThrow('mock error message');
     });
   });
 

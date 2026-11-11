@@ -45,9 +45,14 @@ const makeLogger = (): jest.Mocked<Logger> => {
   return child;
 };
 
+const catalogCountResponse = (total: number) => ({
+  columns: [{ name: 'total', type: 'long' }],
+  values: [[total]],
+});
+
 const makeEsClient = (sourceCount: number): jest.Mocked<ElasticsearchClient> => {
   return {
-    count: jest.fn().mockResolvedValue({ count: sourceCount }),
+    esql: { query: jest.fn().mockResolvedValue(catalogCountResponse(sourceCount)) },
     indices: {
       // Serverless answers 410 api_not_available_exception for this API.
       getFieldMapping: jest
@@ -128,8 +133,8 @@ describe('ensureThreatIntelBootstrap', () => {
     it('calls installIndexTemplates on an empty catalog too', async () => {
       // count === 0 means first boot — ensure templates install and seeding runs
       const esClient = makeEsClient(0);
-      // second count call (inside seedThreatIntelCatalog) also returns 0
-      (esClient.count as jest.Mock).mockResolvedValue({ count: 0 });
+      // the catalog count after seeding also returns 0
+      (esClient.esql.query as jest.Mock).mockResolvedValue(catalogCountResponse(0));
       const logger = makeLogger();
 
       await ensureThreatIntelBootstrap({ esClient, logger });
@@ -137,9 +142,22 @@ describe('ensureThreatIntelBootstrap', () => {
       expect(indexTemplatesModule.installIndexTemplates).toHaveBeenCalledTimes(1);
     });
 
+    it('counts the catalog with ES|QL and logs an error when it is still empty after seeding', async () => {
+      const esClient = makeEsClient(0);
+      const logger = makeLogger();
+
+      await ensureThreatIntelBootstrap({ esClient, logger });
+
+      expect(esClient.esql.query).toHaveBeenCalledWith(
+        { query: 'FROM .kibana-threat-intel-sources | STATS total = COUNT(*)', params: [] },
+        { signal: undefined }
+      );
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('is still empty'));
+    });
+
     it('calls seedDefaultSources when the catalog is empty', async () => {
       const esClient = makeEsClient(0);
-      (esClient.count as jest.Mock).mockResolvedValue({ count: 0 });
+      (esClient.esql.query as jest.Mock).mockResolvedValue(catalogCountResponse(0));
       const logger = makeLogger();
 
       await ensureThreatIntelBootstrap({ esClient, logger });
@@ -152,7 +170,7 @@ describe('ensureThreatIntelBootstrap', () => {
     // skipped seeding forever, permanently omitting the rest of the catalog.
     it('retries seeding when some entries failed, and succeeds once they land', async () => {
       const esClient = makeEsClient(0);
-      (esClient.count as jest.Mock).mockResolvedValue({ count: 0 });
+      (esClient.esql.query as jest.Mock).mockResolvedValue(catalogCountResponse(0));
       const logger = makeLogger();
 
       (seedDefaultSourcesModule.seedDefaultSources as jest.Mock)

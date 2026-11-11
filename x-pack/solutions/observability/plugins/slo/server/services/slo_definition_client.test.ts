@@ -14,6 +14,7 @@ import {
 import type { MockedLogger } from '@kbn/logging-mocks';
 import { createSLO } from './fixtures/slo';
 import { createSLORepositoryMock } from './mocks';
+import { IllegalArgumentError } from '../errors';
 import { SLODefinitionClient } from './slo_definition_client';
 import type { SLODefinitionRepository } from './slo_definition_repository';
 import { createTempSummaryDocument } from './summary_transform_generator/helpers/create_temp_summary';
@@ -51,44 +52,37 @@ describe('SLODefinitionClient', () => {
         'default',
         httpServiceMock.createStartContract().basePath
       );
-      esClientMock.search.mockResolvedValueOnce({
-        took: 100,
-        timed_out: false,
-        _shards: {
-          total: 0,
-          successful: 0,
-          skipped: 0,
-          failed: 0,
-        },
-        hits: {
-          hits: [{ _source: summaryDoc, _index: '', _id: '' }],
-        },
-      });
+      esClientMock.esql.query.mockResolvedValueOnce({
+        columns: [{ name: '_source', type: 'unsupported' }],
+        values: [[summaryDoc]],
+      } as never);
 
       const response = await sloDefinitionClient.execute('fixed-id', 'default', 'remote_cluster');
 
       expect(response).toMatchSnapshot();
-      expect(esClientMock.search.mock.calls[0][0]).toMatchInlineSnapshot(`
-        Object {
-          "index": "remote_cluster:.slo-observability.summary-v3*",
-          "query": Object {
-            "bool": Object {
-              "filter": Array [
-                Object {
-                  "term": Object {
-                    "spaceId": "default",
-                  },
-                },
-                Object {
-                  "term": Object {
-                    "slo.id": "fixed-id",
-                  },
-                },
-              ],
-            },
-          },
-        }
-      `);
+      expect(esClientMock.esql.query.mock.calls[0][0]).toEqual({
+        query:
+          'FROM remote_cluster:.slo-observability.summary-v3* METADATA _source | WHERE spaceId == ?spaceId AND slo.id == ?sloId | LIMIT 1',
+        params: [{ spaceId: 'default' }, { sloId: 'fixed-id' }],
+      });
+    });
+  });
+
+  describe('remoteName validation', () => {
+    it.each([
+      'remote | DROP spaceId',
+      'remote\nFROM other',
+      'remote:*',
+      'remote,other',
+      'remote"x',
+      '_remote',
+      '-remote',
+      'a'.repeat(300),
+    ])('rejects the remoteName %j without querying', async (remoteName) => {
+      await expect(sloDefinitionClient.execute('fixed-id', 'default', remoteName)).rejects.toThrow(
+        IllegalArgumentError
+      );
+      expect(esClientMock.esql.query).not.toHaveBeenCalled();
     });
   });
 });

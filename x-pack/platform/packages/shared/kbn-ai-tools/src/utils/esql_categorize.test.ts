@@ -84,6 +84,22 @@ describe('buildCategorizeWithSampleQuery', () => {
     expect(query.indexOf('NOT MATCH')).toBeLessThan(query.indexOf('STATS'));
   });
 
+  it('applies the time range and KQL inline before the exclusions and SAMPLE', () => {
+    const query = buildCategorizeWithSampleQuery({
+      indices: 'logs-*',
+      field: 'message',
+      samplingProbability: 0.5,
+      excludeTokens: ['error timeout'],
+      start: 100,
+      end: 200,
+      kql: 'service.name: checkout',
+    });
+
+    expect(query).toContain(
+      'FROM logs-* | WHERE @timestamp >= "1970-01-01T00:00:00.100Z" AND @timestamp <= "1970-01-01T00:00:00.200Z" | WHERE KQL("service.name: checkout") | WHERE NOT MATCH(message, "error timeout", {"operator": "AND"}) | SAMPLE 0.5 | STATS'
+    );
+  });
+
   it('honors an explicit row limit', () => {
     const query = buildCategorizeWithSampleQuery({
       indices: 'logs-*',

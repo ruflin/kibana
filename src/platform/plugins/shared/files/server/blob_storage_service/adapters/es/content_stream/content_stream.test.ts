@@ -15,8 +15,6 @@ import { elasticsearchServiceMock, loggingSystemMock } from '@kbn/core/server/mo
 import type { ContentStreamEncoding, ContentStreamParameters } from './content_stream';
 import { ContentStream } from './content_stream';
 import type { GetResponse } from '@elastic/elasticsearch/lib/api/types';
-import type { estypes } from '@elastic/elasticsearch';
-import type { FileDocument } from '../../../../file_client/file_metadata_client/adapters/es_index';
 import type { IndexRequest } from '@elastic/elasticsearch/lib/api/types';
 
 describe('ContentStream', () => {
@@ -50,56 +48,30 @@ describe('ContentStream', () => {
 
   describe('read', () => {
     describe('with `indexIsAlias` set to `true`', () => {
-      let searchResponse: estypes.SearchResponse<FileDocument<{}>>;
+      let esqlResponse: { columns: Array<{ name: string; type: string }>; values: unknown[][] };
 
       beforeEach(() => {
-        searchResponse = {
-          took: 3,
-          timed_out: false,
-          _shards: {
-            total: 2,
-            successful: 2,
-            skipped: 0,
-            failed: 0,
-          },
-          hits: {
-            total: {
-              value: 1,
-              relation: 'eq',
-            },
-            max_score: 0,
-            hits: [
-              {
-                _index: 'foo',
-                _id: '123',
-                _score: 1.0,
-              },
-            ],
-          },
+        esqlResponse = {
+          columns: [{ name: '_index', type: 'keyword' }],
+          values: [['foo']],
         };
 
-        client.search.mockResolvedValue(searchResponse);
+        client.esql.query.mockResolvedValue(esqlResponse as never);
       });
 
-      it('should use es.search() to find chunk index', async () => {
+      it('should use ES|QL to find chunk index', async () => {
         stream = getContentStream({ params: { size: 1 }, indexIsAlias: true });
         const data = await new Promise((resolve) => stream.once('data', resolve));
 
-        expect(client.search).toHaveBeenCalledWith({
-          _source: false,
-          query: {
-            term: {
-              _id: 'something.0',
-            },
-          },
-          size: 1,
-          index: 'somewhere',
+        expect(client.esql.query).toHaveBeenCalledWith({
+          query: 'FROM somewhere METADATA _id, _index | WHERE _id == ?id | KEEP _index | LIMIT 1',
+          params: [{ id: 'something.0' }],
         });
         expect(data).toEqual(Buffer.from('some content'));
       });
 
       it('should throw if chunk is not found', async () => {
-        searchResponse.hits.hits = [];
+        esqlResponse.values = [];
         stream = getContentStream({ params: { size: 1 }, indexIsAlias: true });
 
         const readPromise = new Promise((resolve, reject) => {

@@ -47,18 +47,19 @@ const inlineSamples = (
 describe('nlToStreamlang', () => {
   const createMockDeps = (): NlToStreamlangDeps & {
     mockInferenceClient: { chatComplete: jest.Mock };
-    mockEsClient: { search: jest.Mock };
+    mockEsClient: { esql: { query: jest.Mock } };
   } => {
     const mockInferenceClient = {
       chatComplete: jest.fn(),
     };
 
     const mockEsClient = {
-      search: jest.fn().mockResolvedValue({
-        hits: {
-          hits: sampleDocuments.map((doc) => ({ _source: doc })),
-        },
-      }),
+      esql: {
+        query: jest.fn().mockResolvedValue({
+          columns: [{ name: '_source', type: 'object' }],
+          values: sampleDocuments.map((doc) => [doc]),
+        }),
+      },
     };
 
     return {
@@ -322,13 +323,10 @@ describe('nlToStreamlang', () => {
       deps
     );
 
-    expect(deps.mockEsClient.search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        index: 'logs.ecs.test',
-        size: 100,
-        ignore_unavailable: true,
-      })
-    );
+    const { query } = deps.mockEsClient.esql.query.mock.calls[0][0];
+    expect(query).toMatch(/^FROM logs\.ecs\.test METADATA _source/);
+    expect(query).toContain('SORT @timestamp DESC NULLS LAST');
+    expect(query).toMatch(/LIMIT 100$/);
     expect(result.samples_info).toEqual({ source: 'stream', count: 1 });
     expect(result.steps).toHaveLength(1);
   });
@@ -350,12 +348,7 @@ describe('nlToStreamlang', () => {
       deps
     );
 
-    expect(deps.mockEsClient.search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        index: 'logs.ecs.test',
-        size: 50,
-      })
-    );
+    expect(deps.mockEsClient.esql.query.mock.calls[0][0].query).toMatch(/LIMIT 50$/);
     expect(result.samples_info).toEqual({ source: 'stream', count: 1 });
     expect(result.steps).toHaveLength(1);
   });

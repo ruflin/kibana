@@ -16,6 +16,7 @@ import {
 } from '../../../common/es_fields/apm';
 import { SERVICE_NAME } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
+import { boolFilter, hasEsqlDocuments } from '../../lib/helpers/esql_apm';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
 
 const hasOTelMetrics = async ({
@@ -33,39 +34,26 @@ const hasOTelMetrics = async ({
   start: number;
   end: number;
 }) => {
-  const params = {
+  return hasEsqlDocuments({
+    apmEventClient,
+    operationName: 'has_otel_process_metrics',
     apm: {
       events: [ProcessorEvent.metric],
     },
-    track_total_hits: false,
-    size: 1,
-    query: {
-      bool: {
-        filter: [
-          { term: { [SERVICE_NAME]: serviceName } },
-          ...rangeQuery(start, end),
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-          {
-            bool: {
-              should: [
-                { exists: { field: METRIC_OTEL_JVM_PROCESS_CPU_PERCENT } },
-                { exists: { field: METRIC_OTEL_JVM_PROCESS_MEMORY_USAGE } },
-                { exists: { field: METRIC_OTEL_JVM_PROCESS_THREADS_COUNT } },
-                { exists: { field: METRIC_OTEL_SYSTEM_CPU_UTILIZATION } },
-                { exists: { field: METRIC_OTEL_SYSTEM_MEMORY_UTILIZATION } },
-              ],
-            },
-          },
-        ],
-      },
-    },
-    _source: false,
-  };
-
-  const response = await apmEventClient.search('has_otel_process_metrics', params);
-
-  return response.hits.hits.length > 0;
+    equals: [[SERVICE_NAME, serviceName]],
+    anyOfFields: [
+      METRIC_OTEL_JVM_PROCESS_CPU_PERCENT,
+      METRIC_OTEL_JVM_PROCESS_MEMORY_USAGE,
+      METRIC_OTEL_JVM_PROCESS_THREADS_COUNT,
+      METRIC_OTEL_SYSTEM_CPU_UTILIZATION,
+      METRIC_OTEL_SYSTEM_MEMORY_UTILIZATION,
+    ],
+    filter: boolFilter(
+      ...rangeQuery(start, end),
+      ...environmentQuery(environment),
+      ...kqlQuery(kuery)
+    ),
+  });
 };
 
 export { hasOTelMetrics };

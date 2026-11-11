@@ -5,12 +5,18 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { rangeQuery } from '@kbn/observability-plugin/server';
 import { accessKnownApmEventFields } from '@kbn/apm-data-access-plugin/server/utils';
 import { asMutableArray } from '../../../../common/utils/as_mutable_array';
 import { maybe } from '../../../../common/utils/maybe';
 import { ApmDocumentType } from '../../../../common/document_type';
-import { termQuery } from '../../../../common/utils/term_query';
+import {
+  boolFilter,
+  esqlRowsAsHits,
+  fromApmIndex,
+  keepFields,
+} from '../../../lib/helpers/esql_apm';
 import {
   EVENT_OUTCOME,
   SPAN_DESTINATION_SERVICE_RESOURCE,
@@ -31,7 +37,7 @@ export async function getDownstreamServiceResource({
   apmEventClient: APMEventClient;
 }) {
   const requiredFields = asMutableArray([SPAN_DESTINATION_SERVICE_RESOURCE] as const);
-  const response = await apmEventClient.search('get_error_group_main_statistics', {
+  const response = await apmEventClient.esql('get_error_group_main_statistics', {
     apm: {
       sources: [
         {
@@ -40,23 +46,17 @@ export async function getDownstreamServiceResource({
         },
       ],
     },
-    track_total_hits: false,
-    size: 1,
-    _source: ['span.destination.service'],
-    query: {
-      bool: {
-        filter: [
-          ...termQuery(TRACE_ID, traceId),
-          ...termQuery(EVENT_OUTCOME, 'failure'),
-          ...rangeQuery(start, end),
-          { exists: { field: SPAN_DESTINATION_SERVICE_RESOURCE } },
-        ],
-      },
-    },
-    fields: requiredFields,
+    query: (index) =>
+      keepFields(
+        fromApmIndex(index).pipe`WHERE ${esql.col(TRACE_ID)} == ${{ traceId }}`
+          .pipe`WHERE ${esql.col(EVENT_OUTCOME)} == ${{ outcome: 'failure' }}`
+          .pipe`WHERE ${esql.col(SPAN_DESTINATION_SERVICE_RESOURCE)} IS NOT NULL`,
+        [...requiredFields]
+      ).limit(1),
+    filter: boolFilter(...rangeQuery(start, end)),
   });
 
-  const fields = maybe(response.hits.hits[0])?.fields;
+  const fields = maybe(esqlRowsAsHits(response)[0])?.fields;
 
   const event = fields && accessKnownApmEventFields(fields).requireFields(requiredFields);
 

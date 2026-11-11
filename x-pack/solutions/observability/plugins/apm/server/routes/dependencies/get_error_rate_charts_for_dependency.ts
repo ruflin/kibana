@@ -5,7 +5,8 @@
  * 2.0.
  */
 
-import { kqlQuery, rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import { EventOutcome } from '../../../common/event_outcome';
 import {
   EVENT_OUTCOME,
@@ -13,7 +14,9 @@ import {
   SPAN_NAME,
 } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
-import { getMetricsDateHistogramParams } from '../../lib/helpers/metrics';
+import { getMetricsBucketSizeInSeconds } from '../../lib/helpers/metrics';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import { boolFilter, fromApmIndex, getHistogramKeys } from '../../lib/helpers/esql_apm';
 import { getOffsetInMs } from '../../../common/utils/get_offset_in_ms';
 import {
   getDocCountFieldForServiceDestinationStatistics,
@@ -51,83 +54,70 @@ async function getErrorRateChartsForDependencyForTimeRange({
     offset,
   });
 
-  const response = await apmEventClient.search('get_error_rate_for_dependency', {
+  const intervalInMs =
+    getMetricsBucketSizeInSeconds({
+      start: startWithOffset,
+      end: endWithOffset,
+      metricsInterval: 60,
+    }) * 1000;
+  const docCountField = getDocCountFieldForServiceDestinationStatistics(
+    searchServiceDestinationMetrics
+  );
+
+  const response = await apmEventClient.esql('get_error_rate_for_dependency', {
     apm: {
       events: [getProcessorEventForServiceDestinationStatistics(searchServiceDestinationMetrics)],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
-      bool: {
-        filter: [
-          ...environmentQuery(environment),
-          ...kqlQuery(kuery),
-          ...rangeQuery(startWithOffset, endWithOffset),
-          ...termQuery(SPAN_NAME, spanName || null),
-          ...getDocumentTypeFilterForServiceDestinationStatistics(searchServiceDestinationMetrics),
-          { term: { [SPAN_DESTINATION_SERVICE_RESOURCE]: dependencyName } },
-          {
-            terms: {
-              [EVENT_OUTCOME]: [EventOutcome.success, EventOutcome.failure],
-            },
-          },
-        ],
-      },
+    query: (index) => {
+      let query = fromApmIndex(index).pipe`WHERE ${esql.col(
+        SPAN_DESTINATION_SERVICE_RESOURCE
+      )} == ${{ dependencyName }}`;
+      if (spanName) {
+        query = query.pipe`WHERE ${esql.col(SPAN_NAME)} == ${{ spanName }}`;
+      }
+      const failure = { failure: EventOutcome.failure };
+      const outcomes = query.pipe`WHERE ${esql.col(EVENT_OUTCOME)} IN (${{
+        success: EventOutcome.success,
+      }}, ${{ failureOutcome: EventOutcome.failure }})`;
+      // The documents of a metric are counted by their count field.
+      return (docCountField
+        ? outcomes.pipe`STATS total_count = SUM(${esql.col(
+            docCountField
+          )}), failure_count = SUM(${esql.col(docCountField)}) WHERE ${esql.col(
+            EVENT_OUTCOME
+          )} == ${failure} BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ${{
+            intervalInMs,
+          }}`
+        : outcomes.pipe`STATS total_count = COUNT(*), failure_count = COUNT(*) WHERE ${esql.col(
+            EVENT_OUTCOME
+          )} == ${failure} BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ${{
+            intervalInMs,
+          }}`
+      ).pipe`SORT bucket ASC`.limit(10000);
     },
-    aggs: {
-      timeseries: {
-        date_histogram: getMetricsDateHistogramParams({
-          start: startWithOffset,
-          end: endWithOffset,
-          metricsInterval: 60,
-        }),
-        aggs: {
-          ...(searchServiceDestinationMetrics
-            ? {
-                total_count: {
-                  sum: {
-                    field: getDocCountFieldForServiceDestinationStatistics(
-                      searchServiceDestinationMetrics
-                    ),
-                  },
-                },
-              }
-            : {}),
-          failures: {
-            filter: {
-              term: {
-                [EVENT_OUTCOME]: EventOutcome.failure,
-              },
-            },
-            aggs: {
-              ...(searchServiceDestinationMetrics
-                ? {
-                    total_count: {
-                      sum: {
-                        field: getDocCountFieldForServiceDestinationStatistics(
-                          searchServiceDestinationMetrics
-                        ),
-                      },
-                    },
-                  }
-                : {}),
-            },
-          },
-        },
-      },
-    },
+    filter: boolFilter(
+      ...environmentQuery(environment),
+      ...kqlQuery(kuery),
+      ...rangeQuery(startWithOffset, endWithOffset),
+      ...getDocumentTypeFilterForServiceDestinationStatistics(searchServiceDestinationMetrics)
+    ),
   });
 
-  return (
-    response.aggregations?.timeseries.buckets.map((bucket) => {
-      const totalCount = bucket.total_count?.value ?? bucket.doc_count;
-      const failureCount = bucket.failures.total_count?.value ?? bucket.failures.doc_count;
+  if (!response) {
+    return [];
+  }
 
+  const rowsByBucket = new Map(esqlRows(response).map((row) => [Number(row.bucket), row]));
+
+  // A bucket without documents has no total and no failures, like in a histogram aggregation.
+  return getHistogramKeys({ start: startWithOffset, end: endWithOffset, intervalInMs }).map(
+    (key) => {
+      const row = rowsByBucket.get(key);
       return {
-        x: bucket.key + offsetInMs,
-        y: failureCount / totalCount,
+        x: key + offsetInMs,
+        y: Number(row?.failure_count ?? 0) / Number(row?.total_count ?? 0),
       };
-    }) ?? []
+    }
   );
 }
 

@@ -8,6 +8,7 @@
  */
 
 import { sortBy } from 'lodash';
+import { esql } from '@elastic/esql';
 import type { IRouter, Logger, RequestHandlerContext } from '@kbn/core/server';
 import type { AppLinkData, SampleDatasetSchema } from '../lib/sample_dataset_registry_types';
 import { createIndexName } from '../lib/create_index_name';
@@ -129,10 +130,11 @@ async function getSampleDatasetStatus(
         return { status: NOT_INSTALLED };
       }
 
-      const count = await elasticsearch.client.asCurrentUser.count({
-        index,
-      });
-      if (count.count === 0) {
+      const { query } = esql.from([index]).pipe`STATS total = COUNT(*)`.toRequest();
+      const count = (await elasticsearch.client.asCurrentUser.esql.query({
+        query,
+      })) as unknown as { values: unknown[][] };
+      if (count.values[0]?.[0] === 0) {
         return { status: NOT_INSTALLED };
       }
     } catch (err) {

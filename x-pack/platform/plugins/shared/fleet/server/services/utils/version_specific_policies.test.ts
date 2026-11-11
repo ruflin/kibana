@@ -62,6 +62,18 @@ import {
   reassignAgentsFromVersionSpecificPolicies,
 } from './version_specific_policies';
 
+const policyIdsResponse = (ids: string[]) =>
+  ({ columns: [{ name: 'policy_id', type: 'keyword' }], values: ids.map((id) => [id]) } as any);
+
+const agentCountsResponse = (counts: Array<[string, number]>) =>
+  ({
+    columns: [
+      { name: 'agents', type: 'long' },
+      { name: 'policy_id', type: 'keyword' },
+    ],
+    values: counts.map(([id, count]) => [count, id]),
+  } as any);
+
 describe('getAgentVersionsForVersionSpecificPolicies', () => {
   it('should return the correct common agent versions', async () => {
     const result = await getAgentVersionsForVersionSpecificPolicies();
@@ -285,14 +297,18 @@ describe('getVersionSpecificPolicies', () => {
 
 describe('reassignAgentsFromVersionSpecificPolicies', () => {
   const soClient = {} as any;
-  const esClient = { deleteByQuery: jest.fn(), search: jest.fn() } as any;
+  const esClient = {
+    deleteByQuery: jest.fn(),
+    search: jest.fn(),
+    esql: { query: jest.fn() },
+  } as any;
   const getAgentsByKueryMock = AgentService.getAgentsByKuery as jest.Mock;
   const reassignAgentsMock = AgentService.reassignAgents as jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
     esClient.deleteByQuery.mockResolvedValue({});
-    esClient.search.mockResolvedValue({ aggregations: { variant_policy_ids: { buckets: [] } } });
+    esClient.esql.query.mockResolvedValue(policyIdsResponse([]));
   });
 
   const variantKuery = 'policy_base_id:"policy1" and not policy_id:"policy1"';
@@ -316,9 +332,7 @@ describe('reassignAgentsFromVersionSpecificPolicies', () => {
   });
 
   it('also matches agents on a known variant policy_id that have no policy_base_id', async () => {
-    esClient.search.mockResolvedValue({
-      aggregations: { variant_policy_ids: { buckets: [{ key: 'policy1#9.4' }] } },
-    });
+    esClient.esql.query.mockResolvedValue(policyIdsResponse(['policy1#9.4']));
     getAgentsByKueryMock.mockResolvedValue({ total: 1 });
 
     await reassignAgentsFromVersionSpecificPolicies(soClient, esClient, 'policy1');
@@ -414,25 +428,32 @@ describe('buildVariantAgentsKuery', () => {
 describe('getVariantPolicyIdsForParent', () => {
   it('returns variant policy ids from .fleet-policies excluding the base document', async () => {
     const esClient = {
-      search: jest.fn().mockResolvedValue({
-        aggregations: { variant_policy_ids: { buckets: [{ key: 'policy1#9.4' }] } },
-      }),
+      esql: { query: jest.fn().mockResolvedValue(policyIdsResponse(['policy1#9.4'])) },
     } as any;
 
     await expect(getVariantPolicyIdsForParent(esClient, 'policy1')).resolves.toEqual([
       'policy1#9.4',
     ]);
-    expect(esClient.search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        index: '.fleet-policies',
-        query: {
-          bool: {
-            filter: [{ term: { policy_base_id: 'policy1' } }],
-            must_not: [{ term: { policy_id: 'policy1' } }],
+    expect(esClient.esql.query).toHaveBeenCalledWith({
+      query:
+        'FROM .fleet-policies | WHERE policy_base_id == ?parentPolicyId AND policy_id != ?excludedPolicyId | STATS BY policy_id | LIMIT 1000',
+      params: [{ parentPolicyId: 'policy1' }, { excludedPolicyId: 'policy1' }],
+    });
+  });
+
+  it('returns no variants when .fleet-policies does not exist yet', async () => {
+    const esClient = {
+      esql: {
+        query: jest.fn().mockRejectedValue({
+          statusCode: 400,
+          body: {
+            error: { type: 'verification_exception', reason: 'Unknown index [.fleet-policies]' },
           },
-        },
-      })
-    );
+        }),
+      },
+    } as any;
+
+    await expect(getVariantPolicyIdsForParent(esClient, 'policy1')).resolves.toEqual([]);
   });
 });
 
@@ -476,7 +497,7 @@ describe('deleteVersionSpecificFleetServerPoliciesForVersions', () => {
 });
 
 describe('getAgentAssignedVersionsForPolicies', () => {
-  const esClient = { search: jest.fn() } as any;
+  const esClient = { esql: { query: jest.fn() } } as any;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -485,81 +506,68 @@ describe('getAgentAssignedVersionsForPolicies', () => {
   it('returns an empty map without querying when given no parent ids', async () => {
     const result = await getAgentAssignedVersionsForPolicies(esClient, []);
 
-    expect(esClient.search).not.toHaveBeenCalled();
+    expect(esClient.esql.query).not.toHaveBeenCalled();
     expect(result.size).toBe(0);
   });
 
   it('returns an empty map without querying .fleet-agents when no variants exist in .fleet-policies', async () => {
     // Step 1 returns no variant buckets → early return, step 2 never runs.
-    esClient.search.mockResolvedValueOnce({
-      aggregations: { variant_policy_ids: { buckets: [] } },
-    });
+    esClient.esql.query.mockResolvedValueOnce(policyIdsResponse([]));
 
     const result = await getAgentAssignedVersionsForPolicies(esClient, ['policy-1']);
 
-    expect(esClient.search).toHaveBeenCalledTimes(1);
+    expect(esClient.esql.query).toHaveBeenCalledTimes(1);
     expect(result.size).toBe(0);
   });
 
   it('queries .fleet-policies by policy_base_id then .fleet-agents by policy_id, grouping version suffixes by parent id', async () => {
     // Step 1: .fleet-policies returns the variant ids that exist for these parents.
-    esClient.search.mockResolvedValueOnce({
-      aggregations: {
-        variant_policy_ids: {
-          buckets: [
-            { key: 'policy-1#9.4' },
-            { key: 'policy-1#8.18' },
-            { key: 'policy-2#9.4' },
-            { key: 'policy-1' }, // base-id doc — filtered out (no version suffix)
-          ],
-        },
-      },
-    });
+    esClient.esql.query.mockResolvedValueOnce(
+      policyIdsResponse([
+        'policy-1#9.4',
+        'policy-1#8.18',
+        'policy-2#9.4',
+        'policy-1', // base-id doc — filtered out (no version suffix)
+      ])
+    );
     // Step 2: .fleet-agents by policy_id — includes an agent without policy_base_id (downlevel enrollment).
-    esClient.search.mockResolvedValueOnce({
-      aggregations: {
-        agents_by_policy_id: {
-          buckets: [{ key: 'policy-1#9.4' }, { key: 'policy-1#8.18' }, { key: 'policy-2#9.4' }],
-        },
-      },
-    });
+    esClient.esql.query.mockResolvedValueOnce(
+      policyIdsResponse(['policy-1#9.4', 'policy-1#8.18', 'policy-2#9.4'])
+    );
 
     const result = await getAgentAssignedVersionsForPolicies(esClient, ['policy-1', 'policy-2']);
 
     // Step 1 must query .fleet-policies by policy_base_id.
-    expect(esClient.search).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        index: '.fleet-policies',
-        size: 0,
-        query: {
-          bool: {
-            filter: [{ terms: { policy_base_id: ['policy-1', 'policy-2'] } }],
-          },
-        },
-      })
-    );
+    expect(esClient.esql.query).toHaveBeenNthCalledWith(1, {
+      query:
+        'FROM .fleet-policies | WHERE policy_base_id IN (?parentIds) | STATS BY policy_id | LIMIT 200',
+      params: [{ parentIds: ['policy-1', 'policy-2'] }],
+    });
     // Step 2 must query .fleet-agents by the exact variant policy_ids from step 1 (not policy_base_id).
     // This catches downlevel-enrolled agents that lack a policy_base_id field.
-    expect(esClient.search).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        index: '.fleet-agents',
-        size: 0,
-        query: {
-          bool: {
-            filter: [{ terms: { policy_id: ['policy-1#9.4', 'policy-1#8.18', 'policy-2#9.4'] } }],
-          },
-        },
-      })
-    );
+    expect(esClient.esql.query).toHaveBeenNthCalledWith(2, {
+      query:
+        'FROM .fleet-agents | WHERE policy_id IN (?variantIdsChunk) | STATS BY policy_id | LIMIT 3',
+      params: [{ variantIdsChunk: ['policy-1#9.4', 'policy-1#8.18', 'policy-2#9.4'] }],
+    });
     expect(result.get('policy-1')).toEqual(new Set(['9.4', '8.18']));
     expect(result.get('policy-2')).toEqual(new Set(['9.4']));
+  });
+
+  it('queries the parents in chunks so the variants fit the 10,000 rows of an ES|QL response', async () => {
+    const parents = Array.from({ length: 101 }, (_, i) => `policy-${i}`);
+    esClient.esql.query.mockResolvedValue(policyIdsResponse([]));
+
+    await getAgentAssignedVersionsForPolicies(esClient, parents);
+
+    expect(esClient.esql.query).toHaveBeenCalledTimes(2);
+    expect(esClient.esql.query.mock.calls[0][0].query).toContain('LIMIT 10000');
+    expect(esClient.esql.query.mock.calls[1][0].query).toContain('LIMIT 100');
   });
 });
 
 describe('getAgentCountsForVariantPolicyIds', () => {
-  const esClient = { search: jest.fn() } as any;
+  const esClient = { esql: { query: jest.fn() } } as any;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -568,45 +576,38 @@ describe('getAgentCountsForVariantPolicyIds', () => {
   it('returns an empty map without querying when given no variant ids', async () => {
     const result = await getAgentCountsForVariantPolicyIds(esClient, []);
 
-    expect(esClient.search).not.toHaveBeenCalled();
+    expect(esClient.esql.query).not.toHaveBeenCalled();
     expect(result.size).toBe(0);
   });
 
   it('queries .fleet-agents by policy_id with no active/status filter and returns counts', async () => {
-    esClient.search.mockResolvedValue({
-      aggregations: {
-        agents_by_policy_id: {
-          buckets: [{ key: 'policy-1#9.2', doc_count: 3 }],
-          // policy-1#8.18 absent from buckets → zero agents for it
-        },
-      },
-    });
+    // policy-1#8.18 absent from the rows → zero agents for it
+    esClient.esql.query.mockResolvedValue(agentCountsResponse([['policy-1#9.2', 3]]));
 
     const result = await getAgentCountsForVariantPolicyIds(esClient, [
       'policy-1#9.2',
       'policy-1#8.18',
     ]);
 
-    const call = esClient.search.mock.calls[0][0];
+    const call = esClient.esql.query.mock.calls[0][0];
     // Must NOT filter on active / status — inactive and unenrolled agents must block deletion too.
-    expect(JSON.stringify(call.query)).not.toContain('active');
-    expect(JSON.stringify(call.query)).not.toContain('status');
-    expect(call.query.bool.filter[0]).toEqual({
-      terms: { policy_id: ['policy-1#9.2', 'policy-1#8.18'] },
-    });
+    expect(call.query).not.toContain('active');
+    expect(call.query).not.toContain('status');
+    expect(call.query).toBe(
+      'FROM .fleet-agents | WHERE policy_id IN (?idsChunk) | STATS agents = COUNT(*) BY policy_id | LIMIT 2'
+    );
+    expect(call.params).toEqual([{ idsChunk: ['policy-1#9.2', 'policy-1#8.18'] }]);
     expect(result.get('policy-1#9.2')).toBe(3);
     expect(result.has('policy-1#8.18')).toBe(false); // zero — absent from map
   });
 
   it('issues multiple search requests when variant ids exceed the chunk size (>1000)', async () => {
     const ids = Array.from({ length: 1001 }, (_, i) => `policy-1#9.${i}`);
-    esClient.search.mockResolvedValue({
-      aggregations: { agents_by_policy_id: { buckets: [] } },
-    });
+    esClient.esql.query.mockResolvedValue(agentCountsResponse([]));
 
     await getAgentCountsForVariantPolicyIds(esClient, ids);
 
-    expect(esClient.search).toHaveBeenCalledTimes(2);
+    expect(esClient.esql.query).toHaveBeenCalledTimes(2);
   });
 });
 

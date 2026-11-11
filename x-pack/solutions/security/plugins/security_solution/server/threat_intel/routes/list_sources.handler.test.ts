@@ -88,21 +88,24 @@ describe('list_sources routes', () => {
       const { context, esClient } = buildContext();
       esClient.indices.getAlias.mockResolvedValue({});
       esClient.indices.putAlias.mockResolvedValue({ acknowledged: true });
+      esClient.esql.query.mockResolvedValue({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [
+          [
+            'vendor_api:elastic-security-labs',
+            { name: 'Elastic Security Labs', adapter_type: 'vendor_api', enabled: true },
+          ],
+        ],
+      });
+      // The per-source report stats are still a search.
       esClient.search.mockResolvedValue({
         took: 1,
         timed_out: false,
         _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-        hits: {
-          total: { value: 1, relation: 'eq' },
-          max_score: null,
-          hits: [
-            {
-              _index: '.kibana-threat-intel-sources',
-              _id: 'vendor_api:elastic-security-labs',
-              _source: { name: 'Elastic Security Labs', adapter_type: 'vendor_api', enabled: true },
-            },
-          ],
-        },
+        hits: { total: { value: 0, relation: 'eq' }, max_score: null, hits: [] },
       });
 
       const request = httpServerMock.createKibanaRequest({ body: {} });
@@ -110,6 +113,14 @@ describe('list_sources routes', () => {
 
       await version.handler({ core: Promise.resolve(context) } as never, request, response);
 
+      expect(esClient.esql.query).toHaveBeenCalledWith(
+        {
+          query:
+            'FROM .kibana-threat-intel-sources METADATA _id, _source | WHERE space_id IN (?spaceId, ?globalSpaceId) | SORT name ASC NULLS LAST | KEEP _id, _source | LIMIT 500',
+          params: [{ spaceId: 'default' }, { globalSpaceId: '*' }],
+        },
+        { signal: undefined }
+      );
       expect(response.ok).toHaveBeenCalledWith(
         expect.objectContaining({
           body: expect.objectContaining({
@@ -130,7 +141,7 @@ describe('list_sources routes', () => {
       const { context, esClient } = buildContext();
       esClient.indices.getAlias.mockResolvedValue({});
       esClient.indices.putAlias.mockResolvedValue({ acknowledged: true });
-      esClient.search.mockRejectedValue(new Error('cluster unavailable'));
+      esClient.esql.query.mockRejectedValue(new Error('cluster unavailable'));
 
       const request = httpServerMock.createKibanaRequest({ body: {} });
       const response = httpServerMock.createResponseFactory();

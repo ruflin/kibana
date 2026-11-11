@@ -21,6 +21,7 @@ const responseError = (statusCode: number) =>
 const storageMock = <T>() =>
   ({
     search: jest.fn(),
+    esql: jest.fn(),
     get: jest.fn(),
     index: jest.fn(),
     delete: jest.fn(),
@@ -28,6 +29,11 @@ const storageMock = <T>() =>
 
 const searchResponse = (hits: Array<{ _id: string; _source: object }>, total = hits.length) => ({
   hits: { total: { value: total, relation: 'eq' }, hits },
+});
+
+const countResponse = (total: number) => ({
+  columns: [{ name: 'total', type: 'long' }],
+  values: [[total]],
 });
 
 const getResponse = (id: string, source: object) => ({
@@ -69,6 +75,7 @@ describe('CommentsClient', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     comments.search.mockResolvedValue(searchResponse([], 3) as never);
+    comments.esql.mockResolvedValue(countResponse(3) as never);
     comments.get.mockResolvedValue(getResponse('a', stored) as never);
     comments.index.mockResolvedValue({} as never);
     snapshots.get.mockResolvedValue(getResponse('a', snapshot) as never);
@@ -114,9 +121,16 @@ describe('CommentsClient', () => {
       });
       expect(snapshots.index).not.toHaveBeenCalled();
 
-      comments.search.mockResolvedValueOnce(searchResponse([], MAX_COMMENTS) as never);
+      comments.esql.mockResolvedValueOnce(countResponse(MAX_COMMENTS) as never);
       await expect(client().create(input)).rejects.toThrow(CommentsLimitError);
       expect(comments.index).toHaveBeenCalledTimes(1);
+    });
+
+    it('counts the stored comments with an ES|QL STATS', async () => {
+      await client().create(input);
+
+      const [{ pipeline }] = comments.esql.mock.calls[0];
+      expect(pipeline.toRequest().query).toBe('STATS total = COUNT(*)');
     });
 
     it('removes the screenshot again when Elasticsearch refuses the comment', async () => {

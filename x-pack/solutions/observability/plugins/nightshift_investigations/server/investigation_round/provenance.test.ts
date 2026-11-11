@@ -27,7 +27,7 @@ const FULL_TREE = `flowchart TD
 describe('PR 3b write provenance, reinforcementSessionRegistry, and applied_writes', () => {
   it('stamps Wiki provenance, increments version, and returns full before/after applied_writes', async () => {
     const esClient = {
-      search: jest.fn().mockResolvedValue({ hits: { hits: [] } }),
+      esql: { query: jest.fn().mockResolvedValue({ columns: [], values: [] }) },
       get: jest
         .fn()
         .mockResolvedValueOnce({
@@ -221,7 +221,7 @@ describe('PR 3b write provenance, reinforcementSessionRegistry, and applied_writ
     const markdown = `# Checkout\n\n\`\`\`mermaid\n${FULL_TREE}\n\`\`\`\n`;
     const esClient = {
       get: jest.fn().mockResolvedValue({ found: false }),
-      search: jest.fn().mockResolvedValue({ hits: { hits: [] } }),
+      esql: { query: jest.fn().mockResolvedValue({ columns: [], values: [] }) },
       index: jest.fn().mockResolvedValue({}),
     };
     const sandboxSession = {

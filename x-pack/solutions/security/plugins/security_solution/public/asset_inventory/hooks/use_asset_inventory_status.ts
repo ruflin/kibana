@@ -7,16 +7,16 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@kbn/react-query';
-import { lastValueFrom } from 'rxjs';
 import { SECURITY_SOLUTION_ENABLE_ASSET_INVENTORY_SETTING } from '@kbn/management-settings-ids';
-import type { IKibanaSearchRequest, IKibanaSearchResponse } from '@kbn/search-types';
-import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
+import { getESQLResults } from '@kbn/esql-utils';
 import type { GetEntityStoreStatusResponse } from '@kbn/entity-store/common';
 import type { EntityAnalyticsPrivileges } from '../../../common/api/entity_analytics';
 import { useKibana, useUiSetting } from '../../common/lib/kibana';
 import { useIsExperimentalFeatureEnabled } from '../../common/hooks/use_experimental_features';
 import { useEntityStoreStatus } from '../../entity_analytics/components/entity_store/hooks/use_entity_store';
 import { useEntityAnalyticsRoutes } from '../../entity_analytics/api/api';
+import { esqlResponseToRecords } from '../../common/utils/esql';
 import { ASSET_INVENTORY_INDEX_PATTERN } from '../constants';
 import { useAssetInventoryRoutes } from './use_asset_inventory_routes';
 
@@ -70,7 +70,7 @@ const hasGenericEngineExecuted = (engine: GenericEntityEngineStatus): boolean =>
  * - feature & v2 flag gates (Asset Inventory uses entity store v2 only),
  * - the entity store v2 status route,
  * - the entity store v2 privileges route,
- * - a small "has any v2 entity docs" search (`size: 0` + `terminate_after: 1`).
+ * - a small "has any v2 entity docs" ES|QL query (`LIMIT 1` before the count).
  *
  * The mapping replicates the previous server-side logic so consumers
  * (`AssetInventoryOnboarding`, `PermissionDenied`) keep the same semantics.
@@ -92,22 +92,19 @@ export const useAssetInventoryStatus = () => {
   const hasDocsQuery = useQuery<boolean>({
     queryKey: ASSET_INVENTORY_HAS_DOCS_QUERY_KEY,
     queryFn: async () => {
-      const response = await lastValueFrom(
-        dataService.search.search<
-          IKibanaSearchRequest<estypes.SearchRequest>,
-          IKibanaSearchResponse<estypes.SearchResponse<unknown>>
-        >({
-          params: {
-            index: ASSET_INVENTORY_INDEX_PATTERN,
-            size: 0,
-            terminate_after: 1,
-            track_total_hits: 1,
-          },
-        })
-      );
-      const total = response.rawResponse.hits.total;
-      const totalValue = typeof total === 'number' ? total : total?.value ?? 0;
-      return totalValue > 0;
+      try {
+        const { response } = await getESQLResults({
+          esqlQuery: esql.from([ASSET_INVENTORY_INDEX_PATTERN]).pipe`LIMIT 1`
+            .pipe`STATS total = COUNT(*)`.print('basic'),
+          search: dataService.search.search,
+        });
+        const [row] = esqlResponseToRecords<{ total: number }>(response);
+        return (row?.total ?? 0) > 0;
+      } catch (error) {
+        // No index matches the pattern yet: the search this replaces answered with no docs.
+        if (error instanceof Error && error.message.includes('Unknown index')) return false;
+        throw error;
+      }
     },
     enabled: featureGatesPassed,
     // Once we've seen any v2 entity docs we don't need to keep polling — the

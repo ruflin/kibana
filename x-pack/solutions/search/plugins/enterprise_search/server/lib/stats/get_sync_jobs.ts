@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { IScopedClusterClient } from '@kbn/core/server';
 
 import { CONNECTORS_INDEX, CONNECTORS_JOBS_INDEX } from '@kbn/search-connectors';
@@ -19,6 +20,12 @@ import {
   getInProgressJobsCountQuery,
   getOrphanedJobsCountQuery,
 } from '../../utils/get_sync_jobs_queries';
+import {
+  esqlCount,
+  isEsqlUnknownIndexException,
+  runEsql,
+  toEsqlSource,
+} from '../../utils/esql_helpers';
 import { isIndexNotFoundException } from '../../utils/identify_exceptions';
 
 export const fetchSyncJobsStats = async (
@@ -26,59 +33,61 @@ export const fetchSyncJobsStats = async (
   isCrawler?: boolean
 ): Promise<SyncJobsStats> => {
   try {
-    const connectorIdsResult = await client.asCurrentUser.search({
-      index: CONNECTORS_INDEX,
-      scroll: '10s',
-      stored_fields: [],
-    });
-    const ids = connectorIdsResult.hits.hits.map((hit) => hit._id!);
-    const orphanedJobsCountResponse = await client.asCurrentUser.count({
-      index: CONNECTORS_JOBS_INDEX,
-      query: getOrphanedJobsCountQuery(ids, isCrawler),
-    });
+    // The search returned the default 10 hits, and so does this.
+    const connectorIdsResult = await runEsql(
+      client.asCurrentUser,
+      esql.from([toEsqlSource(CONNECTORS_INDEX)], ['_id']).pipe`KEEP _id`.limit(10)
+    );
+    const ids = connectorIdsResult.values.flatMap(([id]) => (typeof id === 'string' ? [id] : []));
+    const orphanedJobsCount = await esqlCount(
+      client.asCurrentUser,
+      CONNECTORS_JOBS_INDEX,
+      getOrphanedJobsCountQuery(ids, isCrawler)
+    );
 
-    const inProgressJobsCountResponse = await client.asCurrentUser.count({
-      index: CONNECTORS_JOBS_INDEX,
-      query: getInProgressJobsCountQuery(isCrawler),
-    });
+    const inProgressJobsCount = await esqlCount(
+      client.asCurrentUser,
+      CONNECTORS_JOBS_INDEX,
+      getInProgressJobsCountQuery(isCrawler)
+    );
 
     // Idle syncs don't make sense for Crawler, because it does not have concept of "Idle" syncs at all.
     // We tried tracking idle syncs in a way similar to connectors, but it results in all crawler jobs
     // marked as idle.
-    const idleJobsCountResponse = isCrawler
-      ? undefined
-      : await client.asCurrentUser.count({
-          index: CONNECTORS_JOBS_INDEX,
-          query: getIdleJobsCountQuery(),
-        });
+    const idleJobsCount = isCrawler
+      ? 0
+      : await esqlCount(client.asCurrentUser, CONNECTORS_JOBS_INDEX, getIdleJobsCountQuery());
 
-    const errorResponse = await client.asCurrentUser.count({
-      index: CONNECTORS_INDEX,
-      query: getErrorCountQuery(isCrawler),
-    });
+    const errorCount = await esqlCount(
+      client.asCurrentUser,
+      CONNECTORS_INDEX,
+      getErrorCountQuery(isCrawler)
+    );
 
-    const connectedResponse = await client.asCurrentUser.count({
-      index: CONNECTORS_INDEX,
-      query: getConnectedCountQuery(isCrawler),
-    });
+    const connectedCount = await esqlCount(
+      client.asCurrentUser,
+      CONNECTORS_INDEX,
+      getConnectedCountQuery(isCrawler)
+    );
 
-    const incompleteResponse = await client.asCurrentUser.count({
-      index: CONNECTORS_INDEX,
-      query: getIncompleteCountQuery(isCrawler),
-    });
+    const incompleteCount = await esqlCount(
+      client.asCurrentUser,
+      CONNECTORS_INDEX,
+      getIncompleteCountQuery(isCrawler)
+    );
 
     const response = {
-      connected: connectedResponse.count,
-      errors: errorResponse.count,
-      idle: idleJobsCountResponse?.count || 0,
-      in_progress: inProgressJobsCountResponse.count,
-      incomplete: incompleteResponse.count,
-      orphaned_jobs: orphanedJobsCountResponse.count,
+      connected: connectedCount,
+      errors: errorCount,
+      idle: idleJobsCount,
+      in_progress: inProgressJobsCount,
+      incomplete: incompleteCount,
+      orphaned_jobs: orphanedJobsCount,
     };
 
     return response;
   } catch (error) {
-    if (isIndexNotFoundException(error)) {
+    if (isIndexNotFoundException(error) || isEsqlUnknownIndexException(error)) {
       return {
         connected: 0,
         errors: 0,

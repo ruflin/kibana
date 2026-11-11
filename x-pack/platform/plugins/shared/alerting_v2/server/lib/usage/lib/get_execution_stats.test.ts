@@ -6,6 +6,8 @@
  */
 
 import { elasticsearchServiceMock } from '@kbn/core/server/mocks';
+import { ALERTING_RULE_EXECUTOR_TASK_TYPE } from '../../rule_executor/constants';
+import { DISPATCHER_TASK_TYPE } from '../../dispatcher/constants';
 import { getExecutionStats, nanosToMillis } from './get_execution_stats';
 
 const elasticsearch = elasticsearchServiceMock.createStart();
@@ -37,26 +39,47 @@ describe('nanosToMillis', () => {
   });
 });
 
+type EsqlRequest = { query: string; params: Array<Record<string, unknown>> };
+
+const mockEsqlResponses = ({
+  totals,
+  statuses,
+  dispatcher,
+}: {
+  totals: unknown[];
+  statuses: Array<[string, number]>;
+  dispatcher: number;
+}) => {
+  esClient.esql.query.mockImplementation((async (request: EsqlRequest) => {
+    if (request.query.includes('PERCENTILE')) {
+      return {
+        columns: ['total', 'p50', 'p75', 'p95', 'p99'].map((name) => ({ name, type: 'double' })),
+        values: [totals],
+      };
+    }
+    if (request.query.includes('BY outcome')) {
+      return {
+        columns: [
+          { name: 'count', type: 'long' },
+          { name: 'outcome', type: 'keyword' },
+        ],
+        values: statuses.map(([outcome, count]) => [count, outcome]),
+      };
+    }
+    return { columns: [{ name: 'total', type: 'long' }], values: [[dispatcher]] };
+  }) as any);
+};
+
 describe('getExecutionStats', () => {
   it('returns stats from aggregations', async () => {
-    esClient.search.mockResponseOnce({
-      took: 1,
-      timed_out: false,
-      _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-      hits: { total: { value: 150, relation: 'eq' }, max_score: null, hits: [] },
-      aggregations: {
-        count_by_status: {
-          buckets: [
-            { key: 'success', doc_count: 140 },
-            { key: 'failure', doc_count: 10 },
-          ],
-        },
-        delay_percentiles: {
-          values: { '50.0': 100000000, '75.0': 250000000, '95.0': 1200000000, '99.0': 5000000000 },
-        },
-      },
-    } as any);
-    esClient.count.mockResponseOnce({ count: 48 } as any);
+    mockEsqlResponses({
+      totals: [150, 100000000, 250000000, 1200000000, 5000000000],
+      statuses: [
+        ['success', 140],
+        ['failure', 10],
+      ],
+      dispatcher: 48,
+    });
 
     const result = await getExecutionStats(esClient);
 
@@ -71,14 +94,28 @@ describe('getExecutionStats', () => {
     });
   });
 
+  it('queries the task-run events of the last 24 hours for the executor and the dispatcher', async () => {
+    mockEsqlResponses({ totals: [0, null, null, null, null], statuses: [], dispatcher: 0 });
+
+    await getExecutionStats(esClient);
+
+    const requests = esClient.esql.query.mock.calls.map(([request]) => request as EsqlRequest);
+    const taskRuns =
+      'FROM .kibana-event-log-* | WHERE event.provider == ?provider AND event.action == ?action AND kibana.task.type == ?taskType AND @timestamp >= NOW() - 24 hours | ';
+    expect(requests.map(({ query }) => query)).toEqual([
+      `${taskRuns}STATS total = COUNT(*), p50 = PERCENTILE(kibana.task.schedule_delay, 50), p75 = PERCENTILE(kibana.task.schedule_delay, 75), p95 = PERCENTILE(kibana.task.schedule_delay, 95), p99 = PERCENTILE(kibana.task.schedule_delay, 99)`,
+      `${taskRuns}STATS count = COUNT(*) BY outcome = event.outcome | SORT count DESC | LIMIT 10`,
+      `${taskRuns}STATS total = COUNT(*)`,
+    ]);
+    expect(requests.map(({ params }) => params[2])).toEqual([
+      { taskType: ALERTING_RULE_EXECUTOR_TASK_TYPE },
+      { taskType: ALERTING_RULE_EXECUTOR_TASK_TYPE },
+      { taskType: DISPATCHER_TASK_TYPE },
+    ]);
+  });
+
   it('returns defaults when aggregations are undefined', async () => {
-    esClient.search.mockResponseOnce({
-      took: 1,
-      timed_out: false,
-      _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-      hits: { total: { value: 0, relation: 'eq' }, max_score: null, hits: [] },
-    } as any);
-    esClient.count.mockResponseOnce({ count: 0 } as any);
+    mockEsqlResponses({ totals: [0, null, null, null, null], statuses: [], dispatcher: 0 });
 
     const result = await getExecutionStats(esClient);
 
@@ -94,21 +131,25 @@ describe('getExecutionStats', () => {
   });
 
   it('handles numeric hits.total format', async () => {
-    esClient.search.mockResponseOnce({
-      took: 1,
-      timed_out: false,
-      _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
-      hits: { total: 5, max_score: null, hits: [] },
-      aggregations: {
-        count_by_status: { buckets: [] },
-        delay_percentiles: { values: {} },
-      },
-    } as any);
-    esClient.count.mockResponseOnce({ count: 2 } as any);
+    mockEsqlResponses({ totals: [5, null, null, null, null], statuses: [], dispatcher: 2 });
 
     const result = await getExecutionStats(esClient);
 
     expect(result.executions_count_24hr).toBe(5);
     expect(result.dispatcher_executions_count_24hr).toBe(2);
+  });
+
+  it('returns defaults when the event log index does not exist', async () => {
+    esClient.esql.query.mockRejectedValue({
+      statusCode: 400,
+      body: {
+        error: { type: 'verification_exception', reason: 'Unknown index [.kibana-event-log-*]' },
+      },
+    });
+
+    const result = await getExecutionStats(esClient);
+
+    expect(result.executions_count_24hr).toBe(0);
+    expect(result.dispatcher_executions_count_24hr).toBe(0);
   });
 });

@@ -398,11 +398,15 @@ describe('writeEntityIds', () => {
   });
 });
 
+const entityIdRows = (ids: string[]) => ({
+  columns: [{ name: 'entity.id', type: 'keyword' }],
+  values: ids.map((id) => [id]),
+});
+
 describe('matchExistingTargetIds', () => {
   const makeSearchEsClient = (entityIds: string[]): ElasticsearchClient => {
-    const hits = entityIds.map((id) => ({ fields: { 'entity.id': [id] } }));
     return {
-      search: jest.fn().mockResolvedValue({ hits: { hits } }),
+      esql: { query: jest.fn().mockResolvedValue(entityIdRows(entityIds)) },
     } as unknown as ElasticsearchClient;
   };
 
@@ -410,7 +414,7 @@ describe('matchExistingTargetIds', () => {
     const esClient = makeSearchEsClient([]);
     const result = await matchExistingTargetIds(esClient, 'default', new Set());
     expect(result.size).toBe(0);
-    expect(esClient.search as jest.Mock).not.toHaveBeenCalled();
+    expect(esClient.esql.query as jest.Mock).not.toHaveBeenCalled();
   });
 
   it('returns only the entity IDs present in the search response', async () => {
@@ -423,9 +427,10 @@ describe('matchExistingTargetIds', () => {
   it('queries the latest entity index pattern for the given namespace', async () => {
     const esClient = makeSearchEsClient([]);
     await matchExistingTargetIds(esClient, 'acme', new Set(['host:x']));
-    const call = (esClient.search as jest.Mock).mock.calls[0][0];
-    expect(call.index).toContain('acme');
-    expect(call.query.terms['entity.id']).toEqual(['host:x']);
+    const call = (esClient.esql.query as jest.Mock).mock.calls[0][0];
+    expect(call.query).toContain('acme');
+    expect(call.query).toMatch(/\| KEEP entity\.id \| LIMIT 1$/);
+    expect(call.filter.terms['entity.id']).toEqual(['host:x']);
   });
 
   describe('more candidates than one search may return', () => {
@@ -438,24 +443,21 @@ describe('matchExistingTargetIds', () => {
     // Echoes back every requested ID, as if all of them exist.
     const makeEchoEsClient = (): ElasticsearchClient =>
       ({
-        search: jest.fn(async ({ query }) => ({
-          hits: {
-            hits: (query.terms['entity.id'] as string[]).map((id) => ({
-              fields: { 'entity.id': [id] },
-            })),
-          },
-        })),
+        esql: {
+          query: jest.fn(async ({ filter }) => entityIdRows(filter.terms['entity.id'] as string[])),
+        },
       } as unknown as ElasticsearchClient);
 
     it('never asks a single search for more hits than index.max_result_window allows', async () => {
       const esClient = makeEchoEsClient();
       await matchExistingTargetIds(esClient, 'default', candidates);
 
-      const calls = (esClient.search as jest.Mock).mock.calls;
+      const calls = (esClient.esql.query as jest.Mock).mock.calls;
       expect(calls).toHaveLength(3);
       for (const [request] of calls) {
-        expect(request.size).toBeLessThanOrEqual(10_000);
-        expect(request.size).toBe(request.query.terms['entity.id'].length);
+        const limit = Number(/LIMIT (\d+)$/.exec(request.query)?.[1]);
+        expect(limit).toBeLessThanOrEqual(10_000);
+        expect(limit).toBe(request.filter.terms['entity.id'].length);
       }
     });
 
@@ -463,8 +465,8 @@ describe('matchExistingTargetIds', () => {
       const esClient = makeEchoEsClient();
       const result = await matchExistingTargetIds(esClient, 'default', candidates);
 
-      const requested = (esClient.search as jest.Mock).mock.calls.flatMap(
-        ([request]) => request.query.terms['entity.id']
+      const requested = (esClient.esql.query as jest.Mock).mock.calls.flatMap(
+        ([request]) => request.filter.terms['entity.id']
       );
       expect(requested).toHaveLength(candidateCount);
       expect(new Set(requested)).toEqual(candidates);
@@ -474,8 +476,8 @@ describe('matchExistingTargetIds', () => {
     it('rethrows a failed search with the failing chunk in the message and the original as cause', async () => {
       const esClient = makeEchoEsClient();
       const searchError = new Error('search_phase_execution_exception');
-      (esClient.search as jest.Mock)
-        .mockResolvedValueOnce({ hits: { hits: [] } })
+      (esClient.esql.query as jest.Mock)
+        .mockResolvedValueOnce(entityIdRows([]))
         .mockRejectedValueOnce(searchError);
 
       const error = await matchExistingTargetIds(esClient, 'default', candidates).catch(
@@ -492,9 +494,8 @@ describe('matchExistingTargetIds', () => {
 
 describe('writeEntityIds — validateTargetIds', () => {
   const makeSearchEsClient = (existingIds: string[]): ElasticsearchClient => {
-    const hits = existingIds.map((id) => ({ fields: { 'entity.id': [id] } }));
     return {
-      search: jest.fn().mockResolvedValue({ hits: { hits } }),
+      esql: { query: jest.fn().mockResolvedValue(entityIdRows(existingIds)) },
     } as unknown as ElasticsearchClient;
   };
 
@@ -556,7 +557,7 @@ describe('writeEntityIds — validateTargetIds', () => {
   it('rethrows a target-validation search rejection without writing', async () => {
     const crudClient = makeCrudClient();
     const esClient = {
-      search: jest.fn().mockRejectedValue(new Error('validation boom')),
+      esql: { query: jest.fn().mockRejectedValue(new Error('validation boom')) },
     } as unknown as ElasticsearchClient;
     const records: EntityRelationshipRecord[] = [
       {
@@ -581,9 +582,9 @@ describe('writeEntityIds — validateTargetIds', () => {
     expect(crudClient.bulkUpdateEntity).not.toHaveBeenCalled();
   });
 
-  it('does not call esClient.search when validateTargetIds is false', async () => {
+  it('does not call esClient.esql.query when validateTargetIds is false', async () => {
     const crudClient = makeCrudClient();
-    const esClient = { search: jest.fn() } as unknown as ElasticsearchClient;
+    const esClient = { esql: { query: jest.fn() } } as unknown as ElasticsearchClient;
     const records: EntityRelationshipRecord[] = [
       {
         entityId: 'host:admin.corp.com',
@@ -594,7 +595,7 @@ describe('writeEntityIds — validateTargetIds', () => {
 
     await writeEntityIds(crudClient, loggerMock.create(), records, esClient, 'default', false);
 
-    expect(esClient.search).not.toHaveBeenCalled();
+    expect(esClient.esql.query).not.toHaveBeenCalled();
   });
 });
 

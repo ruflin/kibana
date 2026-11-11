@@ -12,6 +12,7 @@ import type {
 } from '@kbn/elastic-assistant-common';
 import { sizeIsOutOfRange } from '@kbn/elastic-assistant-common';
 
+import { isPlainEsqlIndexPattern } from '../../../../../../lib/esql_read';
 import { requestHasRequiredAnonymizationParams } from '../../../../../../lib/langchain/helpers';
 
 export const requestIsValid = ({
@@ -29,5 +30,7 @@ export const requestIsValid = ({
 }): boolean =>
   requestHasRequiredAnonymizationParams(request) &&
   alertsIndexPattern != null &&
+  // The pattern reaches an ES|QL `FROM` command, where the composer does not escape names.
+  isPlainEsqlIndexPattern(alertsIndexPattern) &&
   size != null &&
   !sizeIsOutOfRange(size);

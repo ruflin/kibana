@@ -13,6 +13,8 @@ import type {
   QualityPayload,
 } from '@kbn/siem-readiness';
 import { isQualityIncompatible } from '@kbn/siem-readiness';
+import { esql } from '@elastic/esql';
+import { esqlRows, runEsqlRead } from '../../../utils/esql/esql_read';
 
 const DATA_QUALITY_RESULTS_INDEX = '.kibana-data-quality-dashboard-results-*';
 
@@ -24,23 +26,24 @@ const fetchDataQualityResults = async ({
   logger: Logger;
 }): Promise<DataQualityResultDocument[]> => {
   try {
-    const response = await esClient.search<DataQualityResultDocument>({
-      index: DATA_QUALITY_RESULTS_INDEX,
-      size: 10000,
-      sort: [{ checkedAt: { order: 'desc' } }],
-      ignore_unavailable: true,
-      allow_no_indices: true,
+    // Newest first, so the first document seen for an index is its latest result. The index
+    // pattern matching nothing is an empty result, as `ignore_unavailable` made it.
+    const response = await runEsqlRead({
+      esClient,
+      query: esql.from([DATA_QUALITY_RESULTS_INDEX], ['_source']).pipe`SORT checkedAt DESC`
+        .keep('_source')
+        .limit(10000),
     });
 
     const seen = new Set<string>();
     const results: DataQualityResultDocument[] = [];
 
-    for (const hit of response.hits.hits) {
-      if (hit._source) {
-        const { indexName } = hit._source;
-        if (!seen.has(indexName)) {
-          seen.add(indexName);
-          results.push(hit._source);
+    for (const { _source: source } of esqlRows(response)) {
+      if (source !== null && typeof source === 'object') {
+        const result = source as DataQualityResultDocument;
+        if (!seen.has(result.indexName)) {
+          seen.add(result.indexName);
+          results.push(result);
         }
       }
     }

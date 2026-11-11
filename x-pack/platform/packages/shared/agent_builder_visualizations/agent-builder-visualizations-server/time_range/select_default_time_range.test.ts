@@ -29,13 +29,22 @@ const createEsClient = (overrides: {
 }): IScopedClusterClient =>
   ({
     asCurrentUser: {
-      search: overrides.search ?? jest.fn(),
+      esql: { query: overrides.search ?? jest.fn() },
       fieldCaps: overrides.fieldCaps ?? jest.fn(),
     },
   } as unknown as IScopedClusterClient);
 
 const minMaxResponse = (minMs: number | null, maxMs: number | null) => ({
-  aggregations: { min_time: { value: minMs }, max_time: { value: maxMs } },
+  columns: [
+    { name: 'min_time', type: 'date' },
+    { name: 'max_time', type: 'date' },
+  ],
+  values: [
+    [
+      minMs === null ? null : new Date(minMs).toISOString(),
+      maxMs === null ? null : new Date(maxMs).toISOString(),
+    ],
+  ],
 });
 
 describe('selectDefaultTimeRange', () => {
@@ -66,7 +75,12 @@ describe('selectDefaultTimeRange', () => {
     expect(result).toEqual({ from: 'now-24h', to: 'now', mode: 'relative' });
     expect(fieldCaps).not.toHaveBeenCalled();
     expect(search).toHaveBeenCalledTimes(1);
-    expect(search).toHaveBeenCalledWith(expect.objectContaining({ index: 'logs-*' }));
+    expect(search).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: 'FROM logs-* | STATS min_time = MIN(??p0), max_time = MAX(??p1)',
+        params: [{ p0: '@timestamp' }, { p1: '@timestamp' }],
+      })
+    );
   });
 
   it('isolates a failing dataset and still computes from the healthy ones', async () => {
@@ -74,8 +88,8 @@ describe('selectDefaultTimeRange', () => {
       'FROM metrics-* | WHERE @timestamp >= ?_tstart AND @timestamp < ?_tend | STATS count = COUNT(*)';
     const search = jest
       .fn()
-      .mockImplementation((params: { index: string }) =>
-        params.index === 'logs-*'
+      .mockImplementation((params: { query: string }) =>
+        params.query.startsWith('FROM logs-*')
           ? Promise.reject(new Error('index_not_found_exception'))
           : Promise.resolve(minMaxResponse(NOW - 5 * DAY_MS, NOW))
       );

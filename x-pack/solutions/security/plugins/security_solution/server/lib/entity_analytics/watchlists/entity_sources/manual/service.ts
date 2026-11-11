@@ -9,6 +9,7 @@ import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import type { CRUDClient } from '@kbn/entity-store/server/domain/crud/crud_client';
 
 import { uniq } from 'lodash';
+import { esql } from '@elastic/esql';
 
 import type { WatchlistEntityAssignResponseItem } from '../../../../../../common/api/entity_analytics/watchlists/entities/assign.gen';
 import type { WatchlistEntityUnassignResponseItem } from '../../../../../../common/api/entity_analytics/watchlists/entities/unassign.gen';
@@ -18,7 +19,7 @@ import { addWatchlistAttributeToStore } from '../sync/entity_store_sync';
 import { applyBulkRemoveSource } from '../bulk/soft_delete';
 import { MANUAL_SOURCE_ID } from './constants';
 import type { BulkItemOutcome, WatchlistBulkEntity } from '../types';
-import type { WatchlistEntityDoc } from '../../entities/types';
+import { esqlRows, runEsqlRead } from '../../../utils/esql_read';
 import type { WatchlistsByEuid } from '../../entities/service';
 import { getEntityType, type EntityTypeSource } from '../../entities/utils';
 
@@ -217,24 +218,22 @@ const findManualWatchlistDocs = async (
   watchlist: { id: string; index: string },
   euids: string[]
 ) => {
-  const response = await esClient.search<WatchlistEntityDoc>({
-    index: watchlist.index,
-    size: euids.length,
-    query: {
-      bool: {
-        must: [
-          { terms: { 'entity.id': euids } },
-          { term: { 'watchlist.id': watchlist.id } },
-          { term: { 'labels.source_ids': MANUAL_SOURCE_ID } },
-        ],
-      },
-    },
-    _source: ['entity.id'],
+  // `IN ()` is not valid ES|QL, and a `terms` query on no values matched nothing.
+  if (euids.length === 0) return [];
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([watchlist.index], ['_id']).where`entity.id IN (${{
+      euids,
+    }}) AND watchlist.id == ${{
+      watchlistId: watchlist.id,
+    }} AND MV_CONTAINS(labels.source_ids, ${{ manualSourceId: MANUAL_SOURCE_ID }})`
+      .pipe`KEEP _id, entity.id`.limit(euids.length),
   });
 
-  return response.hits.hits.flatMap((hit) => {
-    const euid = hit._source?.entity?.id;
-    return hit._id && euid ? [{ docId: hit._id, euid }] : [];
+  return esqlRows(response).flatMap((row) => {
+    const docId = row._id;
+    const euid = row['entity.id'];
+    return typeof docId === 'string' && typeof euid === 'string' ? [{ docId, euid }] : [];
   });
 };
 

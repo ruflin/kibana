@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { PartialSetupState, ProfilingSetupOptions } from './setup';
 
 const UNIVERSAL_PROFILING_INDEX_PATTERN = 'profiling*';
@@ -14,18 +15,13 @@ export async function hasProfilingData({
   clientWithProfilingAuth,
 }: ProfilingSetupOptions): Promise<PartialSetupState> {
   try {
-    const hasProfilingDataResponse = await clientWithProfilingAuth.search(
+    // The OTel profiling data streams (`profiling-*.otel-*`) also match `profiling*`,
+    // so they are excluded to only report data ingested in the Universal Profiling schema.
+    const hasProfilingDataResponse = await clientWithProfilingAuth.esql(
       'has_any_profiling_data',
-      {
-        // The OTel profiling data streams (`profiling-*.otel-*`) also match `profiling*`,
-        // so they are excluded to only report data ingested in the Universal Profiling schema.
-        index: [UNIVERSAL_PROFILING_INDEX_PATTERN, EXCLUDE_OTEL_INDEX_PATTERN],
-        size: 0,
-        track_total_hits: 1,
-        terminate_after: 1,
-      }
+      esql.from([UNIVERSAL_PROFILING_INDEX_PATTERN, EXCLUDE_OTEL_INDEX_PATTERN]).limit(1)
     );
-    return { data: { available: hasProfilingDataResponse.hits.total.value > 0 } };
+    return { data: { available: hasProfilingDataResponse.values.length > 0 } };
   } catch (error) {
     // If the indices don't exist or any other error occurs,
     // we assume there's no profiling data available

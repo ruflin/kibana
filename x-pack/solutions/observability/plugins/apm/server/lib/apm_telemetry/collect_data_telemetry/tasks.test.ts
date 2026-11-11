@@ -8,8 +8,19 @@
 import { savedObjectsClientMock } from '@kbn/core-saved-objects-api-server-mocks';
 import type { APMIndices } from '@kbn/apm-sources-access-plugin/server';
 import { tasks } from './tasks';
-import { SERVICE_NAME, SERVICE_ENVIRONMENT, AT_TIMESTAMP } from '../../../../common/es_fields/apm';
+import type { ComposerQuery } from '@elastic/esql';
+import type { ESQLSearchResponse } from '@kbn/es-types';
 import type { IndicesStatsResponse } from '../telemetry_client';
+
+const esqlResponse = (
+  columns: string[],
+  values: Array<Array<string | number | null>>
+): ESQLSearchResponse => ({
+  columns: columns.map((name) => ({ name, type: 'keyword' })),
+  values,
+});
+
+const queryText = (query: ComposerQuery) => query.toRequest().query;
 
 describe('data telemetry collection tasks', () => {
   const indices = {
@@ -17,56 +28,36 @@ describe('data telemetry collection tasks', () => {
     metric: 'apm-8.0.0-metric',
     span: 'apm-8.0.0-span',
     transaction: 'apm-8.0.0-transaction',
+    onboarding: 'apm-8.0.0-onboarding',
   } as APMIndices;
 
   describe('environments', () => {
     const task = tasks.find((t) => t.name === 'environments');
 
     it('returns environment information', async () => {
-      const search = jest.fn().mockResolvedValueOnce({
-        aggregations: {
-          environments: {
-            buckets: [
-              {
-                key: 'production',
-              },
-              {
-                key: 'testing',
-              },
-            ],
-          },
-          service_environments: {
-            buckets: [
-              {
-                key: {
-                  [SERVICE_NAME]: 'opbeans-node',
-                  [SERVICE_ENVIRONMENT]: 'production',
-                },
-              },
-              {
-                key: {
-                  [SERVICE_NAME]: 'opbeans-node',
-                  [SERVICE_ENVIRONMENT]: null,
-                },
-              },
-              {
-                key: {
-                  [SERVICE_NAME]: 'opbeans-java',
-                  [SERVICE_ENVIRONMENT]: 'production',
-                },
-              },
-              {
-                key: {
-                  [SERVICE_NAME]: 'opbeans-rum',
-                  [SERVICE_ENVIRONMENT]: null,
-                },
-              },
-            ],
-          },
-        },
-      });
+      const esqlRead = jest.fn().mockImplementation((query: ComposerQuery) =>
+        Promise.resolve(
+          queryText(query).includes('BY service.environment, service.name')
+            ? esqlResponse(
+                ['doc_count', 'service.environment', 'service.name'],
+                [
+                  [1, null, 'opbeans-node'],
+                  [1, null, 'opbeans-rum'],
+                  [1, 'production', 'opbeans-java'],
+                  [1, 'production', 'opbeans-node'],
+                ]
+              )
+            : esqlResponse(
+                ['doc_count', 'service.environment'],
+                [
+                  [5, 'production'],
+                  [3, 'testing'],
+                ]
+              )
+        )
+      );
 
-      expect(await task?.executor({ indices, telemetryClient: { search } } as any)).toEqual({
+      expect(await task?.executor({ indices, telemetryClient: { esqlRead } } as any)).toEqual({
         environments: {
           services_with_multiple_environments: 1,
           services_without_environment: 2,
@@ -81,32 +72,21 @@ describe('data telemetry collection tasks', () => {
 
     describe('without transactions', () => {
       it('returns an empty result', async () => {
-        const search = jest.fn().mockReturnValueOnce({
-          hits: {
-            hits: [],
-            total: {
-              value: 0,
-            },
-          },
-        });
+        const esqlRead = jest
+          .fn()
+          .mockResolvedValueOnce(esqlResponse(['last_timestamp'], [[null]]));
 
-        expect(await task?.executor({ indices, telemetryClient: { search } } as any)).toEqual({});
+        expect(await task?.executor({ indices, telemetryClient: { esqlRead } } as any)).toEqual({});
       });
     });
 
     it('returns aggregated transaction counts', async () => {
+      // The transaction to get a fixed date range.
+      const esqlRead = jest
+        .fn()
+        .mockResolvedValueOnce(esqlResponse(['last_timestamp'], [[new Date().toISOString()]]));
       const search = jest
         .fn()
-        // The first call to `search` asks for a transaction to get
-        // a fixed date range.
-        .mockReturnValueOnce({
-          hits: {
-            hits: [{ fields: { [AT_TIMESTAMP]: [new Date().toISOString()] } }],
-          },
-          total: {
-            value: 1,
-          },
-        })
         // Later calls are all composite aggregations. We return 2 pages of
         // results to test if scrolling works.
         .mockImplementation((params) => {
@@ -133,7 +113,9 @@ describe('data telemetry collection tasks', () => {
           });
         });
 
-      expect(await task?.executor({ indices, telemetryClient: { search } } as any)).toEqual({
+      expect(
+        await task?.executor({ indices, telemetryClient: { esqlRead, search } } as any)
+      ).toEqual({
         aggregated_transactions: {
           current_implementation: {
             expected_metric_document_count: 1250,
@@ -215,30 +197,24 @@ describe('data telemetry collection tasks', () => {
     const task = tasks.find((t) => t.name === 'cloud');
 
     it('returns a map of cloud provider data', async () => {
-      const search = jest.fn().mockResolvedValueOnce({
-        aggregations: {
-          availability_zone: {
-            buckets: [
-              { doc_count: 1, key: 'us-west-1' },
-              { doc_count: 1, key: 'europe-west1-c' },
-            ],
-          },
-          provider: {
-            buckets: [
-              { doc_count: 1, key: 'aws' },
-              { doc_count: 1, key: 'gcp' },
-            ],
-          },
-          region: {
-            buckets: [
-              { doc_count: 1, key: 'us-west' },
-              { doc_count: 1, key: 'europe-west1' },
-            ],
-          },
-        },
+      const values: Record<string, string[]> = {
+        'cloud.availability_zone': ['us-west-1', 'europe-west1-c'],
+        'cloud.provider': ['aws', 'gcp'],
+        'cloud.region': ['us-west', 'europe-west1'],
+      };
+      const esqlRead = jest.fn().mockImplementation((query: ComposerQuery) => {
+        const field = Object.keys(values).find((name) =>
+          queryText(query).includes(`BY \`${name}\``)
+        )!;
+        return Promise.resolve(
+          esqlResponse(
+            ['doc_count', field],
+            values[field].map((value) => [1, value])
+          )
+        );
       });
 
-      expect(await task?.executor({ indices, telemetryClient: { search } } as any)).toEqual({
+      expect(await task?.executor({ indices, telemetryClient: { esqlRead } } as any)).toEqual({
         cloud: {
           availability_zone: ['us-west-1', 'europe-west1-c'],
           provider: ['aws', 'gcp'],
@@ -249,9 +225,9 @@ describe('data telemetry collection tasks', () => {
 
     describe('with no results', () => {
       it('returns an empty map', async () => {
-        const search = jest.fn().mockResolvedValueOnce({});
+        const esqlRead = jest.fn().mockResolvedValue(undefined);
 
-        expect(await task?.executor({ indices, telemetryClient: { search } } as any)).toEqual({
+        expect(await task?.executor({ indices, telemetryClient: { esqlRead } } as any)).toEqual({
           cloud: {
             availability_zone: [],
             provider: [],
@@ -266,19 +242,18 @@ describe('data telemetry collection tasks', () => {
     const task = tasks.find((t) => t.name === 'host');
 
     it('returns a map of host provider data', async () => {
-      const search = jest.fn().mockResolvedValueOnce({
-        aggregations: {
-          platform: {
-            buckets: [
-              { doc_count: 1, key: 'linux' },
-              { doc_count: 1, key: 'windows' },
-              { doc_count: 1, key: 'macos' },
-            ],
-          },
-        },
-      });
+      const esqlRead = jest.fn().mockResolvedValueOnce(
+        esqlResponse(
+          ['doc_count', 'host.os.platform'],
+          [
+            [3, 'linux'],
+            [2, 'windows'],
+            [1, 'macos'],
+          ]
+        )
+      );
 
-      expect(await task?.executor({ indices, telemetryClient: { search } } as any)).toEqual({
+      expect(await task?.executor({ indices, telemetryClient: { esqlRead } } as any)).toEqual({
         host: {
           os: { platform: ['linux', 'windows', 'macos'] },
         },
@@ -287,9 +262,9 @@ describe('data telemetry collection tasks', () => {
 
     describe('with no results', () => {
       it('returns an empty map', async () => {
-        const search = jest.fn().mockResolvedValueOnce({});
+        const esqlRead = jest.fn().mockResolvedValue(undefined);
 
-        expect(await task?.executor({ indices, telemetryClient: { search } } as any)).toEqual({
+        expect(await task?.executor({ indices, telemetryClient: { esqlRead } } as any)).toEqual({
           host: {
             os: {
               platform: [],
@@ -306,21 +281,17 @@ describe('data telemetry collection tasks', () => {
     it('returns a map of processor events', async () => {
       const getTime = jest.spyOn(Date.prototype, 'getTime').mockReturnValue(1594330792957);
 
-      const search = jest.fn().mockImplementation((params: any) => {
-        const isTotalHitsQuery = params?.track_total_hits;
-
-        return Promise.resolve(
-          isTotalHitsQuery
-            ? { hits: { total: { value: 1 } } }
-            : {
-                hits: {
-                  hits: [{ fields: { [AT_TIMESTAMP]: [1] } }],
-                },
-              }
+      const esqlRead = jest
+        .fn()
+        .mockImplementation((query: ComposerQuery) =>
+          Promise.resolve(
+            queryText(query).includes('STATS total = COUNT(*)')
+              ? esqlResponse(['total'], [[1]])
+              : esqlResponse(['oldest'], [[new Date(1).toISOString()]])
+          )
         );
-      });
 
-      expect(await task?.executor({ indices, telemetryClient: { search } } as any)).toEqual({
+      expect(await task?.executor({ indices, telemetryClient: { esqlRead } } as any)).toEqual({
         counts: {
           error: {
             '1d': 1,
@@ -634,27 +605,20 @@ describe('data telemetry collection tasks', () => {
     const task = tasks.find((t) => t.name === 'cardinality');
 
     it('returns cardinalities', async () => {
-      const search = jest.fn().mockImplementation((params: any) => {
-        const isRumQuery = params.query.bool.filter.length === 2;
-        if (isRumQuery) {
-          return Promise.resolve({
-            aggregations: {
-              'client.geo.country_iso_code': { value: 5 },
-              'transaction.name': { value: 1 },
-              'user_agent.original': { value: 2 },
-            },
-          });
-        } else {
-          return Promise.resolve({
-            aggregations: {
-              'transaction.name': { value: 3 },
-              'user_agent.original': { value: 4 },
-            },
-          });
-        }
-      });
+      const esqlRead = jest
+        .fn()
+        .mockImplementation((query: ComposerQuery, filter?: object) =>
+          Promise.resolve(
+            filter
+              ? esqlResponse(
+                  ['country_iso_code', 'transaction_name', 'user_agent_original'],
+                  [[5, 1, 2]]
+                )
+              : esqlResponse(['transaction_name', 'user_agent_original'], [[3, 4]])
+          )
+        );
 
-      expect(await task?.executor({ indices, telemetryClient: { search } } as any)).toEqual({
+      expect(await task?.executor({ indices, telemetryClient: { esqlRead } } as any)).toEqual({
         cardinality: {
           client: { geo: { country_iso_code: { rum: { '1d': 5 } } } },
           transaction: { name: { all_agents: { '1d': 3 }, rum: { '1d': 1 } } },
@@ -878,78 +842,39 @@ describe('data telemetry collection tasks', () => {
     const task = tasks.find((t) => t.name === 'services');
 
     it('should return services per agent name', async () => {
-      const search = jest.fn().mockImplementation((params: any) => {
-        const filter = params.query.bool.filter[0];
-        const queryKnownAgentNames = filter.term;
-        const queryOtelAgentNames = filter.prefix;
-        const queryServices = filter.exists;
+      const otelServices: Array<[string, number]> = [
+        ['otlp', 1],
+        ['otlp/java', 2],
+        ['otlp/java/elastic', 3],
+        ['opentelemetry', 4],
+        ['opentelemetry/java', 5],
+        ['opentelemetry/java/elastic', 6],
+        ['opentelemetry/nodejs/elastic', 7],
+        ['opentelemetry/python/elastic', 8],
+        ['opentelemetry/php/elastic', 9],
+        ['opentelemetry/dotnet/elastic', 10],
+      ];
+      const esqlRead = jest.fn().mockImplementation((query: ComposerQuery) => {
+        const { query: text, params } = query.toRequest();
 
-        if (queryKnownAgentNames && queryKnownAgentNames['agent.name'] === 'java') {
-          return Promise.resolve({
-            aggregations: {
-              services: {
-                value: 10,
-              },
-            },
-          });
-        } else if (queryOtelAgentNames) {
-          return Promise.resolve({
-            aggregations: {
-              agent_name: {
-                buckets: [
-                  {
-                    key: 'otlp',
-                    services: { value: 1 },
-                  },
-                  {
-                    key: 'otlp/java',
-                    services: { value: 2 },
-                  },
-                  {
-                    key: 'otlp/java/elastic',
-                    services: { value: 3 },
-                  },
-                  {
-                    key: 'opentelemetry',
-                    services: { value: 4 },
-                  },
-                  {
-                    key: 'opentelemetry/java',
-                    services: { value: 5 },
-                  },
-                  {
-                    key: 'opentelemetry/java/elastic',
-                    services: { value: 6 },
-                  },
-                  {
-                    key: 'opentelemetry/nodejs/elastic',
-                    services: { value: 7 },
-                  },
-                  {
-                    key: 'opentelemetry/python/elastic',
-                    services: { value: 8 },
-                  },
-                  {
-                    key: 'opentelemetry/php/elastic',
-                    services: { value: 9 },
-                  },
-                  {
-                    key: 'opentelemetry/dotnet/elastic',
-                    services: { value: 10 },
-                  },
-                ],
-              },
-            },
-          });
-        } else if (queryServices) {
-          return Promise.resolve({ hits: { total: { value: 100 } } });
+        if (text.includes('agent.name ==') && JSON.stringify(params).includes('"java"')) {
+          return Promise.resolve(esqlResponse(['services'], [[10]]));
+        } else if (text.includes('STARTS_WITH(agent.name')) {
+          return Promise.resolve(
+            esqlResponse(
+              ['services', 'agent.name'],
+              otelServices.map(([name, services]) => [services, name])
+            )
+          );
+        } else if (text.includes('KEEP service.name')) {
+          return Promise.resolve(esqlResponse(['service.name'], [['opbeans-java']]));
         } else {
-          return Promise.resolve({ aggregations: { services: { value: 0 } } });
+          return Promise.resolve(esqlResponse(['services'], [[0]]));
         }
       });
 
       expect(
-        await task?.executor({ indices, telemetryClient: { search } } as any)
+        await task?.executor({ indices, telemetryClient: { esqlRead } } as any)
       ).toMatchSnapshot();
     });
   });

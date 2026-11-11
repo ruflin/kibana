@@ -10,7 +10,9 @@ import type {
 } from '@kbn/content-packs-schema';
 import type { IStorageClient, IndexStorageSettings } from '@kbn/storage-adapter';
 import { types } from '@kbn/storage-adapter';
+import { esql } from '@elastic/esql';
 import objectHash from 'object-hash';
+import { mapSourceRows } from '../streams/helpers/esql';
 import { CONTENT_NAME, STREAM_NAME } from './fields';
 
 export const contentStorageSettings = {
@@ -45,17 +47,12 @@ export class ContentClient {
   ) {}
 
   async getStoredContentPacks(streamName: string) {
-    const response = await this.clients.storageClient.search({
-      size: 10_000,
-      track_total_hits: false,
-      query: {
-        bool: {
-          filter: [{ term: { [STREAM_NAME]: streamName } }],
-        },
-      },
+    const response = await this.clients.storageClient.esql({
+      metadata: ['_source'],
+      pipeline: esql`WHERE stream.name == ${{ streamName }} | LIMIT 10000`,
     });
 
-    return response.hits.hits.map((hit) => hit._source);
+    return mapSourceRows<StoredContentPack, StoredContentPack>(response, (stored) => stored);
   }
 
   async getStoredContentPack(streamName: string, contentName: string) {

@@ -7,6 +7,7 @@
 
 import { isNonLocalIndexName } from '@kbn/es-query';
 import type { APMEventClient } from '../../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlResponse, toEsqlRequest } from '../../../utils/esql_test_helpers';
 import {
   computeIntervalString,
   computePearsonCorrelation,
@@ -117,13 +118,22 @@ describe('computePearsonCorrelation', () => {
 // fetchThroughputCorrelations
 // ---------------------------------------------------------------------------
 
-function makeBucket(key: number, rpmValue: number, docCount = 100) {
-  return { key, doc_count: docCount, throughput: { value: rpmValue } };
+function makeBucket(key: number, rpmValue: number) {
+  return { key, rpm: rpmValue };
 }
 
-const mockSearch = jest.fn();
+// The buckets have the interval of one minute here, so a bucket holds as many documents as its
+// requests per minute.
+function series(buckets: Array<{ key: number; rpm: number }>) {
+  return esqlResponse(
+    ['bucket', 'doc_count'],
+    buckets.map(({ key, rpm }) => [key, rpm])
+  );
+}
+
+const mockEsql = jest.fn();
 const mockApmEventClient = {
-  search: mockSearch,
+  esql: mockEsql,
   indices: { transaction: 'apm-*-transaction-*' },
 } as unknown as APMEventClient;
 
@@ -131,7 +141,7 @@ const defaultParams = {
   apmEventClient: mockApmEventClient,
   entityType: 'transaction' as const,
   start: 0,
-  end: 3_600_000,
+  end: 120_000,
   environment: 'ENVIRONMENT_ALL',
   query: { match_all: {} } as any,
   kuery: '',
@@ -150,7 +160,7 @@ const uncorrelatedBuckets = [makeBucket(0, 20), makeBucket(60_000, 20), makeBuck
 
 describe('fetchThroughputCorrelations', () => {
   beforeEach(() => {
-    mockSearch.mockReset();
+    mockEsql.mockReset();
     mockIsNonLocalIndexName.mockReturnValue(false);
   });
 
@@ -160,9 +170,9 @@ describe('fetchThroughputCorrelations', () => {
 
   describe('result shape', () => {
     it('returns correlations with the expected fields when the threshold is met', async () => {
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: overallBuckets } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: correlatedBuckets } } });
+      mockEsql
+        .mockResolvedValueOnce(series(overallBuckets))
+        .mockResolvedValueOnce(series(correlatedBuckets));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,
@@ -180,9 +190,9 @@ describe('fetchThroughputCorrelations', () => {
     });
 
     it('sets rpmBaseline to the mean of the overall RPM timeseries', async () => {
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: overallBuckets } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: correlatedBuckets } } });
+      mockEsql
+        .mockResolvedValueOnce(series(overallBuckets))
+        .mockResolvedValueOnce(series(correlatedBuckets));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,
@@ -194,9 +204,9 @@ describe('fetchThroughputCorrelations', () => {
     });
 
     it('sets rpmDelta to filteredMeanRpm − overallMeanRpm', async () => {
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: overallBuckets } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: correlatedBuckets } } });
+      mockEsql
+        .mockResolvedValueOnce(series(overallBuckets))
+        .mockResolvedValueOnce(series(correlatedBuckets));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,
@@ -219,12 +229,13 @@ describe('fetchThroughputCorrelations', () => {
     const weakBuckets10 = [3, 3, 4, 3, 3, 4, 3, 3, 4, 3].map((v, i) => makeBucket(i * 60_000, v));
 
     it('returns no correlations and sets a fallback when correlation is below threshold but non-zero', async () => {
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: linearOverall10 } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: weakBuckets10 } } });
+      mockEsql
+        .mockResolvedValueOnce(series(linearOverall10))
+        .mockResolvedValueOnce(series(weakBuckets10));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,
+        end: 540_000,
         fieldValuePairs: [{ fieldName: 'host.name', fieldValue: 'host-weak' }],
       });
 
@@ -237,9 +248,9 @@ describe('fetchThroughputCorrelations', () => {
     });
 
     it('does not set a fallback when the only candidate has correlation exactly zero', async () => {
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: overallBuckets } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: uncorrelatedBuckets } } });
+      mockEsql
+        .mockResolvedValueOnce(series(overallBuckets))
+        .mockResolvedValueOnce(series(uncorrelatedBuckets));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,
@@ -251,9 +262,9 @@ describe('fetchThroughputCorrelations', () => {
     });
 
     it('does not expose fallbackResult when at least one correlation passes the threshold', async () => {
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: overallBuckets } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: correlatedBuckets } } });
+      mockEsql
+        .mockResolvedValueOnce(series(overallBuckets))
+        .mockResolvedValueOnce(series(correlatedBuckets));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,
@@ -272,13 +283,14 @@ describe('fetchThroughputCorrelations', () => {
       const pairABuckets = Array.from({ length: 10 }, (_, i) => makeBucket(i * 60_000, 2));
       const pairBBuckets = [3, 3, 4, 3, 3, 4, 3, 3, 4, 3].map((v, i) => makeBucket(i * 60_000, v));
 
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: linearOverall } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: pairABuckets } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: pairBBuckets } } });
+      mockEsql
+        .mockResolvedValueOnce(series(linearOverall))
+        .mockResolvedValueOnce(series(pairABuckets))
+        .mockResolvedValueOnce(series(pairBBuckets));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,
+        end: 540_000,
         fieldValuePairs: [
           { fieldName: 'host.name', fieldValue: 'host-flat' },
           { fieldName: 'host.name', fieldValue: 'host-slight' },
@@ -298,10 +310,10 @@ describe('fetchThroughputCorrelations', () => {
 
   describe('zero-traffic pairs', () => {
     it('excludes pairs where every bucket RPM is 0', async () => {
-      const zeroBuckets = overallBuckets.map((b) => ({ ...b, throughput: { value: 0 } }));
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: overallBuckets } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: zeroBuckets } } });
+      const zeroBuckets = overallBuckets.map((b) => ({ ...b, rpm: 0 }));
+      mockEsql
+        .mockResolvedValueOnce(series(overallBuckets))
+        .mockResolvedValueOnce(series(zeroBuckets));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,
@@ -320,9 +332,7 @@ describe('fetchThroughputCorrelations', () => {
 
   describe('empty field-value pairs', () => {
     it('returns empty correlations and no fallback', async () => {
-      mockSearch.mockResolvedValueOnce({
-        aggregations: { timeseries: { buckets: overallBuckets } },
-      });
+      mockEsql.mockResolvedValueOnce(series(overallBuckets));
 
       const result = await fetchThroughputCorrelations({ ...defaultParams, fieldValuePairs: [] });
 
@@ -345,10 +355,10 @@ describe('fetchThroughputCorrelations', () => {
       const strongBuckets = [makeBucket(0, 2), makeBucket(60_000, 50), makeBucket(120_000, 50)];
       const moderateBuckets = [makeBucket(0, 10), makeBucket(60_000, 35), makeBucket(120_000, 50)];
 
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: overallBuckets } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: moderateBuckets } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: strongBuckets } } });
+      mockEsql
+        .mockResolvedValueOnce(series(overallBuckets))
+        .mockResolvedValueOnce(series(moderateBuckets))
+        .mockResolvedValueOnce(series(strongBuckets));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,
@@ -372,7 +382,7 @@ describe('fetchThroughputCorrelations', () => {
 
   describe('error resilience', () => {
     it('returns empty correlations when the overall ES query fails', async () => {
-      mockSearch.mockRejectedValueOnce(new Error('overall ES failure'));
+      mockEsql.mockRejectedValueOnce(new Error('overall ES failure'));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,
@@ -385,11 +395,11 @@ describe('fetchThroughputCorrelations', () => {
     });
 
     it('continues processing remaining pairs when one ES request rejects', async () => {
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: overallBuckets } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: correlatedBuckets } } })
+      mockEsql
+        .mockResolvedValueOnce(series(overallBuckets))
+        .mockResolvedValueOnce(series(correlatedBuckets))
         .mockRejectedValueOnce(new Error('ES error'))
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: correlatedBuckets } } });
+        .mockResolvedValueOnce(series(correlatedBuckets));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,
@@ -406,8 +416,8 @@ describe('fetchThroughputCorrelations', () => {
 
     it('sets ccsWarning=true when a rejection occurs on a non-local index', async () => {
       mockIsNonLocalIndexName.mockReturnValue(true);
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: overallBuckets } } })
+      mockEsql
+        .mockResolvedValueOnce(series(overallBuckets))
         .mockRejectedValueOnce(new Error('CCS error'));
 
       const result = await fetchThroughputCorrelations({
@@ -420,8 +430,8 @@ describe('fetchThroughputCorrelations', () => {
 
     it('sets ccsWarning=false when rejections occur on a local index', async () => {
       mockIsNonLocalIndexName.mockReturnValue(false);
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: overallBuckets } } })
+      mockEsql
+        .mockResolvedValueOnce(series(overallBuckets))
         .mockRejectedValueOnce(new Error('local error'));
 
       const result = await fetchThroughputCorrelations({
@@ -437,14 +447,37 @@ describe('fetchThroughputCorrelations', () => {
   // Bucket alignment
   // -------------------------------------------------------------------------
 
+  describe('queries', () => {
+    it('counts the documents per bucket of the interval, with the field value as a filter', async () => {
+      mockEsql.mockResolvedValue(series(overallBuckets));
+
+      await fetchThroughputCorrelations({
+        ...defaultParams,
+        fieldValuePairs: [{ fieldName: 'host.name', fieldValue: 'host-a' }],
+      });
+
+      const [overall, filtered] = mockEsql.mock.calls;
+      expect(overall[0]).toBe('get_overall_throughput_timeseries');
+      expect(filtered[0]).toBe('get_filtered_throughput_timeseries');
+      expect(toEsqlRequest(overall[1])).toMatchObject({
+        query:
+          'SET unmapped_fields = "nullify"; FROM myIndex | STATS doc_count = COUNT(*) BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ?intervalInMs | SORT bucket ASC | LIMIT 10000',
+        params: [{ intervalInMs: 60000 }],
+      });
+      expect(filtered[1].filter.bool.filter).toContainEqual({
+        term: { 'host.name': 'host-a' },
+      });
+    });
+  });
+
   describe('bucket alignment', () => {
     it('treats buckets missing from the filtered response as zero RPM', async () => {
       // Only one bucket in filtered (60_000); keys 0 and 120_000 default to 0
       const partialBuckets = [makeBucket(60_000, 100)];
 
-      mockSearch
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: overallBuckets } } })
-        .mockResolvedValueOnce({ aggregations: { timeseries: { buckets: partialBuckets } } });
+      mockEsql
+        .mockResolvedValueOnce(series(overallBuckets))
+        .mockResolvedValueOnce(series(partialBuckets));
 
       await expect(
         fetchThroughputCorrelations({
@@ -455,7 +488,7 @@ describe('fetchThroughputCorrelations', () => {
     });
 
     it('handles an empty overall timeseries without throwing', async () => {
-      mockSearch.mockResolvedValueOnce({ aggregations: { timeseries: { buckets: [] } } });
+      mockEsql.mockResolvedValueOnce(series([]));
 
       const result = await fetchThroughputCorrelations({
         ...defaultParams,

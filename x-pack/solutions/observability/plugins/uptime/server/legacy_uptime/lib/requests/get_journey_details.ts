@@ -5,8 +5,9 @@
  * 2.0.
  */
 
-import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { UMElasticsearchQueryFn } from '../adapters/framework';
+import { esqlRows } from '../esql_read';
 import type {
   JourneyStep,
   SyntheticsJourneyApiResponse,
@@ -20,119 +21,55 @@ export const getJourneyDetails: UMElasticsearchQueryFn<
   GetJourneyDetails,
   SyntheticsJourneyApiResponse['details']
 > = async ({ uptimeEsClient, checkGroup }) => {
-  const baseParams = {
-    query: {
-      bool: {
-        filter: [
-          {
-            term: {
-              'monitor.check_group': checkGroup,
-            },
-          },
-          {
-            term: {
-              'synthetics.type': 'journey/start',
-            },
-          },
-        ] as QueryDslQueryContainer[],
-      },
-    },
-    size: 1,
-  };
-
-  const { body: thisJourney } = await uptimeEsClient.search(
-    baseParams,
-    'getJourneyDetailsCurrentJourney'
+  const { response: thisJourneyResponse } = await uptimeEsClient.esql(
+    (indices) =>
+      esql.from(indices, ['_id', '_source']).pipe`WHERE monitor.check_group == ${{ checkGroup }}`
+        .pipe`WHERE synthetics.type == "journey/start"`.pipe`KEEP _id, _source`.limit(1),
+    { operationName: 'getJourneyDetailsCurrentJourney' }
   );
 
-  if (thisJourney.hits.hits.length > 0) {
-    const { _id, _source } = thisJourney.hits.hits[0];
-    const thisJourneySource = Object.assign({ _id }, _source) as JourneyStep;
+  const thisJourneyRow = esqlRows(thisJourneyResponse)[0];
 
-    const baseSiblingParams = {
-      query: {
-        bool: {
-          filter: [
-            {
-              term: {
-                'monitor.id': thisJourneySource.monitor.id,
-              },
-            },
-            {
-              term: {
-                'synthetics.type': 'journey/start',
-              },
-            },
-          ] as QueryDslQueryContainer[],
-        },
-      },
-      _source: ['@timestamp', 'monitor.check_group'],
-      size: 1,
+  if (thisJourneyRow) {
+    const thisJourneySource = Object.assign(
+      { _id: thisJourneyRow._id },
+      thisJourneyRow._source
+    ) as JourneyStep;
+
+    const siblingQuery = (comparison: '<' | '>') => (indices: string[]) => {
+      const base = esql.from(indices).pipe`WHERE monitor.id == ${{
+        monitorId: thisJourneySource.monitor.id,
+      }}`.pipe`WHERE synthetics.type == "journey/start"`;
+      const withRange =
+        comparison === '<'
+          ? base.pipe`WHERE @timestamp < TO_DATETIME(${{ ts: thisJourneySource['@timestamp'] }})`
+              .pipe`SORT @timestamp DESC NULLS LAST`
+          : base.pipe`WHERE @timestamp > TO_DATETIME(${{ ts: thisJourneySource['@timestamp'] }})`
+              .pipe`SORT @timestamp ASC NULLS LAST`;
+      return withRange.pipe`KEEP @timestamp, monitor.check_group`.limit(1);
     };
 
-    const previousParams = {
-      ...baseSiblingParams,
-      query: {
-        bool: {
-          filter: [
-            ...baseSiblingParams.query.bool.filter,
-            {
-              range: {
-                '@timestamp': {
-                  lt: thisJourneySource['@timestamp'],
-                },
-              },
-            },
-          ],
-        },
-      },
-      sort: [{ '@timestamp': { order: 'desc' as const } }],
-    };
-
-    const nextParams = {
-      ...baseSiblingParams,
-      query: {
-        bool: {
-          filter: [
-            ...baseSiblingParams.query.bool.filter,
-            {
-              range: {
-                '@timestamp': {
-                  gt: thisJourneySource['@timestamp'],
-                },
-              },
-            },
-          ],
-        },
-      },
-      sort: [{ '@timestamp': { order: 'asc' as const } }],
-    };
-
-    const { body: previousJourneyResult } = await uptimeEsClient.search(
-      previousParams,
-      'getJourneyDetailsNextJourney'
-    );
-    const { body: nextJourneyResult } = await uptimeEsClient.search(
-      nextParams,
-      'getJourneyDetailsPreviousJourney'
-    );
-    const previousJourney: any =
-      previousJourneyResult?.hits?.hits.length > 0 ? previousJourneyResult?.hits?.hits[0] : null;
-    const nextJourney: any =
-      nextJourneyResult?.hits?.hits.length > 0 ? nextJourneyResult?.hits?.hits[0] : null;
+    const { response: previousJourneyResponse } = await uptimeEsClient.esql(siblingQuery('<'), {
+      operationName: 'getJourneyDetailsNextJourney',
+    });
+    const { response: nextJourneyResponse } = await uptimeEsClient.esql(siblingQuery('>'), {
+      operationName: 'getJourneyDetailsPreviousJourney',
+    });
+    const previousJourney = esqlRows(previousJourneyResponse)[0];
+    const nextJourney = esqlRows(nextJourneyResponse)[0];
     return {
       timestamp: thisJourneySource['@timestamp'],
       journey: thisJourneySource,
       previous: previousJourney
         ? {
-            checkGroup: previousJourney._source.monitor.check_group,
-            timestamp: previousJourney._source['@timestamp'],
+            checkGroup: previousJourney['monitor.check_group'],
+            timestamp: previousJourney['@timestamp'],
           }
         : undefined,
       next: nextJourney
         ? {
-            checkGroup: nextJourney._source.monitor.check_group,
-            timestamp: nextJourney._source['@timestamp'],
+            checkGroup: nextJourney['monitor.check_group'],
+            timestamp: nextJourney['@timestamp'],
           }
         : undefined,
     } as SyntheticsJourneyApiResponse['details'];

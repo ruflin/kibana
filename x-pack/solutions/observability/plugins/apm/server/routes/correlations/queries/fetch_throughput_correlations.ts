@@ -7,6 +7,8 @@
 
 import { chunk } from 'lodash';
 import { isNonLocalIndexName } from '@kbn/es-query';
+import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import type { ProcessorEvent } from '@kbn/apm-types-shared';
 import { termQuery } from '@kbn/observability-plugin/server';
 import type {
   CommonCorrelationsQueryParams,
@@ -19,6 +21,8 @@ import {
   THROUGHPUT_CORRELATION_THRESHOLD,
 } from '../../../../common/correlations/constants';
 import type { APMEventClient } from '../../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlRows } from '../../../lib/helpers/esql_read';
+import { fromApmIndex, getHistogramKeys } from '../../../lib/helpers/esql_apm';
 import { getCommonCorrelationsQuery } from './get_common_correlations_query';
 import { getEventTypeFromEntityType } from '../utils';
 
@@ -34,10 +38,59 @@ interface FilteredRpmEntry {
   filteredRpm: number[];
 }
 
-export function computeIntervalString(start: number, end: number): string {
+export function computeIntervalInMs(start: number, end: number): number {
   const rangeMs = end - start;
-  const bucketMs = Math.max(60_000, Math.ceil(rangeMs / THROUGHPUT_BUCKET_COUNT / 60_000) * 60_000);
-  return `${bucketMs / 1000}s`;
+  return Math.max(60_000, Math.ceil(rangeMs / THROUGHPUT_BUCKET_COUNT / 60_000) * 60_000);
+}
+
+export function computeIntervalString(start: number, end: number): string {
+  return `${computeIntervalInMs(start, end) / 1000}s`;
+}
+
+/**
+ * The requests per minute of every bucket of the range. A bucket without documents has a rate
+ * of 0, like in a histogram aggregation with `extended_bounds`.
+ */
+async function fetchThroughputTimeseries({
+  apmEventClient,
+  operationName,
+  eventType,
+  start,
+  end,
+  intervalInMs,
+  filter,
+}: {
+  apmEventClient: APMEventClient;
+  operationName: string;
+  eventType: ProcessorEvent;
+  start: number;
+  end: number;
+  intervalInMs: number;
+  filter: QueryDslQueryContainer;
+}): Promise<Array<{ key: number; rpm: number }>> {
+  const response = await apmEventClient.esql(operationName, {
+    apm: { events: [eventType] },
+    query: (index) =>
+      fromApmIndex(index)
+        .pipe`STATS doc_count = COUNT(*) BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ${{
+        intervalInMs,
+      }}`.pipe`SORT bucket ASC`.limit(10000),
+    filter,
+  });
+
+  if (!response) {
+    return [];
+  }
+
+  const docCountByBucket = new Map(
+    esqlRows(response).map((row) => [Number(row.bucket), Number(row.doc_count)])
+  );
+  const intervalInMinutes = intervalInMs / 60_000;
+
+  return getHistogramKeys({ start, end, intervalInMs }).map((key) => ({
+    key,
+    rpm: (docCountByBucket.get(key) ?? 0) / intervalInMinutes,
+  }));
 }
 
 export function computePearsonCorrelation(x: number[], y: number[]): number {
@@ -64,24 +117,27 @@ async function fetchFilteredRpmTimeseries({
   environment,
   kuery,
   query,
-  intervalString,
+  intervalInMs,
   fieldValuePair,
   overallBucketKeys,
 }: CommonCorrelationsQueryParams & {
   apmEventClient: APMEventClient;
   entityType: EntityType;
-  intervalString: string;
+  intervalInMs: number;
   fieldValuePair: FieldValuePair;
   overallBucketKeys: number[];
 }): Promise<FilteredRpmEntry | undefined> {
   const eventType = getEventTypeFromEntityType(entityType);
   const { fieldName, fieldValue } = fieldValuePair;
 
-  const resp = await apmEventClient.search('get_filtered_throughput_timeseries', {
-    apm: { events: [eventType] },
-    track_total_hits: false,
-    size: 0,
-    query: {
+  const timeseries = await fetchThroughputTimeseries({
+    apmEventClient,
+    operationName: 'get_filtered_throughput_timeseries',
+    eventType,
+    start,
+    end,
+    intervalInMs,
+    filter: {
       bool: {
         filter: [
           getCommonCorrelationsQuery({ start, end, environment, kuery, query }),
@@ -89,27 +145,9 @@ async function fetchFilteredRpmTimeseries({
         ],
       },
     },
-    aggs: {
-      timeseries: {
-        date_histogram: {
-          field: '@timestamp',
-          fixed_interval: intervalString,
-          min_doc_count: 0,
-          extended_bounds: { min: start, max: end },
-        },
-        aggs: {
-          throughput: { rate: { unit: 'minute' as const } },
-        },
-      },
-    },
   });
 
-  const filteredByKey = new Map<number, number>(
-    (resp.aggregations?.timeseries.buckets ?? []).map((b) => [
-      b.key as number,
-      (b.throughput as { value: number }).value ?? 0,
-    ])
-  );
+  const filteredByKey = new Map<number, number>(timeseries.map(({ key, rpm }) => [key, rpm]));
 
   // Align to overall bucket keys; treat missing buckets as 0
   const filteredRpm = overallBucketKeys.map((k) => filteredByKey.get(k) ?? 0);
@@ -134,39 +172,26 @@ export const fetchThroughputCorrelations = async ({
   entityType: EntityType;
   fieldValuePairs: FieldValuePair[];
 }): Promise<ThroughputCorrelationsResponse> => {
-  const intervalString = computeIntervalString(start, end);
+  const intervalInMs = computeIntervalInMs(start, end);
   const eventType = getEventTypeFromEntityType(entityType);
 
   // Fetch overall RPM timeseries once; bail out gracefully if the query fails
-  const overallResp = await apmEventClient
-    .search('get_overall_throughput_timeseries', {
-      apm: { events: [eventType] },
-      track_total_hits: false,
-      size: 0,
-      query: getCommonCorrelationsQuery({ start, end, environment, kuery, query }),
-      aggs: {
-        timeseries: {
-          date_histogram: {
-            field: '@timestamp',
-            fixed_interval: intervalString,
-            min_doc_count: 0,
-            extended_bounds: { min: start, max: end },
-          },
-          aggs: {
-            throughput: { rate: { unit: 'minute' as const } },
-          },
-        },
-      },
-    })
-    .catch(() => null);
+  const overallBuckets = await fetchThroughputTimeseries({
+    apmEventClient,
+    operationName: 'get_overall_throughput_timeseries',
+    eventType,
+    start,
+    end,
+    intervalInMs,
+    filter: getCommonCorrelationsQuery({ start, end, environment, kuery, query }),
+  }).catch(() => null);
 
-  if (!overallResp) {
+  if (!overallBuckets) {
     return { throughputCorrelations: [], ccsWarning: false };
   }
 
-  const overallBuckets = overallResp.aggregations?.timeseries.buckets ?? [];
-  const overallBucketKeys = overallBuckets.map((b) => b.key as number);
-  const overallRpm = overallBuckets.map((b) => (b.throughput as { value: number }).value ?? 0);
+  const overallBucketKeys = overallBuckets.map(({ key }) => key);
+  const overallRpm = overallBuckets.map(({ rpm }) => rpm);
   const overallMeanRpm = overallRpm.reduce((a, b) => a + b, 0) / (overallRpm.length || 1);
 
   // Fetch filtered RPM timeseries in chunks to cap simultaneous ES requests
@@ -185,7 +210,7 @@ export const fetchThroughputCorrelations = async ({
           environment,
           kuery,
           query,
-          intervalString,
+          intervalInMs,
           fieldValuePair: pair,
           overallBucketKeys,
         })

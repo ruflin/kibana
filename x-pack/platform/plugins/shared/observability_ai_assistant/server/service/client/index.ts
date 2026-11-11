@@ -10,6 +10,7 @@ import type { ActionsClient } from '@kbn/actions-plugin/server';
 import type { CoreSetup, ElasticsearchClient, IUiSettingsClient } from '@kbn/core/server';
 import type { Logger } from '@kbn/logging';
 import type { PublicMethodsOf } from '@kbn/utility-types';
+import { esql } from '@elastic/esql';
 import { last, merge, omit } from 'lodash';
 import type { Observable } from 'rxjs';
 import { getSpaceUrlPrefix } from '@kbn/core-spaces-common';
@@ -68,6 +69,7 @@ import {
 import type { ChatFunctionClient } from '../chat_function_client';
 import type { KnowledgeBaseService, RecalledEntry } from '../knowledge_base_service';
 import { getAccessQuery } from '../util/get_access_query';
+import { runEsqlRows } from '../util/esql_read';
 import { getSystemMessageFromInstructions } from '../util/get_system_message_from_instructions';
 import { getContextFunctionRequestIfNeeded } from './get_context_function_request_if_needed';
 import { continueConversation } from './operators/continue_conversation';
@@ -121,9 +123,11 @@ export class ObservabilityAIAssistantClient {
       return undefined;
     }
 
-    const response = await this.dependencies.esClient.asInternalUser.search<Conversation>({
-      index: resourceNames.writeIndexAlias.conversations,
-      query: {
+    const [row] = await runEsqlRows({
+      esClient: this.dependencies.esClient.asInternalUser,
+      query: esql.from([resourceNames.writeIndexAlias.conversations], ['_id', '_index', '_source'])
+        .pipe`KEEP _id, _index, _source`.limit(1),
+      filter: {
         bool: {
           filter: [
             ...getAccessQuery({
@@ -134,11 +138,17 @@ export class ObservabilityAIAssistantClient {
           ],
         },
       },
-      size: 1,
-      terminate_after: 1,
     });
 
-    return response.hits.hits[0];
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      _id: String(row._id),
+      _index: String(row._index),
+      _source: row._source as Conversation,
+    };
   };
 
   private getConversationUpdateValues = (lastUpdated: string) => {
@@ -600,10 +610,11 @@ export class ObservabilityAIAssistantClient {
   }
 
   find = async (options?: { query?: string }): Promise<Conversation[]> => {
-    const response = await this.dependencies.esClient.asInternalUser.search<Conversation>({
-      index: resourceNames.writeIndexAlias.conversations,
-      allow_no_indices: true,
-      query: {
+    const rows = await runEsqlRows({
+      esClient: this.dependencies.esClient.asInternalUser,
+      query: esql.from([resourceNames.writeIndexAlias.conversations], ['_source'])
+        .pipe`SORT @timestamp DESC NULLS LAST`.limit(100).pipe`KEEP _source`,
+      filter: {
         bool: {
           filter: [
             ...getAccessQuery({
@@ -613,13 +624,9 @@ export class ObservabilityAIAssistantClient {
           ],
         },
       },
-      sort: {
-        '@timestamp': 'desc',
-      },
-      size: 100,
     });
 
-    return response.hits.hits.map((hit) => hit._source!);
+    return rows.map((row) => row._source as Conversation);
   };
 
   update = async (

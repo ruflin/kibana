@@ -646,22 +646,35 @@ describe('DashboardMigrationsDataDashboardsClient', () => {
     test('should return migration stats', async () => {
       const migrationId = 'migration1';
       const mockResponse = {
-        hits: { total: { value: 10 } },
-        aggregations: {
-          status: {
-            buckets: [
-              { key: SiemMigrationStatus.PENDING, doc_count: 3 },
-              { key: SiemMigrationStatus.PROCESSING, doc_count: 2 },
-              { key: SiemMigrationStatus.COMPLETED, doc_count: 4 },
-              { key: SiemMigrationStatus.FAILED, doc_count: 1 },
-            ],
-          },
-          createdAt: { value_as_string: '2025-01-01T00:00:00.000Z' },
-          lastUpdatedAt: { value_as_string: '2025-01-02T00:00:00.000Z' },
-        },
+        columns: [
+          { name: 'items', type: 'long' },
+          { name: 'createdAt', type: 'date' },
+          { name: 'lastUpdatedAt', type: 'date' },
+          { name: 'status', type: 'keyword' },
+        ],
+        values: [
+          [3, '2025-01-01T00:00:00.000Z', '2025-01-01T12:00:00.000Z', SiemMigrationStatus.PENDING],
+          [
+            2,
+            '2025-01-01T00:00:00.000Z',
+            '2025-01-02T00:00:00.000Z',
+            SiemMigrationStatus.PROCESSING,
+          ],
+          [
+            4,
+            '2025-01-01T00:00:00.000Z',
+            '2025-01-01T08:00:00.000Z',
+            SiemMigrationStatus.COMPLETED,
+          ],
+          [1, '2025-01-01T00:00:00.000Z', '2025-01-01T09:00:00.000Z', SiemMigrationStatus.FAILED],
+        ],
       };
 
-      esClient.asInternalUser.search = jest.fn().mockResolvedValue(mockResponse);
+      esClient.asInternalUser.esql.query = jest.fn().mockResolvedValue(mockResponse);
+      // the vendor lookup of the migration finds no item
+      esClient.asInternalUser.search = jest
+        .fn()
+        .mockResolvedValue({ hits: { total: { value: 0 }, hits: [] } });
 
       const result = await dashboardMigrationsDataDashboardsClient.getStats(migrationId);
 
@@ -683,28 +696,32 @@ describe('DashboardMigrationsDataDashboardsClient', () => {
   describe('getAllStats', () => {
     test('should return all migrations stats', async () => {
       const mockResponse = {
-        aggregations: {
-          migrationIds: {
-            buckets: [
-              {
-                key: 'migration1',
-                doc_count: 5,
-                status: {
-                  buckets: [
-                    { key: SiemMigrationStatus.COMPLETED, doc_count: 3 },
-                    { key: SiemMigrationStatus.FAILED, doc_count: 2 },
-                  ],
-                },
-                createdAt: { value_as_string: '2025-08-04T00:00:00.000Z' },
-                lastUpdatedAt: { value_as_string: '2025-08-04T00:00:00.000Z' },
-              },
-            ],
-          },
-        },
+        columns: [
+          { name: 'items', type: 'long' },
+          { name: 'createdAt', type: 'date' },
+          { name: 'lastUpdatedAt', type: 'date' },
+          { name: 'migration_id', type: 'keyword' },
+          { name: 'status', type: 'keyword' },
+        ],
+        values: [
+          [
+            3,
+            '2025-08-04T00:00:00.000Z',
+            '2025-08-04T00:00:00.000Z',
+            'migration1',
+            SiemMigrationStatus.COMPLETED,
+          ],
+          [
+            2,
+            '2025-08-04T00:00:00.000Z',
+            '2025-08-04T00:00:00.000Z',
+            'migration1',
+            SiemMigrationStatus.FAILED,
+          ],
+        ],
       };
 
-      // return the migration response
-      esClient.asInternalUser.search = jest.fn().mockResolvedValueOnce(mockResponse);
+      esClient.asInternalUser.esql.query = jest.fn().mockResolvedValueOnce(mockResponse);
 
       // calls to get vendor for the migration
       jest.spyOn(SiemMigrationsDataItemClient.prototype, 'get').mockResolvedValue({

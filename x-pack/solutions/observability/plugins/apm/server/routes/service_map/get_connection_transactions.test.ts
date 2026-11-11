@@ -6,6 +6,7 @@
  */
 
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlResponse, toEsqlRequest } from '../../utils/esql_test_helpers';
 import { CONNECTION_JOIN_TIME_BUFFER_MS, MAX_CONNECTION_IDS } from './connection_constants';
 import { getConnectionTransactions } from './get_connection_transactions';
 
@@ -22,7 +23,7 @@ function setup() {
   const options = (
     overrides: Partial<Parameters<typeof getConnectionTransactions>[0]> = {}
   ): Parameters<typeof getConnectionTransactions>[0] => ({
-    apmEventClient: { search } as unknown as APMEventClient,
+    apmEventClient: { esql: search } as unknown as APMEventClient,
     sourceServiceName: 'serviceA',
     dependencies: ['redis'],
     environment: 'production',
@@ -33,14 +34,34 @@ function setup() {
   return { search, options };
 }
 
+/** The `esql` request of a recorded call. */
+function requestOf(search: jest.Mock, callIndex: number) {
+  return toEsqlRequest(search.mock.calls[callIndex][1]);
+}
+
+/**
+ * The rows a query returns for `total` matching documents: ES|QL has no total, so a result
+ * larger than the budget is one row over it (`LIMIT` budget + 1).
+ */
+function padRows<T>(rows: T[], total: number, filler: (index: number) => T): T[] {
+  return total > MAX_CONNECTION_IDS
+    ? [
+        ...rows,
+        ...Array.from({ length: MAX_CONNECTION_IDS + 1 - rows.length }, (_, i) => filler(i)),
+      ]
+    : rows;
+}
+
 /** Entry transactions of the target: the `parent.id` of each one is a span id of the source. */
 function entryTransactionsResponse(parentIds: string[], total = parentIds.length) {
-  return {
-    hits: {
-      total: { value: total, relation: 'eq' },
-      hits: parentIds.map((id) => ({ fields: { 'parent.id': [id] } })),
-    },
-  };
+  return esqlResponse(
+    ['parent.id'],
+    padRows(
+      parentIds.map((id) => [id]),
+      total,
+      (index) => [`other-span-${index}`]
+    )
+  );
 }
 
 interface ExitSpanFixture {
@@ -52,36 +73,28 @@ interface ExitSpanFixture {
 
 /** Exit spans of the source: each carries the id of the transaction it belongs to. */
 function exitSpansResponse(spans: ExitSpanFixture[], total = spans.length) {
-  return {
-    hits: {
-      total: { value: total, relation: 'eq' },
-      hits: spans.map(({ transactionId, durationUs = 100_000, failed = false, outcome }) => ({
-        fields: {
-          ...(transactionId ? { 'transaction.id': [transactionId] } : {}),
-          'span.duration.us': [durationUs],
-          'event.outcome': [outcome ?? (failed ? 'failure' : 'success')],
-        },
-      })),
-    },
-  };
+  return esqlResponse(
+    ['transaction.id', 'span.duration.us', 'event.outcome'],
+    padRows(
+      spans.map(({ transactionId, durationUs = 100_000, failed = false, outcome }) => [
+        transactionId ?? null,
+        durationUs,
+        outcome ?? (failed ? 'failure' : 'success'),
+      ]),
+      total,
+      () => [null, 100_000, 'success']
+    )
+  );
 }
 
 /** The transactions of the source that resolve the names of the calls. */
 function transactionNamesResponse(
   transactions: Array<{ id: string; name: string; type?: string }>
 ) {
-  return {
-    hits: {
-      total: { value: transactions.length, relation: 'eq' },
-      hits: transactions.map(({ id, name, type = 'request' }) => ({
-        fields: {
-          'transaction.id': [id],
-          'transaction.name': [name],
-          ...(type ? { 'transaction.type': [type] } : {}),
-        },
-      })),
-    },
-  };
+  return esqlResponse(
+    ['transaction.id', 'transaction.name', 'transaction.type'],
+    transactions.map(({ id, name, type = 'request' }) => [id, name, type])
+  );
 }
 
 describe('getConnectionTransactions', () => {
@@ -122,16 +135,18 @@ describe('getConnectionTransactions', () => {
 
       await getConnectionTransactions(options({ dependencies: ['redis', 'postgresql'] }));
 
-      const [, request] = search.mock.calls[0];
-      expect(request).toMatchObject({
-        apm: { events: ['span'] },
-        size: MAX_CONNECTION_IDS,
-        sort: [{ '@timestamp': 'desc' }],
-      });
-      expect(request.query.bool.filter).toEqual(
+      const request = requestOf(search, 0);
+      expect(request.apm).toEqual({ events: ['span'] });
+      expect(request.query).toContain('WHERE `service.name` == ?sourceServiceName');
+      expect(request.query).toContain(
+        'WHERE `span.destination.service.resource` IN (?dependencies)'
+      );
+      expect(request.query).toContain('SORT @timestamp DESC NULLS LAST');
+      expect(request.query).toContain(`LIMIT ${MAX_CONNECTION_IDS + 1}`);
+      expect(request.params).toEqual(
         expect.arrayContaining([
-          { term: { 'service.name': 'serviceA' } },
-          { terms: { 'span.destination.service.resource': ['redis', 'postgresql'] } },
+          { sourceServiceName: 'serviceA' },
+          { dependencies: ['redis', 'postgresql'] },
         ])
       );
     });
@@ -146,13 +161,14 @@ describe('getConnectionTransactions', () => {
 
       await getConnectionTransactions(options());
 
-      const [name, request] = search.mock.calls[1];
-      expect(name).toBe('get_connection_transactions_names');
-      expect(request.apm.events).toEqual(['transaction']);
-      expect(request.query.bool.filter).toEqual(
+      expect(search.mock.calls[1][0]).toBe('get_connection_transactions_names');
+      const request = requestOf(search, 1);
+      expect(request.apm).toEqual({ events: ['transaction'] });
+      expect(request.query).toContain('WHERE `transaction.id` IN (?callTransactionIds)');
+      expect(request.params).toEqual(
         expect.arrayContaining([
-          { term: { 'service.name': 'serviceA' } },
-          { terms: { 'transaction.id': ['tx-1'] } },
+          { sourceServiceName: 'serviceA' },
+          { callTransactionIds: ['tx-1'] },
         ])
       );
     });
@@ -248,10 +264,10 @@ describe('getConnectionTransactions', () => {
       expect(search.mock.calls.map(([name]) => name)).toEqual([
         'get_connection_transactions_exit_spans',
       ]);
-      expect(search.mock.calls[0][1].query.bool.filter).toEqual(
+      expect(requestOf(search, 0).params).toEqual(
         expect.arrayContaining([
-          { term: { 'service.name': 'serviceA' } },
-          { terms: { 'span.destination.service.resource': ['opbeans-b:3000'] } },
+          { sourceServiceName: 'serviceA' },
+          { dependencies: ['opbeans-b:3000'] },
         ])
       );
     });
@@ -272,16 +288,13 @@ describe('getConnectionTransactions', () => {
         'get_connection_transactions_exit_spans',
         'get_connection_transactions_names',
       ]);
-      expect(search.mock.calls[0][1].query.bool.filter).toEqual(
+      expect(requestOf(search, 0).query).toContain('WHERE `parent.id` IS NOT NULL');
+      expect(requestOf(search, 0).params).toEqual([{ targetServiceName: 'serviceB' }]);
+      expect(requestOf(search, 1).query).toContain('WHERE `span.id` IN (?parentIds)');
+      expect(requestOf(search, 1).params).toEqual(
         expect.arrayContaining([
-          { term: { 'service.name': 'serviceB' } },
-          { exists: { field: 'parent.id' } },
-        ])
-      );
-      expect(search.mock.calls[1][1].query.bool.filter).toEqual(
-        expect.arrayContaining([
-          { term: { 'service.name': 'serviceA' } },
-          { terms: { 'span.id': ['span-1', 'span-2'] } },
+          { sourceServiceName: 'serviceA' },
+          { parentIds: ['span-1', 'span-2'] },
         ])
       );
       expect(result.transactionGroups).toHaveLength(1);
@@ -293,12 +306,11 @@ describe('getConnectionTransactions', () => {
 
       await getConnectionTransactions(options({ targetServiceName: 'serviceB', dependencies: [] }));
 
-      expect(search.mock.calls[0][1]).toMatchObject({
-        size: MAX_CONNECTION_IDS,
-        sort: [{ '@timestamp': 'desc' }],
-        fields: ['parent.id'],
-      });
-      expect(JSON.stringify(search.mock.calls[0][1].query)).not.toContain('service.environment');
+      const request = requestOf(search, 0);
+      expect(request.query).toContain(`LIMIT ${MAX_CONNECTION_IDS + 1}`);
+      expect(request.query).toContain('SORT @timestamp DESC NULLS LAST');
+      expect(request.query).toContain('KEEP `parent.id`');
+      expect(JSON.stringify([request.query, request.filter])).not.toContain('service.environment');
     });
 
     it('stops after the first query when the target has no entry transaction', async () => {
@@ -394,11 +406,12 @@ describe('getConnectionTransactions', () => {
 
       await getConnectionTransactions(options());
 
-      const namesRange = search.mock.calls[1][1].query.bool.filter.find(
-        (f: Record<string, unknown>) => 'range' in f
-      );
-      expect(namesRange.range['@timestamp'].gte).toBe(START - CONNECTION_JOIN_TIME_BUFFER_MS);
-      expect(namesRange.range['@timestamp'].lte).toBe(END);
+      const filterClauses = requestOf(search, 1).filter?.bool?.filter as Array<{
+        range?: Record<string, { gte?: number; lte?: number }>;
+      }>;
+      const namesRange = filterClauses.find((clause) => clause.range)?.range?.['@timestamp'];
+      expect(namesRange?.gte).toBe(START - CONNECTION_JOIN_TIME_BUFFER_MS);
+      expect(namesRange?.lte).toBe(END);
     });
   });
 });

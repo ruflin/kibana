@@ -6,7 +6,9 @@
  */
 
 import type { TransportResult, estypes } from '@elastic/elasticsearch';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
 import { errors } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, KibanaRequest } from '@kbn/core/server';
 import { i18n } from '@kbn/i18n';
 import { JOB_STATUS } from '@kbn/reporting-common';
@@ -21,6 +23,23 @@ import type { Payload } from './get_document_payload';
 import { getDocumentPayloadFactory } from './get_document_payload';
 
 const defaultSize = 10;
+
+/**
+ * ES|QL reports a missing index as a 400 `verification_exception` ("Unknown index [<name>]"),
+ * where the count API answers 0 for a pattern that matches no index.
+ */
+const isEsqlUnknownIndexError = (error: unknown): boolean => {
+  const { statusCode, body } = (error ?? {}) as {
+    statusCode?: number;
+    body?: { error?: { type?: string; reason?: string } };
+  };
+  return (
+    statusCode === 400 &&
+    body?.error?.type === 'verification_exception' &&
+    typeof body.error.reason === 'string' &&
+    body.error.reason.includes('Unknown index')
+  );
+};
 const getUsername = (user: ReportingUser) => (user ? user.username : false);
 
 function getSearchBody(body: estypes.SearchRequest): estypes.SearchRequest {
@@ -125,23 +144,25 @@ export function jobsQueryFactory(
 
     async count(user) {
       const username = getUsername(user);
-      const body = {
-        query: {
-          constant_score: {
-            filter: {
-              bool: {
-                must: [{ term: { created_by: username } }],
-              },
-            },
-          },
-        },
-      };
+      const { query, params } = esql.from(REPORTING_DATA_STREAM_WILDCARD_WITH_LEGACY.split(','))
+        .pipe`WHERE created_by == ${{ username: String(username) }}`
+        .pipe`STATS total = COUNT(*)`.toRequest();
 
-      const response = await execQuery((elasticsearchClient) =>
-        elasticsearchClient.count({ ...body, index: REPORTING_DATA_STREAM_WILDCARD_WITH_LEGACY })
-      );
+      const response = await execQuery(async (elasticsearchClient) => {
+        try {
+          return (await elasticsearchClient.esql.query({
+            query,
+            params,
+          } as EsqlQueryRequest)) as unknown as { values: unknown[][] };
+        } catch (error) {
+          // A pattern without any reporting index counted 0 with the count API.
+          if (isEsqlUnknownIndexError(error)) return undefined;
+          throw error;
+        }
+      });
 
-      return response?.count ?? 0;
+      const total = response?.values[0]?.[0];
+      return typeof total === 'number' ? total : 0;
     },
 
     async get(user, id) {

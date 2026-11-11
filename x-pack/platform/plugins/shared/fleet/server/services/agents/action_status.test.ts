@@ -121,6 +121,7 @@ describe('getActionStatuses with scheduledOnly', () => {
     return {
       openPointInTime: jest.fn().mockResolvedValue({ id: 'pit-id' }),
       closePointInTime: jest.fn().mockResolvedValue({ succeeded: true }),
+      esql: { query: jest.fn().mockResolvedValue({ columns: [], values: [] }) },
       search: jest
         .fn()
         .mockResolvedValueOnce({ hits: { hits } })
@@ -193,6 +194,7 @@ describe('getActionStatuses policy change actions', () => {
     return {
       openPointInTime: jest.fn().mockResolvedValue({ id: 'pit-id' }),
       closePointInTime: jest.fn().mockResolvedValue({ succeeded: true }),
+      esql: { query: jest.fn().mockResolvedValue({ columns: [], values: [] }) },
       search: jest.fn().mockImplementation(async (request: { index?: string }) => {
         if (request.index === '.fleet-policies') {
           return { hits: { hits: pages.shift() ?? [] } };
@@ -304,6 +306,7 @@ describe('getActionStatuses version specific policy actions', () => {
     return {
       openPointInTime: jest.fn().mockResolvedValue({ id: 'pit-id' }),
       closePointInTime: jest.fn().mockResolvedValue({ succeeded: true }),
+      esql: { query: jest.fn().mockResolvedValue({ columns: [], values: [] }) },
       search: jest.fn().mockImplementation(async (request: any) => {
         if (request.pit) {
           // getActions reads pages of a point in time, sorted by timestamp
@@ -420,5 +423,106 @@ describe('getActionStatuses version specific policy actions', () => {
 
     expect(actions.map((action) => action.actionId).sort()).toEqual(['A', 'D']);
     expect(getActionsSearches(esClient).map((request) => request.from)).toEqual([0]);
+  });
+});
+
+describe('getActionStatuses ack counts and error host names', () => {
+  const actionSearchHit = {
+    _source: {
+      action_id: 'action-1',
+      type: 'UPGRADE',
+      '@timestamp': '2026-01-01T00:00:00Z',
+      total: 3,
+      agents: ['agent-1', 'agent-2', 'agent-3'],
+    },
+  };
+
+  const makeEsClient = () => {
+    const esqlQuery = jest.fn().mockImplementation(async (request: { query: string }) => {
+      if (request.query.includes('STATS')) {
+        return {
+          columns: [
+            { name: 'doc_count', type: 'long' },
+            { name: 'max_timestamp', type: 'date' },
+            { name: 'action_id', type: 'keyword' },
+          ],
+          values: [[2, '2026-01-01T01:00:00.000Z', 'action-1']],
+        };
+      }
+      return {
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: 'local_metadata.host.name', type: 'text' },
+        ],
+        values: [['agent-1', 'host-1']],
+      };
+    });
+    const search = jest.fn().mockImplementation(async (request: any) => {
+      if (request.pit) {
+        return { hits: { hits: [actionSearchHit] } };
+      }
+      if (request.index === '.fleet-actions-results') {
+        return {
+          hits: { hits: [], total: 1 },
+          aggregations: {
+            top_error_hits: {
+              hits: {
+                hits: [
+                  {
+                    _source: {
+                      agent_id: 'agent-1',
+                      error: 'boom',
+                      '@timestamp': '2026-01-01T00:30:00Z',
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        };
+      }
+      return { hits: { hits: [] }, aggregations: { policies: { buckets: [] } } };
+    });
+    return {
+      openPointInTime: jest.fn().mockResolvedValue({ id: 'pit-id' }),
+      closePointInTime: jest.fn().mockResolvedValue({ succeeded: true }),
+      search,
+      esql: { query: esqlQuery },
+    } as unknown as ElasticsearchClient;
+  };
+
+  it('reads the ack count and last ack time per action with STATS', async () => {
+    const esClient = makeEsClient();
+
+    const actions = await getActionStatuses(esClient, { errorSize: 5 });
+
+    const upgrade = actions.find((action) => action.actionId === 'action-1');
+    expect(upgrade).toEqual(
+      expect.objectContaining({
+        nbAgentsAck: 1, // 2 acks, 1 of them an error
+        nbAgentsFailed: 1,
+        completionTime: '2026-01-01T01:00:00.000Z',
+      })
+    );
+    const [ackRequest] = (esClient.esql.query as jest.Mock).mock.calls[0];
+    expect(ackRequest.query).toBe(
+      'FROM .fleet-actions-results | WHERE action_id IN (?actionIds) | STATS doc_count = COUNT(*), max_timestamp = MAX(@timestamp) BY action_id | LIMIT 1'
+    );
+    expect(ackRequest.params).toEqual([{ actionIds: ['action-1'] }]);
+  });
+
+  it('resolves the host name of agents with errors', async () => {
+    const esClient = makeEsClient();
+
+    const actions = await getActionStatuses(esClient, { errorSize: 5 });
+
+    const upgrade = actions.find((action) => action.actionId === 'action-1');
+    expect(upgrade?.latestErrors).toEqual([
+      expect.objectContaining({ agentId: 'agent-1', hostname: 'host-1' }),
+    ]);
+    const [hostRequest] = (esClient.esql.query as jest.Mock).mock.calls[1];
+    expect(hostRequest.query).toBe(
+      'FROM .fleet-agents METADATA _id | WHERE agent.id IN (?agentIds) | KEEP _id, local_metadata.host.name | LIMIT 1'
+    );
   });
 });

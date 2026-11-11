@@ -7,6 +7,7 @@
 import type { Readable } from 'stream';
 
 import moment from 'moment';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 
 import { createEsFileClient } from '@kbn/files-plugin/server';
@@ -15,6 +16,7 @@ import type { ResponseHeaders } from '@kbn/core-http-server';
 
 import type { AgentDiagnostics } from '../../../common/types/models';
 import { appContextService } from '../app_context';
+import { esqlRows, esqlSources, runEsqlRead } from '../esql_read';
 import {
   AGENT_ACTIONS_INDEX,
   AGENT_ACTIONS_RESULTS_INDEX,
@@ -121,33 +123,21 @@ async function _getRequestDiagnosticsActions(
     error?: string;
   }>
 > {
-  const agentActionRes = await esClient.search<any>({
-    index: AGENT_ACTIONS_INDEX,
-    ignore_unavailable: true,
-    size: SO_SEARCH_LIMIT,
-    sort: { '@timestamp': 'desc' },
-    query: {
-      bool: {
-        must: [
-          {
-            term: {
-              type: 'REQUEST_DIAGNOSTICS',
-            },
-          },
-          {
-            term: {
-              agents: agentId,
-            },
-          },
-        ],
-      },
-    },
+  // `agents` is a multi-valued keyword, so its term clause stays a Query DSL filter.
+  const agentActionRes = await runEsqlRead({
+    esClient,
+    query: esql.from([AGENT_ACTIONS_INDEX]).where`type == "REQUEST_DIAGNOSTICS"`
+      .pipe`SORT @timestamp DESC NULLS LAST`.pipe`KEEP action_id, @timestamp, expiration`.limit(
+      SO_SEARCH_LIMIT
+    ),
+    filter: { term: { agents: agentId } },
+    ignoreUnknownIndex: true,
   });
 
-  const agentActions = agentActionRes.hits.hits.map((hit) => ({
-    actionId: hit._source?.action_id as string,
-    timestamp: hit._source?.['@timestamp'],
-    expiration: hit._source?.expiration,
+  const agentActions = esqlRows(agentActionRes).map((row) => ({
+    actionId: row.action_id as string,
+    timestamp: row['@timestamp'] as string | undefined,
+    expiration: row.expiration as string | undefined,
   }));
 
   if (agentActions.length === 0) {
@@ -155,32 +145,26 @@ async function _getRequestDiagnosticsActions(
   }
 
   try {
-    const actionResultsRes = await esClient.search<any>({
-      index: AGENT_ACTIONS_RESULTS_INDEX,
-      ignore_unavailable: true,
-      size: SO_SEARCH_LIMIT,
-      query: {
-        bool: {
-          must: [
-            {
-              terms: {
-                action_id: agentActions.map((action) => action.actionId),
-              },
-            },
-            {
-              term: {
-                agent_id: agentId,
-              },
-            },
-          ],
-        },
-      },
+    // `data` is not mapped (disabled object), so `upload_id` is only readable from `_source`.
+    const actionResultsRes = await runEsqlRead({
+      esClient,
+      query: esql.from([AGENT_ACTIONS_RESULTS_INDEX], ['_source']).where`action_id IN (${{
+        actionIds: agentActions.map((action) => action.actionId),
+      }}) AND agent_id == ${{ agentId }}`
+        .keep('_source')
+        .limit(SO_SEARCH_LIMIT),
+      ignoreUnknownIndex: true,
     });
-    const actionResults = actionResultsRes.hits.hits.map((hit) => ({
-      actionId: hit._source?.action_id as string,
-      timestamp: hit._source?.['@timestamp'],
-      fileId: hit._source?.data?.upload_id as string,
-      error: hit._source?.error,
+    const actionResults = esqlSources<{
+      action_id?: string;
+      '@timestamp'?: string;
+      data?: { upload_id?: string };
+      error?: string;
+    }>(actionResultsRes).map((source) => ({
+      actionId: source.action_id as string,
+      timestamp: source['@timestamp'],
+      fileId: source.data?.upload_id as string,
+      error: source.error,
     }));
     return agentActions.map((action) => {
       const actionResult = actionResults.find((result) => result.actionId === action.actionId);
@@ -288,17 +272,17 @@ export async function getAgentIdForUploadFile(
   esClient: ElasticsearchClient,
   fileId: string
 ): Promise<string> {
-  const result = await esClient.search<{ agent_id: string }>({
-    index: FILE_STORAGE_METADATA_AGENT_INDEX,
-    query: { ids: { values: [fileId] } },
-    _source: ['agent_id'],
-    size: 1,
+  const result = await runEsqlRead({
+    esClient,
+    query: esql.from([FILE_STORAGE_METADATA_AGENT_INDEX], ['_id']).where`_id == ${{ fileId }}`
+      .keep('agent_id')
+      .limit(1),
   });
-  const hit = result.hits.hits[0];
-  if (!hit?._source?.agent_id) {
+  const agentId = esqlRows(result)[0]?.agent_id;
+  if (!agentId) {
     throw new FleetNotFoundError(`File ${fileId} not found`);
   }
-  return hit._source.agent_id;
+  return agentId as string;
 }
 
 export function getDownloadHeadersForFile(fileName: string): ResponseHeaders {

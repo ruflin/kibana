@@ -229,6 +229,18 @@ afterAll(async () => {
   await otelProvider.shutdown();
 });
 
+const latestRevisionsResponse = (rows: Array<[string, number | null]>) =>
+  ({
+    columns: [
+      { name: 'latest_revision', type: 'integer' },
+      { name: 'policy_id', type: 'keyword' },
+    ],
+    values: rows.map(([policyId, revision]) => [revision, policyId]),
+  } as any);
+
+const agentCountResponse = (total: number) =>
+  ({ columns: [{ name: 'total', type: 'long' }], values: [[total]] } as any);
+
 describe('Agent policy', () => {
   beforeEach(() => {
     otelExporter?.reset();
@@ -991,7 +1003,7 @@ describe('Agent policy', () => {
         },
       ] as any);
       esClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
-      esClient.count.mockResolvedValue({ count: 0 } as any);
+      esClient.esql.query.mockResolvedValue(agentCountResponse(0));
       mockedPackagePolicyService.create.mockReset();
     });
 
@@ -1038,10 +1050,14 @@ describe('Agent policy', () => {
     });
 
     it('should throw error if active agents are assigned to the policy', async () => {
-      esClient.count.mockResolvedValueOnce({ count: 2 } as any);
+      esClient.esql.query.mockResolvedValueOnce(agentCountResponse(2));
       await expect(agentPolicyService.delete(soClient, esClient, 'mocked')).rejects.toThrow(
         'Cannot delete an agent policy that is assigned to any active or inactive agents'
       );
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query: `FROM .fleet-agents | WHERE active == TRUE AND (policy_id == ?policyId OR STARTS_WITH(policy_id, ?variantPrefix)) | STATS total = COUNT(*)`,
+        params: [{ policyId: 'mocked' }, { variantPrefix: 'mocked#' }],
+      });
     });
 
     it('should delete .fleet-policies entries on agent policy delete', async () => {
@@ -1282,7 +1298,7 @@ describe('Agent policy', () => {
         supports_agentless: true,
       });
       // agentless policies are allowed to have active agents; the count check is bypassed
-      esClient.count.mockResolvedValue({ count: 1 } as any);
+      esClient.esql.query.mockResolvedValue(agentCountResponse(1));
       const deleteAgentlessAgentSpy = jest
         .spyOn(agentlessAgentService, 'deleteAgentlessAgent')
         .mockResolvedValue(undefined as any);
@@ -1308,7 +1324,7 @@ describe('Agent policy', () => {
         package_policies: ['package-1'],
         supports_agentless: true,
       });
-      esClient.count.mockResolvedValue({ count: 1 } as any);
+      esClient.esql.query.mockResolvedValue(agentCountResponse(1));
       const callOrder: string[] = [];
 
       jest.mocked(unenrollForAgentPolicyId).mockImplementationOnce(async () => {
@@ -3193,6 +3209,7 @@ describe('Agent policy', () => {
           hits: [{ _source: { policy_id: 'policy123', revision_idx: 1 } }],
         },
       } as any);
+      esClient.esql.query.mockResolvedValue(latestRevisionsResponse([]));
       await agentPolicyService.deployPolicy(soClient, 'policy123');
 
       expect(esClient.bulk).toHaveBeenCalledWith(
@@ -3312,6 +3329,7 @@ describe('Agent policy', () => {
           hits: [{ _source: { policy_id: 'test-agentless-policy', revision_idx: 1 } }],
         },
       } as any);
+      esClient.esql.query.mockResolvedValue(latestRevisionsResponse([]));
 
       jest.spyOn(agentlessAgentService, 'createAgentlessAgent');
 
@@ -3386,6 +3404,7 @@ describe('Agent policy', () => {
           hits: [{ _source: { policy_id: 'test-agentless-policy', revision_idx: 1 } }],
         },
       } as any);
+      esClient.esql.query.mockResolvedValue(latestRevisionsResponse([]));
 
       jest.spyOn(agentlessAgentService, 'createAgentlessAgent');
 
@@ -3425,10 +3444,9 @@ describe('Agent policy', () => {
           total: 1,
           hits: [{ _source: { policy_id: 'policy123', revision_idx: 1 } }],
         },
-        aggregations: {
-          policies: { buckets: [{ key: 'policy123', latest_revision: { value: 1 } }] },
-        },
       } as any);
+      esClient.esql.query.mockResolvedValue(latestRevisionsResponse([]));
+      esClient.esql.query.mockResolvedValue(latestRevisionsResponse([['policy123', 1]]));
 
       await agentPolicyService.deployPolicy(soClient, 'policy123');
 
@@ -3472,10 +3490,8 @@ describe('Agent policy', () => {
           total: 1,
           hits: [{ _source: { policy_id: 'policy123', revision_idx: 2 } }],
         },
-        aggregations: {
-          policies: { buckets: [{ key: 'policy123', latest_revision: { value: 2 } }] },
-        },
       } as any);
+      esClient.esql.query.mockResolvedValue(latestRevisionsResponse([['policy123', 2]]));
 
       await agentPolicyService.deployPolicy(soClient, 'policy123');
 
@@ -3569,6 +3585,7 @@ describe('Agent policy', () => {
         const esClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
         esClient.bulk.mockResolvedValue({ errors: false, items: [] } as any);
         esClient.search.mockResolvedValue({ hits: { hits: [] }, aggregations: {} } as any);
+        esClient.esql.query.mockResolvedValue(latestRevisionsResponse([]));
         mockedAppContextService.getInternalUserESClient.mockReturnValue(esClient);
         mockedAppContextService.getExperimentalFeatures.mockReturnValue({
           enableVersionSpecificPolicies: true,
@@ -4773,21 +4790,21 @@ describe('Agent policy', () => {
       const result = await agentPolicyService.getLatestFleetPolicyRevisions(esClient, []);
 
       expect(result).toEqual(new Map());
-      expect(esClient.search).not.toHaveBeenCalled();
+      expect(esClient.esql.query).not.toHaveBeenCalled();
     });
 
     it('maps each policy id to its latest deployed revision, omitting policies with none', async () => {
       const esClient = elasticsearchServiceMock.createInternalClient();
-      esClient.search.mockResolvedValue({
-        aggregations: {
-          policies: {
-            buckets: [
-              { key: 'policy1', latest_revision: { value: 3 } },
-              { key: 'policy2', latest_revision: { value: 1 } },
-              { key: 'policy3', latest_revision: { value: null } },
-            ],
-          },
-        },
+      esClient.esql.query.mockResolvedValue({
+        columns: [
+          { name: 'latest_revision', type: 'integer' },
+          { name: 'policy_id', type: 'keyword' },
+        ],
+        values: [
+          [3, 'policy1'],
+          [1, 'policy2'],
+          [null, 'policy3'],
+        ],
       } as any);
 
       const result = await agentPolicyService.getLatestFleetPolicyRevisions(esClient, [
@@ -4802,13 +4819,10 @@ describe('Agent policy', () => {
           ['policy2', 1],
         ])
       );
-      expect(esClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: AGENT_POLICY_INDEX,
-          size: 0,
-          query: { terms: { policy_id: ['policy1', 'policy2', 'policy3'] } },
-        })
-      );
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query: `FROM ${AGENT_POLICY_INDEX} | WHERE policy_id IN (?agentPolicyIds) | STATS latest_revision = MAX(revision_idx) BY policy_id | LIMIT 3`,
+        params: [{ agentPolicyIds: ['policy1', 'policy2', 'policy3'] }],
+      });
     });
   });
 

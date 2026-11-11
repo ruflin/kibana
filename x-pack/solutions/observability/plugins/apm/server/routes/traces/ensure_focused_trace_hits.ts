@@ -5,10 +5,11 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { SearchHit } from '@elastic/elasticsearch/lib/api/types';
 import type { APMEventClient } from '@kbn/apm-data-access-plugin/server';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
-import { rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { rangeQuery } from '@kbn/observability-plugin/server';
 import {
   PARENT_ID,
   PROCESSOR_EVENT,
@@ -16,8 +17,9 @@ import {
   SPAN_ID,
   TRACE_ID,
   TRANSACTION_ID,
-  TRANSACTION_MARKS_AGENT,
 } from '../../../common/es_fields/apm';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import { whereTerm } from '../../lib/helpers/esql_values';
 import { ecsOnlyOptionalFields, fields, optionalFields } from './trace_constants';
 
 const MAX_ANCESTOR_HOPS = 50;
@@ -110,7 +112,7 @@ export async function ensureFocusedTraceHits<THit extends FocusedTraceHit>({
         if (!id || !idsToFetch.includes(id) || hitsById.has(id)) {
           continue;
         }
-        // Intentional `as THit` type assertion as apmEventClient.search returns generic Elasticsearch SearchHit documents;
+        // Intentional `as THit` type assertion as apmEventClient.esql rows are shaped like generic Elasticsearch SearchHit documents;
         const typedHit = fetchedHit as THit;
         hitsById.set(id, typedHit);
         reserved.push(typedHit);
@@ -180,46 +182,50 @@ async function fetchTraceHitsByIds({
     return [];
   }
 
-  const response = await apmEventClient.search(
-    'get_focused_trace_items',
-    {
-      apm: {
-        events: [ProcessorEvent.span, ProcessorEvent.transaction],
-      },
-      track_total_hits: false,
-      size: ids.length,
-      query: {
-        bool: {
-          filter: [
-            ...termQuery(TRACE_ID, traceId),
-            ...rangeQuery(start, end),
-            // The service flyout passes serviceName, and its ranked page is already
-            // limited to that service. Ancestors from other services stay out so they
-            // cannot take maxTraceItems slots. Callers that omit serviceName, such as
-            // transaction details, still reserve the full cross-service chain.
-            ...termQuery(SERVICE_NAME, serviceName),
-          ],
-          // Child spans copy transaction.id from their transaction. Restrict that
-          // clause to transaction documents so a span cannot take the only hit.
-          should: [
-            {
-              bool: {
-                filter: [
-                  { terms: { [TRANSACTION_ID]: ids } },
-                  { term: { [PROCESSOR_EVENT]: ProcessorEvent.transaction } },
-                ],
-              },
-            },
-            { terms: { [SPAN_ID]: ids } },
-          ],
-          minimum_should_match: 1,
-        },
-      },
-      fields: [...fields, ...(ecsOnly ? ecsOnlyOptionalFields : optionalFields)],
-      _source: [TRANSACTION_MARKS_AGENT],
-    },
-    { skipProcessorEventFilter: !ecsOnly }
-  );
+  const columns = [...fields, ...(ecsOnly ? ecsOnlyOptionalFields : optionalFields)];
+  const [firstColumn, ...otherColumns] = columns;
 
-  return response.hits.hits;
+  const response = await apmEventClient.esql('get_focused_trace_items', {
+    apm: {
+      events: [ProcessorEvent.span, ProcessorEvent.transaction],
+    },
+    // `_source` carries the transaction marks, which are not a mapped column. The optional
+    // fields are not mapped in every index, so unmapped fields read as null.
+    query: (index) =>
+      // Child spans copy transaction.id from their transaction. Restrict that
+      // clause to transaction documents so a span cannot take the only hit.
+      whereTerm(
+        // The service flyout passes serviceName, and its ranked page is already
+        // limited to that service. Ancestors from other services stay out so they
+        // cannot take maxTraceItems slots. Callers that omit serviceName, such as
+        // transaction details, still reserve the full cross-service chain.
+        whereTerm(
+          esql.from(index, ['_source']).addSetCommand('unmapped_fields', 'nullify'),
+          TRACE_ID,
+          traceId
+        ),
+        SERVICE_NAME,
+        serviceName
+      ).pipe`WHERE (${esql.col(TRANSACTION_ID)} IN (${{ transactionIds: ids }}) AND ${esql.col(
+        PROCESSOR_EVENT
+      )} == ${{ processorEvent: ProcessorEvent.transaction }}) OR ${esql.col(SPAN_ID)} IN (${{
+        spanIds: ids,
+      }})`
+        .keep(firstColumn, ...otherColumns, '_source')
+        .limit(ids.length),
+    filter: { bool: { filter: rangeQuery(start, end) } },
+    skipProcessorEventFilter: !ecsOnly,
+  });
+
+  return esqlRows(response).map((row) => {
+    const { _source: source, ...columnValues } = row;
+    return {
+      fields: Object.fromEntries(
+        Object.entries(columnValues)
+          .filter(([, value]) => value !== null && value !== undefined)
+          .map(([name, value]) => [name, Array.isArray(value) ? value : [value]])
+      ),
+      _source: source,
+    };
+  });
 }

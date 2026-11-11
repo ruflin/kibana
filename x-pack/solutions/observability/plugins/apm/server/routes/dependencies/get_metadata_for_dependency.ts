@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { rangeQuery } from '@kbn/observability-plugin/server';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import { accessKnownApmEventFields } from '@kbn/apm-data-access-plugin/server/utils';
@@ -16,6 +17,7 @@ import {
   SPAN_SUBTYPE,
   SPAN_TYPE,
 } from '../../../common/es_fields/apm';
+import { boolFilter, esqlRowsAsHits, fromApmIndex, keepFields } from '../../lib/helpers/esql_apm';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
 
 export async function getMetadataForDependency({
@@ -30,31 +32,21 @@ export async function getMetadataForDependency({
   end: number;
 }): Promise<MetadataForDependencyResponse> {
   const fields = asMutableArray([SPAN_TYPE, SPAN_SUBTYPE] as const);
-  const sampleResponse = await apmEventClient.search('get_metadata_for_dependency', {
+  const sampleResponse = await apmEventClient.esql('get_metadata_for_dependency', {
     apm: {
       events: [ProcessorEvent.span, ProcessorEvent.transaction],
     },
-    track_total_hits: false,
-    size: 1,
-    query: {
-      bool: {
-        filter: [
-          {
-            term: {
-              [SPAN_DESTINATION_SERVICE_RESOURCE]: dependencyName,
-            },
-          },
-          ...rangeQuery(start, end),
-        ],
-      },
-    },
-    fields,
-    sort: {
-      '@timestamp': 'desc',
-    },
+    query: (index) =>
+      keepFields(
+        fromApmIndex(index).pipe`WHERE ${esql.col(SPAN_DESTINATION_SERVICE_RESOURCE)} == ${{
+          dependencyName,
+        }}`.pipe`SORT @timestamp DESC NULLS LAST`,
+        [...fields]
+      ).limit(1),
+    filter: boolFilter(...rangeQuery(start, end)),
   });
 
-  const hitFields = maybe(sampleResponse.hits.hits[0])?.fields;
+  const hitFields = maybe(esqlRowsAsHits(sampleResponse)[0])?.fields;
 
   const sample = hitFields && accessKnownApmEventFields(hitFields);
 

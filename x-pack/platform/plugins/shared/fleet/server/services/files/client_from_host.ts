@@ -16,8 +16,10 @@ import { createEsFileClient } from '@kbn/files-plugin/server';
 import type { File } from '@kbn/files-plugin/common';
 
 import moment from 'moment';
+import { esql } from '@elastic/esql';
 
 import { FleetFileNotFound, FleetFilesClientError } from '../../errors';
+import { esqlRows, isEsqlUnknownIndexError, runEsqlRead } from '../esql_read';
 
 import type {
   FileCustomMeta,
@@ -52,17 +54,21 @@ export class FleetFromHostFilesClient implements FleetFromHostFileClientInterfac
 
   async get(fileId: string): Promise<FleetFile> {
     try {
-      const fileDocSearchResult = await this.esClient.search<HostUploadedFileMetadata>({
-        index: this.fileMetaIndex,
-        size: 1,
-        query: {
-          term: {
-            _id: fileId,
-          },
-        },
+      const fileDocSearchResult = await runEsqlRead({
+        esClient: this.esClient,
+        query: esql.from([this.fileMetaIndex], ['_id', '_index', '_source']).where`_id == ${{
+          fileId,
+        }}`
+          .keep('_id', '_index', '_source')
+          .limit(1),
       });
 
-      const docSearchHit = fileDocSearchResult.hits.hits[0] ?? {};
+      const [fileDocRow] = esqlRows(fileDocSearchResult);
+      const docSearchHit = {
+        _id: fileDocRow?._id as string | undefined,
+        _index: fileDocRow?._index as string | undefined,
+        _source: fileDocRow?._source as HostUploadedFileMetadata | undefined,
+      } as estypes.SearchHit<HostUploadedFileMetadata>;
 
       if (!docSearchHit._source) {
         throw new FleetFileNotFound(
@@ -79,7 +85,7 @@ export class FleetFromHostFilesClient implements FleetFromHostFileClientInterfac
       if (error instanceof FleetFilesClientError) {
         throw error;
       }
-      if (error.message.includes('index_not_found')) {
+      if (error.message.includes('index_not_found') || isEsqlUnknownIndexError(error)) {
         throw new FleetFileNotFound(error.message, error);
       }
 
@@ -89,25 +95,13 @@ export class FleetFromHostFilesClient implements FleetFromHostFileClientInterfac
 
   async doesFileHaveData(fileId: string): Promise<boolean> {
     try {
-      const chunks = await this.esClient.search({
-        index: this.fileDataIndex,
-        size: 0,
-        query: {
-          bool: {
-            filter: [
-              {
-                term: {
-                  bid: fileId,
-                },
-              },
-            ],
-          },
-        },
-        // Setting `_source` to false - we don't need the actual document to be returned
-        _source: false,
+      const chunks = await runEsqlRead({
+        esClient: this.esClient,
+        // Only the existence of a chunk matters, not the actual document
+        query: esql.from([this.fileDataIndex]).where`bid == ${{ fileId }}`.keep('bid').limit(1),
       });
 
-      return Boolean((chunks.hits?.total as estypes.SearchTotalHits)?.value);
+      return esqlRows(chunks).length > 0;
     } catch (err) {
       throw new FleetFilesClientError(
         `Checking if file id [${fileId}] has data in index [${this.fileDataIndex}] failed with: ${err.message}`,

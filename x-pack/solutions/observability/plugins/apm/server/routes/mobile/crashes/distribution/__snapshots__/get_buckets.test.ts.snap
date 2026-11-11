@@ -1,73 +1,56 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
 exports[`get buckets should make the correct query 1`] = `
-Array [
-  Array [
-    "get_error_distribution_buckets",
-    Object {
-      "aggs": Object {
-        "distribution": Object {
-          "histogram": Object {
-            "extended_bounds": Object {
-              "max": 1528977600000,
-              "min": 1528113600000,
+Object {
+  "apm": Object {
+    "events": Array [
+      "error",
+    ],
+  },
+  "filter": Object {
+    "bool": Object {
+      "filter": Array [
+        Object {
+          "range": Object {
+            "@timestamp": Object {
+              "format": "epoch_millis",
+              "gte": 1528113600000,
+              "lte": 1528977600000,
             },
-            "field": "@timestamp",
-            "interval": 10,
-            "min_doc_count": 0,
           },
         },
-      },
-      "apm": Object {
-        "events": Array [
-          "error",
-        ],
-      },
-      "query": Object {
-        "bool": Object {
-          "filter": Array [
-            Object {
-              "term": Object {
-                "error.type": "crash",
-              },
-            },
-            Object {
-              "term": Object {
-                "service.name": "myServiceName",
-              },
-            },
-            Object {
-              "range": Object {
-                "@timestamp": Object {
-                  "format": "epoch_millis",
-                  "gte": 1528113600000,
-                  "lte": 1528977600000,
+        Object {
+          "bool": Object {
+            "minimum_should_match": 1,
+            "should": Array [
+              Object {
+                "term": Object {
+                  "service.environment": "prod",
                 },
               },
-            },
-            Object {
-              "bool": Object {
-                "minimum_should_match": 1,
-                "should": Array [
-                  Object {
-                    "term": Object {
-                      "service.environment": "prod",
-                    },
-                  },
-                  Object {
-                    "term": Object {
-                      "resource.attributes.deployment.environment.name": "prod",
-                    },
-                  },
-                ],
+              Object {
+                "term": Object {
+                  "resource.attributes.deployment.environment.name": "prod",
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-      "size": 0,
-      "track_total_hits": false,
+      ],
+    },
+  },
+  "operationName": "get_error_distribution_buckets",
+  "params": Array [
+    Object {
+      "error_type_value": "crash",
+    },
+    Object {
+      "service_name_value": "myServiceName",
+    },
+    Object {
+      "intervalMs": 100000000,
     },
   ],
-]
+  "query": "FROM myIndex | WHERE \`error.type\` == ?error_type_value | WHERE \`service.name\` == ?service_name_value | EVAL bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ?intervalMs | STATS doc_count = COUNT(*) BY bucket | LIMIT 9",
+}
 `;

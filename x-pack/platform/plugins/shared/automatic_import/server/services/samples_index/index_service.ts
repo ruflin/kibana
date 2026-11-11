@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger, LoggerFactory } from '@kbn/core/server';
 import type {
   AutomaticImportSamplesProperties,
@@ -90,20 +91,17 @@ export class AutomaticImportSamplesIndexService {
   public async getSamplesForDataStream(integrationId: string, dataStreamId: string) {
     const samplesIndexAdapter = this.getAdapter();
 
-    const results = await samplesIndexAdapter.getClient().search({
-      query: {
-        bool: {
-          must: [
-            { term: { integration_id: integrationId } },
-            { term: { data_stream_id: dataStreamId } },
-          ],
-        },
-      },
-      size: UPLOAD_SAMPLES_MAX_LINES,
-      track_total_hits: false,
+    // `log_data` is an unindexed text field, so it is read from `_source`. The limit is the number
+    // of lines an upload accepts.
+    const results = await samplesIndexAdapter.getClient().esql({
+      metadata: ['_source'],
+      pipeline: esql`WHERE integration_id == ${{ integrationId }} AND data_stream_id == ${{
+        dataStreamId,
+      }} | KEEP _source | LIMIT ${{ limit: UPLOAD_SAMPLES_MAX_LINES }}`,
     });
-    const samples: string[] = results.hits.hits.map(
-      (hit) => (hit._source as AutomaticImportSamplesProperties).log_data
+    const sourceColumn = results.columns.findIndex((column) => column.name === '_source');
+    const samples: string[] = results.values.map(
+      (row) => (row[sourceColumn] as AutomaticImportSamplesProperties).log_data
     );
     return samples;
   }

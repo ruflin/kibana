@@ -27,6 +27,7 @@ describe('signals routes', () => {
   let featureFlagEnabled: boolean;
   let feedbackLoopEnabled: boolean;
   let search: jest.Mock;
+  let esqlQuery: jest.Mock;
 
   const createContext = () =>
     ({
@@ -35,7 +36,7 @@ describe('signals routes', () => {
           client: { get: jest.fn().mockImplementation(async () => featureFlagEnabled) },
         },
         elasticsearch: {
-          client: { asCurrentUser: { search } },
+          client: { asCurrentUser: { search, esql: { query: esqlQuery } } },
         },
       }),
     } as unknown as Parameters<RequestHandler>[0]);
@@ -57,6 +58,7 @@ describe('signals routes', () => {
     feedbackLoopEnabled = true;
     response = httpServerMock.createResponseFactory();
     search = jest.fn();
+    esqlQuery = jest.fn();
 
     const createVersionedRoute = (method: string) => (config: RegisteredRoute['config']) => ({
       addVersion: (versionConfig: { validate: unknown }, handler: RequestHandler) => {
@@ -94,6 +96,7 @@ describe('signals routes', () => {
 
     expect(response.notFound).toHaveBeenCalledTimes(2);
     expect(search).not.toHaveBeenCalled();
+    expect(esqlQuery).not.toHaveBeenCalled();
   });
 
   it('returns 404 on every route when the feedback loop is disabled', async () => {
@@ -104,19 +107,25 @@ describe('signals routes', () => {
 
     expect(response.notFound).toHaveBeenCalledTimes(2);
     expect(search).not.toHaveBeenCalled();
+    expect(esqlQuery).not.toHaveBeenCalled();
   });
 
   it("aggregates by tag over the current space's index and reads as the current user", async () => {
-    search.mockResolvedValue({
-      aggregations: { tags: { buckets: [{ key: 'query_error', doc_count: 5 }] } },
+    esqlQuery.mockResolvedValue({
+      columns: [
+        { name: 'count', type: 'long' },
+        { name: 'tag', type: 'keyword' },
+      ],
+      values: [[5, 'query_error']],
     });
 
     await callRoute(SIGNAL_GROUPS_PATH, {});
 
-    expect(search).toHaveBeenCalledWith(
+    expect(esqlQuery).toHaveBeenCalledWith(
       expect.objectContaining({
-        index: 'context-engine-signals-default',
-        aggs: { tags: { terms: expect.objectContaining({ field: 'tags' }) } },
+        query: expect.stringMatching(
+          /^FROM context-engine-signals-default \| WHERE tags IS NOT NULL \| STATS count = COUNT\(\*\) BY tag = tags/
+        ),
       })
     );
     expect(response.ok).toHaveBeenCalledWith({

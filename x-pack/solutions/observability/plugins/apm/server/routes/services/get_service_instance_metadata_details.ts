@@ -5,6 +5,7 @@
  * 2.0.
  */
 import { merge } from 'lodash';
+import { esql } from '@elastic/esql';
 import { rangeQuery } from '@kbn/observability-plugin/server';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import { accessKnownApmEventFields } from '@kbn/apm-data-access-plugin/server/utils';
@@ -17,11 +18,11 @@ import {
   SERVICE_NAME,
   SERVICE_NODE_NAME,
 } from '../../../common/es_fields/apm';
-import { maybe } from '../../../common/utils/maybe';
 import {
   getBackwardCompatibleDocumentTypeFilter,
   getProcessorEventForTransactions,
 } from '../../lib/helpers/transactions';
+import { esqlRowAsApmFields } from '../../lib/helpers/esql_apm';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
 import { asMutableArray } from '../../../common/utils/as_mutable_array';
 import {
@@ -44,11 +45,7 @@ export async function getServiceInstanceMetadataDetails({
   start: number;
   end: number;
 }): Promise<ServiceInstanceMetadataDetailsResponse> {
-  const filter = [
-    { term: { [SERVICE_NAME]: serviceName } },
-    { term: { [SERVICE_NODE_NAME]: serviceNodeName } },
-    ...rangeQuery(start, end),
-  ];
+  const filter = { bool: { filter: rangeQuery(start, end) } };
 
   const requiredKeys = asMutableArray([AT_TIMESTAMP, SERVICE_NAME, AGENT_NAME] as const);
 
@@ -62,70 +59,66 @@ export async function getServiceInstanceMetadataDetails({
 
   const fields = [...requiredKeys, ...optionalKeys];
 
+  const [firstField, ...otherFields] = fields;
+
+  // Cloud, container and host fields are not mapped in every index, so unmapped fields read as null.
+  const sampleQuery = (index: string[], metricsetName?: string) => {
+    const query = esql.from(index).addSetCommand('unmapped_fields', 'nullify')
+      .pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ serviceName }} AND ${esql.col(
+      SERVICE_NODE_NAME
+    )} == ${{ serviceNodeName }}`;
+    return (
+      metricsetName ? query.pipe`WHERE ${esql.col(METRICSET_NAME)} == ${{ metricsetName }}` : query
+    )
+      .keep(firstField, ...otherFields)
+      .limit(1);
+  };
+
   async function getApplicationMetricSample() {
-    const response = await apmEventClient.search(
+    const response = await apmEventClient.esql(
       'get_service_instance_metadata_details_application_metric',
       {
-        apm: {
-          events: [ProcessorEvent.metric],
-        },
-        track_total_hits: false,
-        terminate_after: 1,
-        size: 1,
-        query: {
-          bool: {
-            filter: filter.concat({ term: { [METRICSET_NAME]: 'app' } }),
-          },
-        },
-        fields,
+        apm: { events: [ProcessorEvent.metric] },
+        query: (index) => sampleQuery(index, 'app'),
+        filter,
       }
     );
 
-    const hits = maybe(response.hits.hits[0])?.fields;
+    const hits = esqlRowAsApmFields(response);
 
     return hits && accessKnownApmEventFields(hits).requireFields(requiredKeys).unflatten();
   }
 
   async function getTransactionEventSample() {
-    const response = await apmEventClient.search(
+    const response = await apmEventClient.esql(
       'get_service_instance_metadata_details_application_transaction_event',
       {
-        apm: {
-          events: [ProcessorEvent.transaction],
-        },
-        track_total_hits: false,
-        terminate_after: 1,
-        size: 1,
-        query: { bool: { filter } },
-        fields,
+        apm: { events: [ProcessorEvent.transaction] },
+        query: (index) => sampleQuery(index),
+        filter,
       }
     );
 
-    const hits = maybe(response.hits.hits[0])?.fields;
+    const hits = esqlRowAsApmFields(response);
 
     return hits && accessKnownApmEventFields(hits).unflatten();
   }
 
   async function getTransactionMetricSample() {
-    const response = await apmEventClient.search(
+    const response = await apmEventClient.esql(
       'get_service_instance_metadata_details_application_transaction_metric',
       {
-        apm: {
-          events: [getProcessorEventForTransactions(true)],
-        },
-        track_total_hits: false,
-        terminate_after: 1,
-        size: 1,
-        query: {
+        apm: { events: [getProcessorEventForTransactions(true)] },
+        query: (index) => sampleQuery(index),
+        filter: {
           bool: {
-            filter: filter.concat(getBackwardCompatibleDocumentTypeFilter(true)),
+            filter: [...rangeQuery(start, end), ...getBackwardCompatibleDocumentTypeFilter(true)],
           },
         },
-        fields,
       }
     );
 
-    const hits = maybe(response.hits.hits[0])?.fields;
+    const hits = esqlRowAsApmFields(response);
 
     return hits && accessKnownApmEventFields(hits).unflatten();
   }

@@ -20,7 +20,11 @@ import { fetchIndices, fetchSearchIndices } from './fetch_indices';
 describe('fetch indices lib functions', () => {
   const mockClient = {
     asCurrentUser: {
-      count: jest.fn().mockReturnValue({ count: 100 }),
+      esql: {
+        query: jest
+          .fn()
+          .mockReturnValue({ columns: [{ name: 'total', type: 'long' }], values: [[100]] }),
+      },
       indices: {
         get: jest.fn(),
         stats: jest.fn(),

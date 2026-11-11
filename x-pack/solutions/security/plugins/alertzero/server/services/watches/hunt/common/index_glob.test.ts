@@ -5,7 +5,39 @@
  * 2.0.
  */
 
-import { clusterCovers, compileGlob, exclusionReachesCluster, globsOverlap } from './index_glob';
+import {
+  clusterCovers,
+  compileGlob,
+  exclusionReachesCluster,
+  globsOverlap,
+  isPlainEsqlSource,
+} from './index_glob';
+
+describe('isPlainEsqlSource', () => {
+  it.each([
+    'logs-*',
+    '.alerts-security.alerts-default',
+    'remote_1:logs-aws.*',
+    'logs-foo::failures',
+  ])('accepts %j', (pattern) => {
+    expect(isPlainEsqlSource(pattern)).toBe(true);
+  });
+
+  it.each([
+    'logs-* | DROP message',
+    'logs-*|DROP message',
+    'logs-*\nFROM other',
+    'logs-a,logs-b',
+    'logs "x"',
+    '-logs-*',
+    '_hidden',
+    '+logs',
+    '',
+    `a${'b'.repeat(300)}`,
+  ])('rejects %j', (pattern) => {
+    expect(isPlainEsqlSource(pattern)).toBe(false);
+  });
+});
 
 describe('compileGlob', () => {
   it('treats only `*` as a wildcard', () => {

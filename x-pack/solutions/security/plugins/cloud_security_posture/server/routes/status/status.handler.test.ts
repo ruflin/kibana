@@ -21,6 +21,7 @@
 
 import { errors } from '@elastic/elasticsearch';
 import {
+  type ElasticsearchClientMock,
   elasticsearchServiceMock,
   httpServiceMock,
   savedObjectsClientMock,
@@ -153,7 +154,7 @@ const agentPolicyFor = (id: string): AgentPolicy =>
   } as unknown as AgentPolicy);
 
 interface OrchestrationDeps {
-  esClient: jest.Mocked<ElasticsearchClient>;
+  esClient: ElasticsearchClientMock;
   soClient: jest.Mocked<SavedObjectsClientContract>;
   agentPolicyService: ReturnType<typeof createMockAgentPolicyService>;
   agentService: ReturnType<typeof createMockAgentService>;
@@ -199,35 +200,29 @@ const createOrchestrationDeps = (): OrchestrationDeps => {
   };
 };
 
-const setupEsSearch = (esClient: jest.Mocked<ElasticsearchClient>, scenario: EsSearchScenario) => {
+const setupEsSearch = (esClient: ElasticsearchClientMock, scenario: EsSearchScenario) => {
+  esClient.esql.query.mockImplementation((req) => {
+    const { query } = req as { query: string };
+    let hasFindings: boolean;
+    if (query.startsWith(`FROM ${CDR_MISCONFIGURATIONS_INDEX_PATTERN} `)) {
+      hasFindings = scenario.hasMisconfigurationsFindings;
+    } else if (query.startsWith(`FROM ${CDR_VULNERABILITIES_INDEX_PATTERN.replace(',', ', ')} `)) {
+      hasFindings = scenario.hasVulnerabilitiesFindings;
+    } else {
+      throw new Error(`unexpected has-findings call: ${query}`);
+    }
+    return Promise.resolve({
+      columns: [{ name: '@timestamp', type: 'date' }],
+      values: hasFindings ? [['2026-01-01T00:00:00.000Z']] : [],
+    }) as unknown as ReturnType<ElasticsearchClient['esql']['query']>;
+  });
   esClient.search.mockImplementation((req) => {
     const request = req as { index: string; size?: number; query?: any };
     const index = request.index;
-    const isHasFindings = request.size === 0;
     const postureFilter = request.query?.bool?.filter?.find?.(
       (f: { term?: { safe_posture_type?: string } }) => f.term?.safe_posture_type
     );
     const posture: PostureType | undefined = postureFilter?.term?.safe_posture_type;
-
-    if (isHasFindings) {
-      if (index === CDR_MISCONFIGURATIONS_INDEX_PATTERN) {
-        return Promise.resolve({
-          hits: {
-            total: { value: scenario.hasMisconfigurationsFindings ? 1 : 0, relation: 'eq' },
-            hits: [],
-          },
-        }) as unknown as ReturnType<ElasticsearchClient['search']>;
-      }
-      if (index === CDR_VULNERABILITIES_INDEX_PATTERN) {
-        return Promise.resolve({
-          hits: {
-            total: { value: scenario.hasVulnerabilitiesFindings ? 1 : 0, relation: 'eq' },
-            hits: [],
-          },
-        }) as unknown as ReturnType<ElasticsearchClient['search']>;
-      }
-      throw new Error(`unexpected has-findings call for index=${index}`);
-    }
 
     let result: CheckIndexStatusResult;
     if (posture === 'cspm' && index === CDR_LATEST_NATIVE_MISCONFIGURATIONS_INDEX_ALIAS) {
@@ -386,6 +381,21 @@ describe('CSP status route', () => {
         const res = await callGetCspStatus(deps);
 
         expect(res.hasMisconfigurationsFindings).toBe(true);
+      });
+
+      it(`Checks for findings within the retention period with ES|QL`, async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-01-10T12:00:00.000Z'));
+        setupEsSearch(deps.esClient, emptyEsScenario());
+        setupPackagePolicies(deps.packagePolicyService, []);
+        setupAgents(deps.agentPolicyService, deps.agentService, {});
+        setupInstallation(deps.packageServiceMocks, undefined);
+
+        await callGetCspStatus(deps);
+
+        expect(deps.esClient.esql.query).toHaveBeenCalledWith({
+          query: `FROM ${CDR_MISCONFIGURATIONS_INDEX_PATTERN} | WHERE @timestamp >= TO_DATETIME(?since) AND @timestamp <= NOW() | LIMIT 1`,
+          params: [{ since: '2026-01-09T10:00:00.000Z' }],
+        });
       });
 
       it(`Return hasMisconfigurationsFindings false when there are no findings`, async () => {

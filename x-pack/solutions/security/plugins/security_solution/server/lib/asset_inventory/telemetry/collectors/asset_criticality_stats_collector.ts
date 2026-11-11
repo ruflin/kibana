@@ -6,8 +6,8 @@
  */
 
 import type { Logger, ElasticsearchClient } from '@kbn/core/server';
-import type { AggregationBucket, AggregationOnlyResponse, AssetCriticalityStats } from '../type';
-import { ENTITY_INDEX, getAggsQuery } from '../helper';
+import type { AggregationOnlyResponse, AssetCriticalityStats } from '../type';
+import { ENTITY_INDEX, getFieldTermsStats } from '../helper';
 
 /**
  * Parses aggregation buckets into a simplified list of entity stats.
@@ -39,16 +39,7 @@ export const getAssetCriticalityStats = async (
       return [];
     }
 
-    const assetCriticalityStats = await esClient.search<
-      unknown,
-      {
-        field_terms: {
-          buckets: AggregationBucket[];
-        };
-      }
-    >(getAggsQuery('asset.criticality', 10));
-
-    const buckets = assetCriticalityStats.aggregations?.field_terms?.buckets ?? [];
+    const buckets = await getFieldTermsStats(esClient, 'asset.criticality', 10);
     return parseAssetCriticalityAggs({ buckets });
   } catch (e) {
     logger.error(

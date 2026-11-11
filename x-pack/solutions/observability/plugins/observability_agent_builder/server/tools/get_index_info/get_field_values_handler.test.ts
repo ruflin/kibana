@@ -5,8 +5,10 @@
  * 2.0.
  */
 
+import { elasticsearchServiceMock } from '@kbn/core/server/mocks';
 import {
   getFieldCategory,
+  getFieldValuesHandler,
   resolveInputToConcreteFields,
   type ResolvedValidField,
 } from './get_field_values_handler';
@@ -130,5 +132,89 @@ describe('resolveInputToConcreteFields', () => {
       expect(categories).toContain('keyword');
       expect(categories).toContain('date');
     });
+  });
+});
+
+describe('getFieldValuesHandler', () => {
+  const esClient = elasticsearchServiceMock.createScopedClusterClient();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    esClient.asCurrentUser.fieldCaps.mockResolvedValue({
+      indices: ['logs-1'],
+      fields: {
+        'http.status': { long: {} as never },
+        'event.duration': { long: {} as never },
+        '@timestamp': { date: {} as never },
+        message: { text: {} as never },
+      },
+    });
+  });
+
+  const run = () =>
+    getFieldValuesHandler({
+      esClient,
+      index: 'logs-*',
+      fields: ['http.status', 'event.duration', '@timestamp', 'message'],
+      start: '2026-01-01T00:00:00.000Z',
+      end: '2026-01-01T01:00:00.000Z',
+    });
+
+  it('reads min/max of numeric and date fields and text samples with ES|QL', async () => {
+    esClient.asCurrentUser.esql.query
+      .mockResolvedValueOnce({
+        columns: [
+          { name: 'min_0', type: 'long' },
+          { name: 'max_0', type: 'long' },
+          { name: 'min_1', type: 'long' },
+          { name: 'max_1', type: 'long' },
+        ],
+        values: [[200, 500, null, null]],
+      } as never)
+      .mockResolvedValueOnce({
+        columns: [
+          { name: 'min_0', type: 'date' },
+          { name: 'max_0', type: 'date' },
+        ],
+        values: [['2026-01-01T00:00:01.000Z', '2026-01-01T00:59:00.000Z']],
+      } as never)
+      .mockResolvedValueOnce({
+        columns: [{ name: 'message', type: 'text' }],
+        values: [['first'], [['second', 'third']], [null]],
+      } as never);
+
+    const { fields } = await run();
+
+    const queries = esClient.asCurrentUser.esql.query.mock.calls.map(
+      ([request]) => (request as { query: string }).query
+    );
+    expect(queries).toEqual([
+      'FROM logs-* | STATS min_0 = MIN(`http.status`), max_0 = MAX(`http.status`), min_1 = MIN(`event.duration`), max_1 = MAX(`event.duration`)',
+      'FROM logs-* | STATS min_0 = MIN(@timestamp), max_0 = MAX(@timestamp)',
+      'FROM logs-* | KEEP message | LIMIT 5',
+    ]);
+    expect(fields['http.status']).toEqual({
+      type: 'numeric',
+      field: 'http.status',
+      min: 200,
+      max: 500,
+    });
+    expect(fields['event.duration']).toEqual({
+      type: 'error',
+      field: 'event.duration',
+      message: 'No numeric values found',
+    });
+    expect(fields['@timestamp']).toEqual({
+      type: 'date',
+      field: '@timestamp',
+      min: '2026-01-01T00:00:01.000Z',
+      max: '2026-01-01T00:59:00.000Z',
+    });
+    expect(fields.message).toEqual({
+      type: 'text',
+      field: 'message',
+      samples: ['first', 'second', 'third'],
+    });
+    expect(esClient.asCurrentUser.search).not.toHaveBeenCalled();
   });
 });

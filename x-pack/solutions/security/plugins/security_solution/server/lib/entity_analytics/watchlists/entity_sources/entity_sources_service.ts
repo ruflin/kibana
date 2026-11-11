@@ -12,6 +12,7 @@ import type {
   StartServicesAccessor,
 } from '@kbn/core/server';
 import type { SortResults } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import { CRUDClient } from '@kbn/entity-store/server/domain/crud/crud_client';
 import { getEntitiesAlias, ENTITY_LATEST } from '@kbn/entity-store/server';
 import { getFakeKibanaRequest } from '@kbn/security-plugin/server/authentication/api_keys/fake_kibana_request';
@@ -27,6 +28,7 @@ import { WatchlistConfigClient } from '../management/watchlist_config';
 import type { IdentityProvider, WatchlistsByEuid } from '../entities/service';
 import { createWatchlistEntitiesService } from '../entities/service';
 import { getIndexForWatchlist } from '../entities/utils';
+import { esqlRows, runEsqlRead } from '../../utils/esql_read';
 import { createIndexSyncService } from './sync/index_sync';
 import type { FullSyncState } from './sync/update_detection/update_detection';
 import type { SyncResult } from './sync/sources_sync';
@@ -279,21 +281,17 @@ export const createEntitySourcesService = ({
     ignoredSourceIds: string[] = [MANUAL_SOURCE_ID],
     abortSignal?: AbortSignal
   ) => {
-    const aggResponse = await esClient.search({
-      index: meta.index,
-      size: 0,
-      query: { term: { 'watchlist.id': meta.id } },
-      aggs: {
-        source_ids: { terms: { field: 'labels.source_ids', size: 100 } },
-      },
+    // `labels.source_ids` is multi-valued: `STATS ... BY` counts a document once per value, as a terms aggregation does.
+    const aggResponse = await runEsqlRead({
+      esClient,
+      query: esql.from([meta.index]).where`watchlist.id == ${{ watchlistId: meta.id }}`
+        .pipe`STATS docs = COUNT(*) BY labels.source_ids`.pipe`SORT docs DESC`.limit(100),
     });
 
     const excludedIds = new Set([...ignoredSourceIds, ...activeSourceIds]);
-    const orphanedSourceIds: string[] = (
-      (aggResponse.aggregations?.source_ids as { buckets: Array<{ key: string }> })?.buckets ?? []
-    )
-      .map((b) => b.key)
-      .filter((id) => !excludedIds.has(id));
+    const orphanedSourceIds: string[] = esqlRows(aggResponse)
+      .map((row) => row['labels.source_ids'])
+      .filter((id): id is string => typeof id === 'string' && !excludedIds.has(id));
 
     if (orphanedSourceIds.length === 0) {
       logger.debug(`[WatchlistSync] No orphaned sources for watchlist ${meta.id}`);

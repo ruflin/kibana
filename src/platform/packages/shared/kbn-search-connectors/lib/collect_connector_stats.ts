@@ -8,7 +8,7 @@
  */
 
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
-import type { AggregationsCardinalityAggregate } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type {
   Connector,
   ConnectorConfigProperties,
@@ -268,25 +268,25 @@ const dataSourceSpecificStats = async (
   return stats;
 };
 
+// Index names the ES|QL parser reads without quotes. Anything else is quoted, so that an index
+// name can never end the `FROM` command.
+const UNQUOTED_SOURCE = /^[A-Za-z0-9._*:-]+$/;
+
+const toEsqlSource = (source: string): string =>
+  UNQUOTED_SOURCE.test(source) ? source : `"${source.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+
 const tableCounts = async (
   client: ElasticsearchClient,
   indexName: string,
   tableField: string
 ): Promise<number> => {
   try {
-    const aggs = {
-      table_count: {
-        cardinality: {
-          field: `${tableField}.keyword`,
-        },
-      },
-    };
+    const { query } = esql.from([toEsqlSource(indexName)])
+      .pipe`STATS table_count = COUNT_DISTINCT(${esql.col(`${tableField}.keyword`)})`.toRequest();
+    const response = (await client.esql.query({ query })) as unknown as { values: unknown[][] };
+    const tableCount = response.values[0]?.[0];
 
-    const searchResponse = await client.search({ index: indexName, aggs, size: 0 });
-
-    return (
-      (searchResponse.aggregations?.table_count as AggregationsCardinalityAggregate).value ?? 0
-    );
+    return typeof tableCount === 'number' ? tableCount : 0;
   } catch (e) {
     return 0;
   }

@@ -7,9 +7,11 @@
 
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 
 import type { KnowledgeBaseItem } from '../../../../common/types';
 import { appContextService } from '../../app_context';
+import { esqlSources, runEsqlRead } from '../../esql_read';
 import { retryTransientEsErrors } from '../elasticsearch/retry';
 
 import { KNOWLEDGE_BASE_PATH } from './install_state_machine/steps/step_save_knowledge_base';
@@ -120,25 +122,30 @@ export async function getPackageKnowledgeBaseFromIndex(
   signal?: AbortSignal
 ): Promise<KnowledgeBaseItem[]> {
   try {
-    const query = {
-      match: { package_name: pkgName },
-    };
+    // `_source` carries the document as stored, whatever the type of `content` (`semantic_text`).
+    const response = await runEsqlRead({
+      esClient,
+      query: esql.from([INTEGRATION_KNOWLEDGE_INDEX], ['_source']).where`package_name == ${{
+        pkgName,
+      }}`
+        .keep('_source')
+        .limit(DEFAULT_SIZE),
+      // A missing index has no knowledge base content
+      ignoreUnknownIndex: true,
+      signal,
+    });
 
-    const response = await esClient.search(
-      {
-        index: INTEGRATION_KNOWLEDGE_INDEX,
-        query,
-        size: DEFAULT_SIZE,
-      },
-      signal ? { signal } : undefined
-    );
-
-    return response.hits.hits.map((hit: any) => ({
-      fileName: hit._source.filename,
-      content: hit._source.content,
-      path: `${KNOWLEDGE_BASE_PATH}${hit._source.filename}`,
-      installed_at: hit._source.installed_at,
-      version: hit._source.version,
+    return esqlSources<{
+      filename: string;
+      content: string;
+      installed_at?: string;
+      version?: string;
+    }>(response).map((source) => ({
+      fileName: source.filename,
+      content: source.content,
+      path: `${KNOWLEDGE_BASE_PATH}${source.filename}`,
+      installed_at: source.installed_at,
+      version: source.version,
     }));
   } catch (error) {
     if (error.statusCode === 404) {

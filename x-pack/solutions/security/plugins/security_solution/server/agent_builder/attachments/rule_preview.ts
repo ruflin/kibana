@@ -6,6 +6,7 @@
  */
 
 import type { SearchHit } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import { ALERT_RULE_UUID } from '@kbn/rule-data-utils';
 import { z, lazySchema } from '@kbn/zod/v4';
 import { ToolType } from '@kbn/agent-builder-common';
@@ -17,6 +18,7 @@ import type {
 import { ToolResultType, isOtherResult } from '@kbn/agent-builder-common/tools/tool_result';
 import type { ElasticsearchClient, KibanaRequest } from '@kbn/core/server';
 import { DEFAULT_PREVIEW_INDEX, SecurityAgentBuilderAttachments } from '../../../common/constants';
+import { esqlRows, runEsql } from '../../lib/esql/esql_read';
 import { securityAttachmentDataSchema } from './security_attachment_data_schema';
 
 export const rulePreviewAttachmentDataSchema = lazySchema(() =>
@@ -76,6 +78,19 @@ const isRulePreviewAttachmentData = (data: unknown): data is RulePreviewAttachme
   return rulePreviewAttachmentDataSchema.safeParse(data).success;
 };
 
+const previewAlertsQuery = ({
+  previewId,
+  spaceId,
+  metadata = [],
+}: {
+  previewId: string;
+  spaceId: string;
+  metadata?: string[];
+}) =>
+  esql.from([`${DEFAULT_PREVIEW_INDEX}-${spaceId}`], metadata).pipe`WHERE ${esql.col(
+    ALERT_RULE_UUID
+  )} == ${{ previewId }}`;
+
 export const getRulePreviewAlertCount = async ({
   esClient,
   previewId,
@@ -85,22 +100,13 @@ export const getRulePreviewAlertCount = async ({
   previewId: string;
   spaceId: string;
 }): Promise<number> => {
-  const result = await esClient.count({
-    index: `${DEFAULT_PREVIEW_INDEX}-${spaceId}`,
-    query: {
-      bool: {
-        filter: [
-          {
-            term: {
-              [ALERT_RULE_UUID]: previewId,
-            },
-          },
-        ],
-      },
-    },
+  const response = await runEsql({
+    esClient,
+    query: previewAlertsQuery({ previewId, spaceId }).pipe`STATS total = COUNT(*)`,
   });
+  const total = esqlRows(response)[0]?.total;
 
-  return result.count;
+  return typeof total === 'number' ? total : 0;
 };
 
 const getRulePreviewAlertsTool = (): BuiltinAttachmentBoundedTool<
@@ -112,28 +118,32 @@ const getRulePreviewAlertsTool = (): BuiltinAttachmentBoundedTool<
     'Fetch the preview alerts generated for a security rule preview. Provide the previewId shown in the rule preview attachment.',
   schema: getRulePreviewAlertsToolSchema,
   handler: async ({ previewId, size = DEFAULT_ALERTS_SIZE }, context) => {
-    const searchResult = await context.esClient.asCurrentUser.search<RulePreviewAlertSource>({
-      index: `${DEFAULT_PREVIEW_INDEX}-${context.spaceId}`,
-      size,
-      track_total_hits: true,
-      query: {
-        bool: {
-          filter: [
-            {
-              term: {
-                [ALERT_RULE_UUID]: previewId,
-              },
-            },
-          ],
-        },
-      },
-      sort: [{ '@timestamp': { order: 'desc' } }],
-    });
+    const esClient = context.esClient.asCurrentUser;
+    const [alertsResponse, totalResponse] = await Promise.all([
+      runEsql({
+        esClient,
+        query: previewAlertsQuery({
+          previewId,
+          spaceId: context.spaceId,
+          metadata: ['_id', '_index', '_source'],
+        }).pipe`SORT @timestamp DESC NULLS LAST`.limit(size),
+      }),
+      runEsql({
+        esClient,
+        query: previewAlertsQuery({ previewId, spaceId: context.spaceId })
+          .pipe`STATS total = COUNT(*)`,
+      }),
+    ]);
 
-    const total =
-      typeof searchResult.hits.total === 'number'
-        ? searchResult.hits.total
-        : searchResult.hits.total?.value ?? 0;
+    const alerts = esqlRows(alertsResponse).map(
+      ({ _id, _index, _source }): SearchHit<RulePreviewAlertSource> => ({
+        _id: typeof _id === 'string' ? _id : undefined,
+        _index: typeof _index === 'string' ? _index : '',
+        _source: _source as RulePreviewAlertSource,
+      })
+    );
+    const totalValue = esqlRows(totalResponse)[0]?.total;
+    const total = typeof totalValue === 'number' ? totalValue : 0;
 
     return {
       results: [
@@ -142,7 +152,7 @@ const getRulePreviewAlertsTool = (): BuiltinAttachmentBoundedTool<
           data: {
             previewId,
             total,
-            alerts: searchResult.hits.hits,
+            alerts,
           } satisfies RulePreviewAlertsToolResult,
         },
       ],

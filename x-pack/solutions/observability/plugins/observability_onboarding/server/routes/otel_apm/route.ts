@@ -8,7 +8,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import * as t from 'io-ts';
 import Boom from '@hapi/boom';
-import type { estypes } from '@elastic/elasticsearch';
 import { createManagedOtlpServiceApiKey } from '../../lib/api_key/create_managed_otlp_service_api_key';
 import { hasLogMonitoringPrivileges } from '../../lib/api_key/has_log_monitoring_privileges';
 import { createObservabilityOnboardingServerRoute } from '../create_observability_onboarding_server_route';
@@ -18,6 +17,7 @@ import {
   throwHasDataSearchError,
 } from '../../lib/handle_has_data_search_error';
 import { checkPreExistingData } from '../../lib/check_pre_existing_data';
+import { hasDocuments } from '../../lib/esql';
 
 const createOtelApmOnboardingFlowRoute = createObservabilityOnboardingServerRoute({
   endpoint: 'POST /internal/observability_onboarding/otel_apm/flow',
@@ -84,29 +84,17 @@ const hasOtelApmDataRoute = createObservabilityOnboardingServerRoute({
     ];
 
     try {
-      const filters: estypes.QueryDslQueryContainer[] = [
-        { range: { '@timestamp': { gte: start } } },
-      ];
-      if (serviceName) {
-        filters.push({ term: { 'service.name': serviceName } });
-      }
-      const query: estypes.QueryDslQueryContainer = {
-        bool: { filter: filters },
-      };
-
-      const [preExisting, result] = await Promise.all([
+      const [preExisting, hasData] = await Promise.all([
         checkPreExistingData(elasticsearch.client.asCurrentUser, apmIndices, start),
-        elasticsearch.client.asCurrentUser.search({
-          index: apmIndices,
-          ignore_unavailable: true,
-          allow_partial_search_results: true,
-          size: 0,
-          terminate_after: 1,
-          query,
+        hasDocuments({
+          esClient: elasticsearch.client.asCurrentUser,
+          indices: apmIndices,
+          terms: serviceName ? [{ field: 'service.name', value: serviceName }] : [],
+          // `start` is client-supplied, so the range stays a request filter (Query DSL).
+          filter: { range: { '@timestamp': { gte: start } } },
         }),
       ]);
 
-      const hasData = (result.hits.total as estypes.SearchTotalHits).value > 0;
       return { hasData, hasPreExistingData: preExisting || undefined };
     } catch (error) {
       if (isNoShardsAvailableError(error)) {

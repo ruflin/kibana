@@ -107,6 +107,9 @@ describe('BACKFILL_SCRIPT', () => {
   });
 });
 
+const countResponse = (count: number) =>
+  ({ columns: [{ name: 'count', type: 'long' }], values: [[count]] } as any);
+
 describe('backfillIndex', () => {
   const target: BackfillTarget = {
     index: AGENT_POLICY_INDEX,
@@ -123,7 +126,7 @@ describe('backfillIndex', () => {
   });
 
   it('only counts the documents when there is nothing to backfill', async () => {
-    esClient.count.mockResolvedValue({ count: 0 } as any);
+    esClient.esql.query.mockResolvedValue(countResponse(0));
 
     const result = await backfillIndex(esClient, target, { logger });
 
@@ -132,10 +135,36 @@ describe('backfillIndex', () => {
     expect(logger.info).not.toHaveBeenCalled();
   });
 
+  it('counts the documents with a policy_id and without a policy_base_id', async () => {
+    esClient.esql.query.mockResolvedValue(countResponse(0));
+
+    await backfillIndex(esClient, target, { logger });
+
+    expect(esClient.esql.query).toHaveBeenCalledWith({
+      query: `FROM ${AGENT_POLICY_INDEX} | WHERE policy_id IS NOT NULL AND policy_base_id IS NULL | STATS count = COUNT(*)`,
+      params: [],
+    });
+  });
+
+  it('counts no documents when the index does not exist', async () => {
+    esClient.esql.query.mockRejectedValue(
+      Object.assign(new Error('Unknown index'), {
+        statusCode: 400,
+        body: {
+          error: { type: 'verification_exception', reason: 'Unknown index [.fleet-policies]' },
+        },
+      })
+    );
+
+    const result = await backfillIndex(esClient, target, { logger });
+
+    expect(result).toEqual({ label: 'fleet-policies', status: 'completed', updated: 0 });
+  });
+
   it('updates the documents in bounded batches until a batch is not full', async () => {
-    esClient.count
-      .mockResolvedValueOnce({ count: 70 } as any)
-      .mockResolvedValueOnce({ count: 0 } as any);
+    esClient.esql.query
+      .mockResolvedValueOnce(countResponse(70))
+      .mockResolvedValueOnce(countResponse(0));
     esClient.updateByQuery
       .mockResolvedValueOnce({ total: 50, updated: 50 } as any)
       .mockResolvedValueOnce({ total: 20, updated: 20 } as any);
@@ -166,10 +195,10 @@ describe('backfillIndex', () => {
   });
 
   it('continues after a batch that is not full when documents were skipped on a conflict', async () => {
-    esClient.count
-      .mockResolvedValueOnce({ count: 21 } as any)
-      .mockResolvedValueOnce({ count: 1 } as any)
-      .mockResolvedValueOnce({ count: 0 } as any);
+    esClient.esql.query
+      .mockResolvedValueOnce(countResponse(21))
+      .mockResolvedValueOnce(countResponse(1))
+      .mockResolvedValueOnce(countResponse(0));
     esClient.updateByQuery
       .mockResolvedValueOnce({ total: 20, updated: 19, version_conflicts: 1 } as any)
       .mockResolvedValueOnce({ total: 1, updated: 1 } as any);
@@ -181,9 +210,9 @@ describe('backfillIndex', () => {
   });
 
   it('stops at the time budget and reports the remaining documents', async () => {
-    esClient.count.mockResolvedValueOnce({ count: 120 } as any).mockResolvedValueOnce({
-      count: 70,
-    } as any);
+    esClient.esql.query
+      .mockResolvedValueOnce(countResponse(120))
+      .mockResolvedValueOnce(countResponse(70));
     esClient.updateByQuery.mockResolvedValue({ total: 50, updated: 50 } as any);
     const now = jest.spyOn(Date, 'now');
     // deadline is 0 + 1000, the second batch starts at 2000
@@ -200,8 +229,8 @@ describe('backfillIndex', () => {
   });
 
   it('reports a partial run when the final count is rejected after the time budget', async () => {
-    esClient.count
-      .mockResolvedValueOnce({ count: 120 } as any)
+    esClient.esql.query
+      .mockResolvedValueOnce(countResponse(120))
       .mockRejectedValueOnce(
         Object.assign(new Error('[parent] Data too large'), { statusCode: 429 })
       );
@@ -213,7 +242,7 @@ describe('backfillIndex', () => {
     now.mockRestore();
 
     expect(result).toEqual({ label: 'fleet-policies', status: 'partial', updated: 50 });
-    expect(esClient.count).toHaveBeenCalledTimes(2);
+    expect(esClient.esql.query).toHaveBeenCalledTimes(2);
     expect(logger.info).toHaveBeenCalledWith(
       'Backfilled policy_base_id on 50 fleet-policies documents: partial, remaining unknown, continuing on the next run'
     );
@@ -221,7 +250,7 @@ describe('backfillIndex', () => {
   });
 
   it('passes the signal to Elasticsearch and does not count after a cancelled request', async () => {
-    esClient.count.mockResolvedValue({ count: 120 } as any);
+    esClient.esql.query.mockResolvedValue(countResponse(120));
     const abortController = new AbortController();
     esClient.updateByQuery.mockImplementation(async () => {
       abortController.abort();
@@ -234,8 +263,8 @@ describe('backfillIndex', () => {
     });
 
     expect(result).toEqual({ label: 'fleet-policies', status: 'partial', updated: 0 });
-    expect(esClient.count).toHaveBeenCalledTimes(1);
-    expect(esClient.count).toHaveBeenCalledWith(expect.anything(), {
+    expect(esClient.esql.query).toHaveBeenCalledTimes(1);
+    expect(esClient.esql.query).toHaveBeenCalledWith(expect.anything(), {
       signal: abortController.signal,
     });
     expect(esClient.updateByQuery).toHaveBeenCalledWith(expect.anything(), {
@@ -248,7 +277,7 @@ describe('backfillIndex', () => {
   });
 
   it('stops when the signal is aborted', async () => {
-    esClient.count.mockResolvedValue({ count: 120 } as any);
+    esClient.esql.query.mockResolvedValue(countResponse(120));
     const abortController = new AbortController();
     esClient.updateByQuery.mockImplementation(async () => {
       abortController.abort();
@@ -263,11 +292,11 @@ describe('backfillIndex', () => {
     expect(result.status).toBe('partial');
     expect(esClient.updateByQuery).toHaveBeenCalledTimes(1);
     // no count of the remaining documents after the cancellation
-    expect(esClient.count).toHaveBeenCalledTimes(1);
+    expect(esClient.esql.query).toHaveBeenCalledTimes(1);
   });
 
   it('stops when a full batch updates nothing', async () => {
-    esClient.count.mockResolvedValue({ count: 50 } as any);
+    esClient.esql.query.mockResolvedValue(countResponse(50));
     esClient.updateByQuery.mockResolvedValue({ total: 50, updated: 0, noops: 50 } as any);
 
     const result = await backfillIndex(esClient, target, { logger });
@@ -277,7 +306,7 @@ describe('backfillIndex', () => {
   });
 
   it('reports a failed batch with the documents updated before it, without throwing', async () => {
-    esClient.count.mockResolvedValue({ count: 120 } as any);
+    esClient.esql.query.mockResolvedValue(countResponse(120));
     esClient.updateByQuery
       .mockResolvedValueOnce({ total: 50, updated: 50 } as any)
       .mockRejectedValueOnce(new Error('circuit_breaking_exception'));
@@ -309,9 +338,9 @@ describe('backfillIndex retries', () => {
   });
 
   it('retries a batch rejected by a circuit breaker instead of waiting for the next setup', async () => {
-    esClient.count
-      .mockResolvedValueOnce({ count: 10 } as any)
-      .mockResolvedValueOnce({ count: 0 } as any);
+    esClient.esql.query
+      .mockResolvedValueOnce(countResponse(10))
+      .mockResolvedValueOnce(countResponse(0));
     esClient.updateByQuery
       .mockRejectedValueOnce(rejected(429, '[parent] Data too large'))
       .mockRejectedValueOnce(rejected(429, '[parent] Data too large'))
@@ -328,21 +357,21 @@ describe('backfillIndex retries', () => {
   });
 
   it('retries the counts', async () => {
-    esClient.count
+    esClient.esql.query
       .mockRejectedValueOnce(rejected(429))
-      .mockResolvedValueOnce({ count: 10 } as any)
+      .mockResolvedValueOnce(countResponse(10))
       .mockRejectedValueOnce(rejected(503))
-      .mockResolvedValueOnce({ count: 0 } as any);
+      .mockResolvedValueOnce(countResponse(0));
     esClient.updateByQuery.mockResolvedValue({ total: 10, updated: 10 } as any);
 
     const result = await backfillIndex(esClient, target, { logger, retryBaseDelayMs: 0 });
 
     expect(result.status).toBe('completed');
-    expect(esClient.count).toHaveBeenCalledTimes(4);
+    expect(esClient.esql.query).toHaveBeenCalledTimes(4);
   });
 
   it('doubles the delay of consecutive retries and starts over after a success', async () => {
-    esClient.count.mockResolvedValue({ count: 100 } as any);
+    esClient.esql.query.mockResolvedValue(countResponse(100));
     esClient.updateByQuery
       .mockRejectedValueOnce(rejected(429))
       .mockRejectedValueOnce(rejected(429))
@@ -365,7 +394,7 @@ describe('backfillIndex retries', () => {
   });
 
   it('does not retry an error that is not transient', async () => {
-    esClient.count.mockResolvedValue({ count: 10 } as any);
+    esClient.esql.query.mockResolvedValue(countResponse(10));
     esClient.updateByQuery.mockRejectedValue(rejected(400, 'script_exception'));
 
     const result = await backfillIndex(esClient, target, { logger, retryBaseDelayMs: 0 });
@@ -375,7 +404,7 @@ describe('backfillIndex retries', () => {
   });
 
   it('gives up when the delay does not fit in the time budget', async () => {
-    esClient.count.mockResolvedValue({ count: 10 } as any);
+    esClient.esql.query.mockResolvedValue(countResponse(10));
     esClient.updateByQuery.mockRejectedValue(rejected(429));
 
     const result = await backfillIndex(esClient, target, {
@@ -392,7 +421,7 @@ describe('backfillIndex retries', () => {
   });
 
   it('stops waiting to retry when the signal is aborted', async () => {
-    esClient.count.mockResolvedValue({ count: 10 } as any);
+    esClient.esql.query.mockResolvedValue(countResponse(10));
     esClient.updateByQuery.mockRejectedValue(rejected(429));
     const controller = new AbortController();
     setImmediate(() => controller.abort());
@@ -412,11 +441,11 @@ describe('backfillPolicyBaseId', () => {
   it('backfills the indices one after the other with their batch sizes', async () => {
     const esClient = elasticsearchServiceMock.createElasticsearchClient();
     const logger = loggingSystemMock.createLogger();
-    esClient.count
-      .mockResolvedValueOnce({ count: 1 } as any)
-      .mockResolvedValueOnce({ count: 0 } as any)
-      .mockResolvedValueOnce({ count: 1 } as any)
-      .mockResolvedValueOnce({ count: 0 } as any);
+    esClient.esql.query
+      .mockResolvedValueOnce(countResponse(1))
+      .mockResolvedValueOnce(countResponse(0))
+      .mockResolvedValueOnce(countResponse(1))
+      .mockResolvedValueOnce(countResponse(0));
     let running = 0;
     esClient.updateByQuery.mockImplementation(async () => {
       running++;
@@ -441,10 +470,10 @@ describe('backfillPolicyBaseId', () => {
   it('continues with the next index when one fails', async () => {
     const esClient = elasticsearchServiceMock.createElasticsearchClient();
     const logger = loggingSystemMock.createLogger();
-    esClient.count
-      .mockResolvedValueOnce({ count: 1 } as any)
-      .mockResolvedValueOnce({ count: 1 } as any)
-      .mockResolvedValueOnce({ count: 0 } as any);
+    esClient.esql.query
+      .mockResolvedValueOnce(countResponse(1))
+      .mockResolvedValueOnce(countResponse(1))
+      .mockResolvedValueOnce(countResponse(0));
     esClient.updateByQuery
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ total: 1, updated: 1 } as any);

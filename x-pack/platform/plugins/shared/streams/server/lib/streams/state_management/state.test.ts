@@ -40,10 +40,14 @@ const placeholderStreamDefinition: Streams.WiredStream.Definition = {
 };
 
 describe('State', () => {
-  const searchMock = jest.fn();
+  const esqlMock = jest.fn();
   const storageClientMock = {
-    search: searchMock,
+    esql: esqlMock,
   };
+  const sourceRows = (...sources: unknown[]) => ({
+    columns: [{ name: '_source', type: 'object' }],
+    values: sources.map((source) => [source]),
+  });
   const stateDependenciesMock = {
     storageClient: storageClientMock,
     lockManager: {
@@ -84,12 +88,7 @@ describe('State', () => {
       },
     };
 
-    searchMock.mockImplementationOnce(() => ({
-      hits: {
-        hits: [{ _source: wiredStream }, { _source: classicStream }],
-        total: { value: 2 },
-      },
-    }));
+    esqlMock.mockImplementationOnce(() => sourceRows(wiredStream, classicStream));
 
     const currentState = await State.currentState(stateDependenciesMock);
 
@@ -102,12 +101,7 @@ describe('State', () => {
   });
 
   it('fails to load if an unsupported stream type is stored', async () => {
-    searchMock.mockImplementationOnce(() => ({
-      hits: {
-        hits: [{ _source: { name: 'test_stream', unknown: {} } }],
-        total: { value: 1 },
-      },
-    }));
+    esqlMock.mockImplementationOnce(() => sourceRows({ name: 'test_stream', unknown: {} }));
 
     await expect(async () => await State.currentState(stateDependenciesMock)).rejects.toThrow(
       'Failed to load current Streams state: Unsupported stream type'
@@ -115,15 +109,9 @@ describe('State', () => {
   });
 
   it('does not allow modifying the starting state', async () => {
-    searchMock.mockImplementationOnce(() => ({
-      hits: {
-        hits: [
-          { _source: { name: 'test_stream', unknown: {} } },
-          { _source: { name: 'other_test_stream', unknown: {} } },
-        ],
-        total: { value: 2 },
-      },
-    }));
+    esqlMock.mockImplementationOnce(() =>
+      sourceRows({ name: 'test_stream', unknown: {} }, { name: 'other_test_stream', unknown: {} })
+    );
 
     jest
       .spyOn(streamFromDefinition, 'streamFromDefinition')
@@ -146,12 +134,7 @@ describe('State', () => {
   });
 
   it('prevents excessive cascading changes', async () => {
-    searchMock.mockImplementationOnce(() => ({
-      hits: {
-        hits: [{ _source: { name: 'test_stream', unknown: {} } }],
-        total: { value: 1 },
-      },
-    }));
+    esqlMock.mockImplementationOnce(() => sourceRows({ name: 'test_stream', unknown: {} }));
 
     jest
       .spyOn(streamFromDefinition, 'streamFromDefinition')
@@ -172,12 +155,7 @@ describe('State', () => {
   });
 
   it('reports when it fails to make the desired changes', async () => {
-    searchMock.mockImplementationOnce(() => ({
-      hits: {
-        hits: [],
-        total: { value: 0 },
-      },
-    }));
+    esqlMock.mockImplementationOnce(() => sourceRows());
 
     jest
       .spyOn(streamFromDefinition, 'streamFromDefinition')
@@ -198,12 +176,7 @@ describe('State', () => {
   });
 
   it('delegates control to StreamActiveRecord and ExecutionPlan', async () => {
-    searchMock.mockImplementationOnce(() => ({
-      hits: {
-        hits: [{ _source: { name: 'test_stream', unknown: {} } }],
-        total: { value: 1 },
-      },
-    }));
+    esqlMock.mockImplementationOnce(() => sourceRows({ name: 'test_stream', unknown: {} }));
 
     const FlowStream = flowStream();
 

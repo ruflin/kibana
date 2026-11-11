@@ -8,6 +8,7 @@
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import type { AttackDiscoveries } from '@kbn/elastic-assistant-common';
 
+import { esqlRows, runEsql } from '../../../../lib/esql_read';
 import { getAlertIdsQuery } from './get_alert_ids_query';
 import { getValidDiscoveries } from './get_valid_discoveries';
 import { logFilteredDiscoveries } from './log_filtered_discoveries';
@@ -48,12 +49,17 @@ export const filterHallucinatedAlerts = async ({
   const uniqueAlertIds = new Set(verifiableDiscoveries.flatMap((discovery) => discovery.alertIds));
 
   // 3. Query ES once for all unique alert IDs
-  const query = getAlertIdsQuery(alertsIndexPattern, [...uniqueAlertIds]);
-  const searchResult = await esClient.search(query);
+  const response = await runEsql({
+    esClient,
+    query: getAlertIdsQuery(alertsIndexPattern, [...uniqueAlertIds]),
+    ignoreUnknownIndex: true,
+  });
 
   // 4. Build a Set of alert IDs that actually exist and filter discoveries
   const existingAlertIds = new Set(
-    searchResult.hits.hits.map((hit) => hit._id).filter((id): id is string => id != null)
+    esqlRows(response)
+      .map((row) => row._id)
+      .filter((id): id is string => typeof id === 'string')
   );
 
   const validDiscoveries = getValidDiscoveries({

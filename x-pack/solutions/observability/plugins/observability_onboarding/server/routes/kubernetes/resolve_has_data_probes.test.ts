@@ -6,17 +6,14 @@
  */
 
 import { errors } from '@elastic/elasticsearch';
-import type { estypes } from '@elastic/elasticsearch';
 import { resolveProbe } from './resolve_has_data_probes';
 
-const fulfilledWithHits = (count: number): PromiseSettledResult<estypes.SearchResponse> => ({
+const fulfilledWithHits = (count: number): PromiseSettledResult<boolean> => ({
   status: 'fulfilled',
-  value: {
-    hits: { total: { value: count, relation: 'eq' }, max_score: null, hits: [] },
-  } as unknown as estypes.SearchResponse,
+  value: count > 0,
 });
 
-const rejectedWith = (error: Error): PromiseSettledResult<estypes.SearchResponse> => ({
+const rejectedWith = (error: Error): PromiseSettledResult<boolean> => ({
   status: 'rejected',
   reason: error,
 });

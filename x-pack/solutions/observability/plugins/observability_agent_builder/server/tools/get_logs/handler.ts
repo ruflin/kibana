@@ -15,7 +15,7 @@ import { computeSamplingProbability } from '../../utils/compute_sampling_probabi
 import { timeRangeFilter, kqlFilter as kqlFilterToDsl } from '../../utils/dsl_filters';
 import type { TypedSearch } from '../../utils/get_typed_search';
 import { getTypedSearch } from '../../utils/get_typed_search';
-import { getTotalHits } from '../../utils/get_total_hits';
+import { esqlCount } from '../../utils/esql_read';
 import { unwrapEsFields } from '../../utils/unwrap_es_fields';
 import { parseDatemath } from '../../utils/time';
 import { FACET_FIELDS, MAX_FIELD_VALUE_LENGTH } from './constants';
@@ -71,14 +71,11 @@ export async function getLogsHandler({
     ...kqlFilterToDsl(kqlFilter),
   ];
 
-  const countResponse = await searchClient({
+  const totalCount = await esqlCount({
+    esClient,
     index,
-    size: 0,
-    track_total_hits: true,
-    query: { bool: { filter: baseFilter } },
+    filter: { bool: { filter: baseFilter } },
   });
-
-  const totalCount = getTotalHits(countResponse);
 
   if (totalCount === 0) {
     return { histogram: [], totalCount: 0, samples: [], categories: [], topValues: {} };

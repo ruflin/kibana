@@ -29,7 +29,7 @@ describe('generateApiKey lib function for connector clients', () => {
       indices: {
         create: jest.fn(),
       },
-      search: jest.fn(),
+      esql: { query: jest.fn() },
       security: {
         createApiKey: jest.fn(),
         invalidateApiKey: jest.fn(),
@@ -43,11 +43,13 @@ describe('generateApiKey lib function for connector clients', () => {
   });
 
   it('should create an API key if index does not have a connector', async () => {
-    mockClient.asCurrentUser.search.mockImplementation(() =>
+    mockClient.asCurrentUser.esql.query.mockImplementation(() =>
       Promise.resolve({
-        hits: {
-          hits: [],
-        },
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [],
       })
     );
     mockClient.asCurrentUser.index.mockImplementation(() => ({
@@ -83,11 +85,13 @@ describe('generateApiKey lib function for connector clients', () => {
     expect(updateConnectorSecret).toHaveBeenCalledTimes(0);
   });
   it('should create an API key plus connector for connectors', async () => {
-    mockClient.asCurrentUser.search.mockImplementation(() =>
+    mockClient.asCurrentUser.esql.query.mockImplementation(() =>
       Promise.resolve({
-        hits: {
-          hits: [{ _id: 'connectorId', _source: { doc: 'doc' } }],
-        },
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [['connectorId', { doc: 'doc' }]],
       })
     );
     mockClient.asCurrentUser.index.mockImplementation(() => ({
@@ -118,6 +122,11 @@ describe('generateApiKey lib function for connector clients', () => {
         },
       },
     });
+    expect(mockClient.asCurrentUser.esql.query).toHaveBeenCalledWith({
+      query:
+        'FROM .elastic-connectors METADATA _id, _source | WHERE index_name == ?indexName | KEEP _id, _source | LIMIT 1',
+      params: [{ indexName: 'search-test' }],
+    });
     expect(mockClient.asCurrentUser.index).toHaveBeenCalledWith({
       document: { api_key_id: 'apiKeyId', doc: 'doc' },
       id: 'connectorId',
@@ -128,17 +137,13 @@ describe('generateApiKey lib function for connector clients', () => {
     expect(updateConnectorSecret).toHaveBeenCalledTimes(0);
   });
   it('should invalidate API key if already defined', async () => {
-    mockClient.asCurrentUser.search.mockImplementation(() =>
+    mockClient.asCurrentUser.esql.query.mockImplementation(() =>
       Promise.resolve({
-        hits: {
-          hits: [
-            {
-              _id: 'connectorId',
-              _source: { api_key_id: '1', doc: 'doc' },
-              fields: { api_key_id: '1' },
-            },
-          ],
-        },
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [['connectorId', { api_key_id: '1', doc: 'doc' }]],
       })
     );
     mockClient.asCurrentUser.index.mockImplementation(() => ({
@@ -189,7 +194,7 @@ describe('generateApiKey lib function for native connectors', () => {
       indices: {
         create: jest.fn(),
       },
-      search: jest.fn(),
+      esql: { query: jest.fn() },
       security: {
         createApiKey: jest.fn(),
         invalidateApiKey: jest.fn(),
@@ -203,11 +208,13 @@ describe('generateApiKey lib function for native connectors', () => {
   });
 
   it('should create an API key if index does not have a connector', async () => {
-    mockClient.asCurrentUser.search.mockImplementation(() =>
+    mockClient.asCurrentUser.esql.query.mockImplementation(() =>
       Promise.resolve({
-        hits: {
-          hits: [],
-        },
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [],
       })
     );
     mockClient.asCurrentUser.index.mockImplementation(() => ({
@@ -243,11 +250,13 @@ describe('generateApiKey lib function for native connectors', () => {
     expect(updateConnectorSecret).toHaveBeenCalledTimes(0);
   });
   it('should create an API key plus connector for connectors', async () => {
-    mockClient.asCurrentUser.search.mockImplementation(() =>
+    mockClient.asCurrentUser.esql.query.mockImplementation(() =>
       Promise.resolve({
-        hits: {
-          hits: [{ _id: 'connectorId', _source: { doc: 'doc' } }],
-        },
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [['connectorId', { doc: 'doc' }]],
       })
     );
     mockClient.asCurrentUser.index.mockImplementation(() => ({
@@ -290,17 +299,13 @@ describe('generateApiKey lib function for native connectors', () => {
     expect(updateConnectorSecret).toHaveBeenCalledTimes(0);
   });
   it('should invalidate API key if already defined', async () => {
-    mockClient.asCurrentUser.search.mockImplementation(() =>
+    mockClient.asCurrentUser.esql.query.mockImplementation(() =>
       Promise.resolve({
-        hits: {
-          hits: [
-            {
-              _id: 'connectorId',
-              _source: { api_key_id: '1', api_key_secret_id: '2', doc: 'doc' },
-              fields: { api_key_id: '1' },
-            },
-          ],
-        },
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [['connectorId', { api_key_id: '1', api_key_secret_id: '2', doc: 'doc' }]],
       })
     );
     mockClient.asCurrentUser.index.mockImplementation(() => ({

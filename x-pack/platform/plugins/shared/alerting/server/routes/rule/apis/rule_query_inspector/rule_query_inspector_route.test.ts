@@ -64,14 +64,15 @@ const mockGetAlertIndicesAlias = jest
 const createMockCoreSetup = (alertDoc?: Record<string, unknown>) => {
   const coreSetup = coreMock.createSetup();
   const mockSearch = jest.fn().mockResolvedValue({
-    hits: { hits: alertDoc ? [{ _source: alertDoc }] : [] },
+    columns: [{ name: '_source', type: 'unsupported' }],
+    values: alertDoc ? [[alertDoc]] : [],
   });
   coreSetup.getStartServices.mockResolvedValue([
     {
       elasticsearch: {
         client: {
           asScoped: () => ({
-            asCurrentUser: { search: mockSearch },
+            asCurrentUser: { esql: { query: mockSearch } },
           }),
         },
       },
@@ -176,7 +177,7 @@ describe('ruleQueryInspectorRoute', () => {
     const router = httpServiceMock.createRouter();
     const mockQueryInspector = jest.fn().mockResolvedValue(mockInspectorResponse);
     const ruleTypeRegistry = createMockRuleTypeRegistry(mockQueryInspector);
-    const { coreSetup } = createMockCoreSetup(mockAlertDoc);
+    const { coreSetup, mockSearch } = createMockCoreSetup(mockAlertDoc);
 
     ruleQueryInspectorRoute(
       router,
@@ -199,6 +200,11 @@ describe('ruleQueryInspectorRoute', () => {
 
     await handler(context, req, res);
 
+    expect(mockSearch.mock.calls[0][0]).toEqual({
+      query:
+        'FROM .alerts-observability.custom_threshold-default METADATA _source | WHERE kibana.alert.uuid == ?alertId | LIMIT 1',
+      params: [{ alertId: 'alert-456' }],
+    });
     expect(mockQueryInspector).toHaveBeenCalledWith(
       req,
       mockAlertDoc[ALERT_RULE_PARAMETERS],

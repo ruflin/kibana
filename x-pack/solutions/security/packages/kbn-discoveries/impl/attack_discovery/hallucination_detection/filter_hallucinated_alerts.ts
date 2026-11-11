@@ -5,13 +5,16 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import { runEsqlRead } from '../esql_helpers';
 import type { DiscoveryWithAlertIds } from './types';
 import { getAlertIds } from './types';
-import { getAlertIdsQuery } from './get_alert_ids_query';
 import { getValidDiscoveries } from './get_valid_discoveries';
 import { logFilteredDiscoveries } from './log_filtered_discoveries';
 import { logUnverifiableDiscoveries } from './log_unverifiable_discoveries';
+
+const ALERT_IDS_BATCH_SIZE = 1000;
 
 interface FilterHallucinatedAlertsParams<T extends DiscoveryWithAlertIds> {
   alertsIndexPattern: string;
@@ -56,14 +59,26 @@ export const filterHallucinatedAlerts = async <T extends DiscoveryWithAlertIds>(
     verifiableDiscoveries.flatMap((discovery) => getAlertIds(discovery))
   );
 
-  // 3. Query ES once for all unique alert IDs
-  const query = getAlertIdsQuery(alertsIndexPattern, [...uniqueAlertIds]);
-  const searchResult = await esClient.search(query);
+  // 3. Query ES for all unique alert IDs (in batches, to bound the size of each query).
+  // A missing alerts index has no alerts, so every ID is unknown.
+  const existingAlertIds = new Set<string>();
+  const ids = [...uniqueAlertIds];
+  for (let offset = 0; offset < ids.length; offset += ALERT_IDS_BATCH_SIZE) {
+    const batch = ids.slice(offset, offset + ALERT_IDS_BATCH_SIZE);
+    const response = await runEsqlRead({
+      esClient,
+      query: esql.from([alertsIndexPattern], ['_id']).pipe`WHERE _id IN (${batch.map((id) =>
+        esql.str(id)
+      )})`
+        .keep('_id')
+        .limit(batch.length),
+    });
 
-  // 4. Build a Set of alert IDs that actually exist and filter discoveries
-  const existingAlertIds = new Set(
-    searchResult.hits.hits.map((hit) => hit._id).filter((id): id is string => id != null)
-  );
+    // 4. Collect the alert IDs that actually exist
+    for (const [id] of response?.values ?? []) {
+      if (typeof id === 'string') existingAlertIds.add(id);
+    }
+  }
 
   const validDiscoveries = getValidDiscoveries({
     attackDiscoveries: verifiableDiscoveries,

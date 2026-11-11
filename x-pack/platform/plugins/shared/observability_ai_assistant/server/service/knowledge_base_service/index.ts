@@ -6,6 +6,7 @@
  */
 
 import { serverUnavailable } from '@hapi/boom';
+import { esql } from '@elastic/esql';
 import type { CoreSetup, ElasticsearchClient, IUiSettingsClient } from '@kbn/core/server';
 import type { Logger } from '@kbn/logging';
 import { orderBy } from 'lodash';
@@ -23,6 +24,7 @@ import { KnowledgeBaseEntryRole, KnowledgeBaseType } from '../../../common/types
 import { getAccessQuery, getUserAccessFilters } from '../util/get_access_query';
 import { getCategoryQuery } from '../util/get_category_query';
 import { getSpaceQuery } from '../util/get_space_query';
+import { type EsqlRow, runEsqlRows } from '../util/esql_read';
 import {
   deleteInferenceEndpoint,
   getInferenceEndpointsForEmbedding,
@@ -60,6 +62,9 @@ export interface RecalledEntry {
   esScore: number | null;
   labels?: Record<string, string>;
 }
+
+const toId = (row: EsqlRow | undefined): string | undefined =>
+  typeof row?._id === 'string' ? row._id : undefined;
 
 function throwKnowledgeBaseNotReady(error: Error) {
   throw serverUnavailable(`Knowledge base is not ready yet: ${error.message}`);
@@ -292,9 +297,11 @@ export class KnowledgeBaseService {
     }
 
     try {
-      const response = await this.dependencies.esClient.asInternalUser.search<KnowledgeBaseEntry>({
-        index: resourceNames.writeIndexAlias.kb,
-        query: {
+      const rows = await runEsqlRows({
+        esClient: this.dependencies.esClient.asInternalUser,
+        query: esql.from([resourceNames.writeIndexAlias.kb], ['_id', '_source'])
+          .pipe`KEEP _id, _source`.limit(500),
+        filter: {
           bool: {
             filter: [
               {
@@ -306,15 +313,16 @@ export class KnowledgeBaseService {
             ],
           },
         },
-        size: 500,
-        _source: ['id', 'text', 'public'],
       });
 
-      return response.hits.hits.map((hit) => ({
-        id: hit._id!,
-        text: hit._source?.text ?? '',
-        public: hit._source?.public,
-      }));
+      return rows.map((row) => {
+        const source = row._source as Pick<KnowledgeBaseEntry, 'text' | 'public'> | undefined;
+        return {
+          id: String(row._id),
+          text: source?.text ?? '',
+          public: source?.public,
+        };
+      });
     } catch (error) {
       this.dependencies.logger.error('Failed to load instructions from knowledge base');
       this.dependencies.logger.error(error);
@@ -388,19 +396,12 @@ export class KnowledgeBaseService {
   };
 
   hasEntries = async () => {
-    const response = await this.dependencies.esClient.asInternalUser.search<KnowledgeBaseEntry>({
-      index: resourceNames.writeIndexAlias.kb,
-      size: 0,
-      track_total_hits: 1,
-      terminate_after: 1,
+    const rows = await runEsqlRows({
+      esClient: this.dependencies.esClient.asInternalUser,
+      query: esql.from([resourceNames.writeIndexAlias.kb], ['_id']).pipe`KEEP _id`.limit(1),
     });
 
-    const hitCount =
-      typeof response.hits.total === 'number'
-        ? response.hits.total
-        : response.hits.total?.value ?? 0;
-
-    return hitCount > 0;
+    return rows.length > 0;
   };
 
   getPersonalUserInstructionId = async ({
@@ -415,9 +416,10 @@ export class KnowledgeBaseService {
     if (!this.dependencies.config.enableKnowledgeBase) {
       return null;
     }
-    const res = await this.dependencies.esClient.asInternalUser.search<KnowledgeBaseEntry>({
-      index: resourceNames.writeIndexAlias.kb,
-      query: {
+    const rows = await runEsqlRows({
+      esClient: this.dependencies.esClient.asInternalUser,
+      query: esql.from([resourceNames.writeIndexAlias.kb], ['_id']).pipe`KEEP _id`.limit(1),
+      filter: {
         bool: {
           filter: [
             { term: { type: KnowledgeBaseType.UserInstruction } },
@@ -432,11 +434,9 @@ export class KnowledgeBaseService {
           ],
         },
       },
-      size: 1,
-      _source: false,
     });
 
-    return res.hits.hits[0]?._id;
+    return toId(rows[0]);
   };
 
   getUuidFromDocId = async ({
@@ -448,28 +448,25 @@ export class KnowledgeBaseService {
     user?: { name: string; id?: string };
     namespace?: string;
   }) => {
-    const query = {
-      bool: {
-        filter: [
-          { term: { doc_id: docId } },
+    const rows = await runEsqlRows({
+      esClient: this.dependencies.esClient.asInternalUser,
+      query: esql.from([resourceNames.writeIndexAlias.kb], ['_id']).pipe`KEEP _id`.limit(1),
+      filter: {
+        bool: {
+          filter: [
+            { term: { doc_id: docId } },
 
-          // exclude user instructions
-          { bool: { must_not: { term: { type: KnowledgeBaseType.UserInstruction } } } },
+            // exclude user instructions
+            { bool: { must_not: { term: { type: KnowledgeBaseType.UserInstruction } } } },
 
-          // restrict access to user's own entries
-          ...getAccessQuery({ user, namespace }),
-        ],
+            // restrict access to user's own entries
+            ...getAccessQuery({ user, namespace }),
+          ],
+        },
       },
-    };
-
-    const response = await this.dependencies.esClient.asInternalUser.search<KnowledgeBaseEntry>({
-      size: 1,
-      index: resourceNames.writeIndexAlias.kb,
-      query,
-      _source: false,
     });
 
-    return response.hits.hits[0]?._id;
+    return toId(rows[0]);
   };
 
   addEntry = async ({

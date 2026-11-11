@@ -78,12 +78,15 @@ describe('Agents CRUD test', () => {
   let mockContract: ReturnType<typeof createAppContextStartContractMock>;
   let esClientMock: ElasticsearchClient;
   let searchMock: jest.Mock;
+  let esqlQueryMock: jest.Mock;
 
   beforeEach(() => {
     searchMock = jest.fn();
+    esqlQueryMock = jest.fn();
     soClientMock.find = jest.fn().mockResolvedValue({ saved_objects: [] });
     esClientMock = {
       search: searchMock,
+      esql: { query: esqlQueryMock },
       openPointInTime: jest.fn().mockResolvedValue({ id: '1' }),
       closePointInTime: jest.fn(),
     } as unknown as ElasticsearchClient;
@@ -238,7 +241,7 @@ describe('Agents CRUD test', () => {
       ]);
 
       expect(result).toEqual(['agent1', 'agent2']);
-      expect(searchMock).not.toHaveBeenCalled();
+      expect(esqlQueryMock).not.toHaveBeenCalled();
     });
 
     it('should return empty array when input is empty', async () => {
@@ -247,14 +250,15 @@ describe('Agents CRUD test', () => {
       const result = await filterAgentIdsByNamespace(esClientMock, soClientMock, []);
 
       expect(result).toEqual([]);
-      expect(searchMock).not.toHaveBeenCalled();
+      expect(esqlQueryMock).not.toHaveBeenCalled();
     });
 
     it('should filter ids by namespace when space awareness is enabled', async () => {
       isSpaceAwarenessEnabledMock.mockResolvedValue(true);
       (soClientMock.getCurrentNamespace as jest.Mock).mockReturnValue('finance');
-      searchMock.mockResolvedValueOnce({
-        hits: { hits: [{ _id: 'agent1' }] },
+      esqlQueryMock.mockResolvedValueOnce({
+        columns: [{ name: '_id', type: 'keyword' }],
+        values: [['agent1']],
       });
 
       const result = await filterAgentIdsByNamespace(esClientMock, soClientMock, [
@@ -263,16 +267,18 @@ describe('Agents CRUD test', () => {
       ]);
 
       expect(result).toEqual(['agent1']);
-      expect(searchMock).toHaveBeenCalledWith(
+      expect(esqlQueryMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          index: AGENTS_INDEX,
-          query: expect.objectContaining({
-            bool: expect.objectContaining({
-              filter: expect.arrayContaining([{ terms: { _id: ['agent1', 'agent2'] } }]),
-            }),
-          }),
+          query: expect.stringContaining(`FROM ${AGENTS_INDEX} METADATA _id`),
+          params: [{ agentIds: ['agent1', 'agent2'] }],
+          // multi-valued `namespaces` stays in the Query DSL filter
+          filter: expect.objectContaining({ bool: expect.anything() }),
         })
       );
+      expect((esqlQueryMock.mock.calls[0][0] as { query: string }).query).toContain(
+        'WHERE _id IN (?agentIds)'
+      );
+      expect((esqlQueryMock.mock.calls[0][0] as { query: string }).query).toContain('LIMIT 2');
     });
   });
 
@@ -1237,8 +1243,8 @@ describe('Agents CRUD test', () => {
 
 describe('getAgentVersionsForAgentPolicyIds', () => {
   it('returns an empty array when no policy ids are provided', async () => {
-    const searchMock = jest.fn();
-    const esClientMock = { search: searchMock } as unknown as ElasticsearchClient;
+    const queryMock = jest.fn();
+    const esClientMock = { esql: { query: queryMock } } as unknown as ElasticsearchClient;
 
     const result = await getAgentVersionsForAgentPolicyIds(
       esClientMock,
@@ -1247,36 +1253,24 @@ describe('getAgentVersionsForAgentPolicyIds', () => {
     );
 
     expect(result).toEqual([]);
-    expect(searchMock).not.toHaveBeenCalled();
+    expect(queryMock).not.toHaveBeenCalled();
   });
 
   it('queries with a term-or-variant filter and rolls up version-specific variants under their base policy id', async () => {
-    const searchMock = jest.fn().mockResolvedValue({
-      hits: {
-        hits: [
-          {
-            _source: {
-              policy_id: 'policy-a',
-              local_metadata: { elastic: { agent: { version: '8.15.0' } } },
-            },
-          },
-          {
-            // version-specific variant of policy-a — must roll up under 'policy-a'
-            _source: {
-              policy_id: 'policy-a#8.16',
-              local_metadata: { elastic: { agent: { version: '8.16.0' } } },
-            },
-          },
-          {
-            _source: {
-              policy_id: 'policy-b',
-              local_metadata: { elastic: { agent: { version: '8.15.0' } } },
-            },
-          },
-        ],
-      },
+    const queryMock = jest.fn().mockResolvedValue({
+      columns: [
+        { name: 'policy_base_id', type: 'keyword' },
+        { name: 'policy_id', type: 'keyword' },
+        { name: 'local_metadata.elastic.agent.version', type: 'text' },
+      ],
+      values: [
+        [null, 'policy-a', '8.15.0'],
+        // version-specific variant of policy-a, must roll up under 'policy-a'
+        [null, 'policy-a#8.16', '8.16.0'],
+        ['policy-b', 'policy-b', '8.15.0'],
+      ],
     });
-    const esClientMock = { search: searchMock } as unknown as ElasticsearchClient;
+    const esClientMock = { esql: { query: queryMock } } as unknown as ElasticsearchClient;
 
     const result = await getAgentVersionsForAgentPolicyIds(
       esClientMock,
@@ -1284,23 +1278,18 @@ describe('getAgentVersionsForAgentPolicyIds', () => {
       ['policy-a', 'policy-b']
     );
 
-    expect(searchMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        query: {
-          bool: {
-            filter: [
-              expect.objectContaining({
-                bool: expect.objectContaining({
-                  should: expect.arrayContaining([
-                    { terms: { policy_base_id: ['policy-a', 'policy-b'] } },
-                  ]),
-                }),
-              }),
-            ],
-          },
-        },
-      })
+    const request = queryMock.mock.calls[0][0];
+    expect(request.query).toContain(
+      'WHERE (policy_base_id IN (?baseIds)) OR (policy_id IN (?p1)) AND policy_base_id IS NULL'
     );
+    expect(request.query).toContain(
+      'KEEP policy_base_id, policy_id, local_metadata.elastic.agent.version'
+    );
+    expect(request.query).toContain('LIMIT 10000');
+    expect(request.params).toEqual([
+      { baseIds: ['policy-a', 'policy-b'] },
+      { p1: ['policy-a', 'policy-b'] },
+    ]);
 
     expect(result).toEqual(
       expect.arrayContaining([

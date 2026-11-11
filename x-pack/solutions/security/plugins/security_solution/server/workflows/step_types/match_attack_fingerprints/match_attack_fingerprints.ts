@@ -6,12 +6,14 @@
  */
 
 import type { QueryDslQueryContainer, SortResults } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 import { asSpaceId } from '@kbn/core-spaces-common';
 import { isNotFoundError } from '@kbn/es-errors';
 import { KibanaApiCallError } from '@kbn/workflows-extensions/server';
 import type { StepHandlerContext } from '@kbn/workflows-extensions/server';
 import { DEFAULT_ALERTS_INDEX } from '../../../../common/constants';
+import { esqlRows, runEsql } from '../../../lib/esql/esql_read';
 import { MAX_ALERT_IDS } from '../../../../common/workflows/step_types/common/constants';
 import { DEFAULT_MAX_ENTITIES } from '../../../../common/workflows/step_types/get_alert_entities_step/get_alert_entities_step_common';
 import { getAlertEntities } from '../get_alert_entities_step/get_alert_entities';
@@ -216,23 +218,18 @@ const readAlertSpan = async (
   if (alertIds.length === 0) {
     return {};
   }
-  const response = await esClient.search(
-    {
-      index: `${DEFAULT_ALERTS_INDEX}-${asSpaceId(spaceId)}`,
-      size: 0,
-      expand_wildcards: ['open', 'hidden'],
-      query: { ids: { values: [...alertIds.slice(0, MAX_ALERT_IDS)] } },
-      aggs: {
-        first: { min: { field: '@timestamp' } },
-        last: { max: { field: '@timestamp' } },
-      },
-    },
-    { signal: abortSignal }
-  );
-  const aggs = response.aggregations as
-    | { first?: { value_as_string?: string }; last?: { value_as_string?: string } }
-    | undefined;
-  return { first: aggs?.first?.value_as_string, last: aggs?.last?.value_as_string };
+  const response = await runEsql({
+    esClient,
+    query: esql.from([`${DEFAULT_ALERTS_INDEX}-${asSpaceId(spaceId)}`]).pipe`WHERE _id IN (${{
+      alertIds: alertIds.slice(0, MAX_ALERT_IDS),
+    }})`.pipe`STATS first_at = MIN(@timestamp), last_at = MAX(@timestamp)`,
+    signal: abortSignal,
+    ignoreUnknownIndex: true,
+  });
+  const [row] = esqlRows(response);
+  const asTimestamp = (value: unknown): string | undefined =>
+    typeof value === 'string' ? value : undefined;
+  return { first: asTimestamp(row?.first_at), last: asTimestamp(row?.last_at) };
 };
 
 const enrichAttack = async (
@@ -292,7 +289,8 @@ const enrichAttack = async (
 
 const fieldStrings = (fields: Record<string, unknown>, key: string): string[] => {
   const value = fields[key];
-  const list = Array.isArray(value) ? value : [];
+  // ES|QL gives a single value as a scalar and several as an array
+  const list = Array.isArray(value) ? value : [value];
   return list.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
 };
 
@@ -306,20 +304,17 @@ const readEntityPairs = async (
   if (alertIds.length === 0) {
     return [];
   }
-  const response = await esClient.search(
-    {
-      index: `${DEFAULT_ALERTS_INDEX}-${asSpaceId(spaceId)}`,
-      size: alertIds.length,
-      expand_wildcards: ['open', 'hidden'],
-      _source: false,
-      fields: ['host.name', 'user.name'],
-      query: { ids: { values: [...alertIds] } },
-    },
-    { signal: abortSignal }
-  );
+  const response = await runEsql({
+    esClient,
+    query: esql.from([`${DEFAULT_ALERTS_INDEX}-${asSpaceId(spaceId)}`]).pipe`WHERE _id IN (${{
+      alertIds: [...alertIds],
+    }})`
+      .keep('host.name', 'user.name')
+      .limit(alertIds.length),
+    signal: abortSignal,
+  });
   const pairs: string[] = [];
-  for (const hit of response.hits?.hits ?? []) {
-    const fields = (hit.fields ?? {}) as Record<string, unknown>;
+  for (const fields of esqlRows(response)) {
     const hosts = fieldStrings(fields, 'host.name');
     const users = fieldStrings(fields, 'user.name');
     for (const host of hosts) {

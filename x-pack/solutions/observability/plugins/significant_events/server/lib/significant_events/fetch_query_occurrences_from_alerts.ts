@@ -214,27 +214,15 @@ export async function computeOccurrences(
   // Widen the write-time `@timestamp` prune by MAX_WRITE_DELAY so late rule
   // runs (cadence + jitter) for in-window minutes are still candidates; ES|QL
   // then drops out-of-window source buckets.
-  const writeTimePrune = {
-    bool: {
-      filter: [
-        {
-          range: {
-            '@timestamp': {
-              gte: rangeFromIso,
-              lte: new Date(
-                effectiveTo.getTime() + parseDuration(METRIC_SERIES_MAX_WRITE_DELAY)
-              ).toISOString(),
-            },
-          },
-        },
-      ],
-    },
-  };
+  const writeTimeToIso = new Date(
+    effectiveTo.getTime() + parseDuration(METRIC_SERIES_MAX_WRITE_DELAY)
+  ).toISOString();
 
   const runBatch = async (batchRuleIds: string[]): Promise<UnparsedEsqlResponse | null> => {
     try {
-      return await esClient.esql('significant_events_alerts_occurrences', {
-        ...alertsReader.buildOccurrencesEsqlRequest({
+      return await esClient.esql(
+        'significant_events_alerts_occurrences',
+        alertsReader.buildOccurrencesEsqlRequest({
           ruleIds: batchRuleIds,
           value,
           esqlUnit,
@@ -242,9 +230,9 @@ export async function computeOccurrences(
           spaceId,
           rangeFromIso,
           rangeToIso,
-        }),
-        filter: writeTimePrune,
-      });
+          writeTimeToIso,
+        })
+      );
     } catch (err) {
       const { type, message } = parseError(err);
       if (type === 'security_exception') {

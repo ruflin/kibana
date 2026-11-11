@@ -122,8 +122,8 @@ describe('deprecation logging API', () => {
         routeHandlerContextMock.core.elasticsearch.client.asCurrentUser.indices.exists as jest.Mock
       ).mockResolvedValue(true);
       (
-        routeHandlerContextMock.core.elasticsearch.client.asCurrentUser.count as jest.Mock
-      ).mockResolvedValue({ count: 10 });
+        routeHandlerContextMock.core.elasticsearch.client.asCurrentUser.esql.query as jest.Mock
+      ).mockResolvedValue({ columns: [{ name: 'count', type: 'long' }], values: [[10]] });
 
       const resp = await routeDependencies.router.getHandler({
         method: 'get',
@@ -136,6 +136,19 @@ describe('deprecation logging API', () => {
 
       expect(resp.status).toEqual(200);
       expect(resp.payload).toEqual({ count: 10 });
+
+      const request = (
+        routeHandlerContextMock.core.elasticsearch.client.asCurrentUser.esql.query as jest.Mock
+      ).mock.calls[0][0];
+      // documents without an origin count too
+      expect(request.query).toBe(
+        'FROM .logs-deprecation.elasticsearch-default | WHERE @timestamp >= TO_DATETIME(?from) AND @timestamp <= TO_DATETIME(?now) AND (`elasticsearch.elastic_product_origin` IS NULL OR NOT (`elasticsearch.elastic_product_origin` IN (?origins))) | STATS count = COUNT(*)'
+      );
+      expect(request.params).toEqual([
+        { from: MOCK_FROM_DATE },
+        { now: expect.any(String) },
+        { origins: expect.arrayContaining(['kibana', 'fleet']) },
+      ]);
     });
 
     it('returns zero matches when deprecation logs index is not created', async () => {

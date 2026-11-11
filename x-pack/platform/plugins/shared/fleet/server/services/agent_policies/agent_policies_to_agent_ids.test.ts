@@ -8,54 +8,23 @@
 import type { ElasticsearchClientMock } from '@kbn/core-elasticsearch-client-server-mocks';
 import { elasticsearchServiceMock } from '@kbn/core-elasticsearch-server-mocks';
 
-import { buildPolicyBaseIdsWithFallbackEsFilter } from '../../../common/services/version_specific_policies_utils';
-
 import { getAgentIdsForAgentPolicies } from './agent_policies_to_agent_ids';
 
 describe('getAgentIdsForAgentPolicies', () => {
   let esClientMock: ElasticsearchClientMock;
   let agentPolicyIds: string[];
-  let agents: Array<{ _index: string; _id: string; _score: number }>;
+  let agents: string[];
 
   beforeEach(() => {
     agentPolicyIds = ['agent-policy-id-a', 'agent-policy-id-b'];
 
-    agents = [
-      {
-        _index: '.fleet-agents-7',
-        _id: 'agent-id-a',
-        _score: 0,
-      },
-      {
-        _index: '.fleet-agents-7',
-        _id: 'agent-id-b',
-        _score: 0,
-      },
-      {
-        _index: '.fleet-agents-7',
-        _id: 'agent-id-c',
-        _score: 0,
-      },
-    ];
+    agents = ['agent-id-a', 'agent-id-b', 'agent-id-c'];
 
     esClientMock = elasticsearchServiceMock.createClusterClient().asInternalUser;
-    esClientMock.search.mockImplementation(async () => {
-      return {
-        took: 3,
-        timed_out: false,
-        _shards: {
-          total: 2,
-          successful: 2,
-          skipped: 0,
-          failed: 0,
-        },
-        hits: {
-          total: 100,
-          max_score: 0,
-          hits: agents,
-        },
-      };
-    });
+    esClientMock.esql.query.mockImplementation((async () => ({
+      columns: [{ name: '_id', type: 'keyword' }],
+      values: agents.map((id) => [id]),
+    })) as any);
   });
 
   it('should return an array of agent ids', async () => {
@@ -74,12 +43,11 @@ describe('getAgentIdsForAgentPolicies', () => {
   it('should match the agents on a version specific or the sentinel policy of the agent policies', async () => {
     await getAgentIdsForAgentPolicies(esClientMock, agentPolicyIds);
 
-    const { query } = esClientMock.search.mock.calls[0][0] as any;
-    expect(query).toEqual({
-      bool: { filter: [buildPolicyBaseIdsWithFallbackEsFilter(agentPolicyIds)] },
-    });
+    const request = esClientMock.esql.query.mock.calls[0][0] as any;
     // by `policy_base_id`, so `<id>#sentinel` agents match, and not by a prefix on `policy_id`
-    expect(JSON.stringify(query)).toContain('"policy_base_id":["agent-policy-id-a"');
-    expect(JSON.stringify(query)).not.toContain('prefix');
+    expect(request.query).toEqual(
+      'FROM .fleet-agents METADATA _id | WHERE (policy_base_id IN (?baseIds)) OR (policy_id IN (?p1)) AND policy_base_id IS NULL | KEEP _id | LIMIT 100'
+    );
+    expect(request.params).toEqual([{ baseIds: agentPolicyIds }, { p1: agentPolicyIds }]);
   });
 });

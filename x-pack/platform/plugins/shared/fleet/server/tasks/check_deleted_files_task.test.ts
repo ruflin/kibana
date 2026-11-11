@@ -102,90 +102,46 @@ describe('check deleted files task', () => {
     };
 
     it('should search both metadata indexes', async () => {
-      esClient.search.mockResolvedValue({
-        took: 5,
-        timed_out: false,
-        _shards: {
-          total: 1,
-          successful: 1,
-          skipped: 0,
-          failed: 0,
-        },
-        hits: {
-          total: {
-            value: 0,
-            relation: 'eq',
-          },
-          hits: [],
-        },
+      esClient.esql.query.mockResolvedValue({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_index', type: 'keyword' },
+        ],
+        values: [],
       });
 
       await runTask();
 
-      expect(esClient.search).toHaveBeenCalledWith(
+      expect(esClient.esql.query).toHaveBeenCalledWith(
         expect.objectContaining({
-          index: ['.fleet-fileds-fromhost-meta-*', '.fleet-fileds-tohost-meta-*'],
+          query: expect.stringContaining(
+            'FROM .fleet-fileds-fromhost-meta-*, .fleet-fileds-tohost-meta-*'
+          ),
         }),
         expect.anything()
       );
     });
 
     it('should attempt to update deleted files', async () => {
-      // mock getReadyFiles search
-      esClient.search
+      esClient.esql.query
+        // mock getReadyFiles query
         .mockResolvedValueOnce({
-          took: 5,
-          timed_out: false,
-          _shards: {
-            total: 1,
-            successful: 1,
-            skipped: 0,
-            failed: 0,
-          },
-          hits: {
-            total: {
-              value: 1,
-              relation: 'eq',
-            },
-            hits: [
-              {
-                _id: 'metadata-testid1',
-                _index: MOCK_FILE_METADATA_INDEX,
-                _source: { file: { status: 'READY' } },
-              },
-              {
-                _id: 'metadata-testid2',
-                _index: MOCK_FILE_METADATA_INDEX,
-                _source: { file: { status: 'READY' } },
-              },
-            ],
-          },
+          columns: [
+            { name: '_id', type: 'keyword' },
+            { name: '_index', type: 'keyword' },
+          ],
+          values: [
+            ['metadata-testid1', MOCK_FILE_METADATA_INDEX],
+            ['metadata-testid2', MOCK_FILE_METADATA_INDEX],
+          ],
         })
-        // mock doFilesHaveChunks search
+        // mock doFilesHaveChunks query
         .mockResolvedValueOnce({
-          took: 5,
-          timed_out: false,
-          _shards: {
-            total: 1,
-            successful: 1,
-            skipped: 0,
-            failed: 0,
-          },
-          hits: {
-            total: {
-              value: 0,
-              relation: 'eq',
-            },
-            hits: [
-              {
-                _id: 'data-testid1',
-                _index: MOCK_FILE_DATA_INDEX,
-                _source: {
-                  bid: 'metadata-testid1',
-                },
-              },
-            ],
-          },
+          columns: [
+            { name: 'bid', type: 'keyword' },
+            { name: '_index', type: 'keyword' },
+          ],
+          values: [['metadata-testid1', MOCK_FILE_DATA_INDEX]],
         });
 
       await runTask();
@@ -211,7 +167,7 @@ describe('check deleted files task', () => {
     it('should not run if task is outdated', async () => {
       const result = await runTask({ ...MOCK_TASK_INSTANCE, id: 'old-id' });
 
-      expect(esClient.search).not.toHaveBeenCalled();
+      expect(esClient.esql.query).not.toHaveBeenCalled();
       expect(esClient.updateByQuery).not.toHaveBeenCalled();
 
       expect(result).toEqual(getDeleteTaskRunResult());

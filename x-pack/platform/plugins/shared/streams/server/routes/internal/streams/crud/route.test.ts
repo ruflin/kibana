@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import { listStreamsRoute, resolveIndexPatternsRoute } from './route';
+import { listStreamsRoute, resolveIndexPatternsRoute, streamDetailRoute } from './route';
 
 jest.mock('../../../../lib/streams/stream_crud', () => ({
   getDataStreamLifecycle: jest.fn((dataStream: { name: string } | null) => ({
@@ -143,6 +143,38 @@ describe('POST /internal/streams/_resolve_index_patterns', () => {
     });
     expect(result).toEqual({
       indices: ['custom-logs', 'logs-application.otel-prod'],
+    });
+  });
+});
+
+const detailRoute = streamDetailRoute['GET /internal/streams/{name}/_details'];
+
+type DetailHandlerParams = Parameters<typeof detailRoute.handler>[0];
+
+describe('GET /internal/streams/{name}/_details', () => {
+  const callDetails = (query: jest.Mock) =>
+    detailRoute.handler({
+      request: {},
+      params: { path: { name: 'logs' }, query: { start: 'now-15m', end: 'now' } },
+      getScopedClients: jest.fn().mockResolvedValue({
+        streamsClient: { getStream: jest.fn().mockResolvedValue({ name: 'logs' }) },
+        scopedClusterClient: { asCurrentUser: { esql: { query } } },
+      }),
+      telemetry: {
+        startTrackingEndpointLatency: jest.fn().mockReturnValue(jest.fn()),
+        reportStreamsStateError: jest.fn(),
+      },
+    } as unknown as DetailHandlerParams);
+
+  it('counts the documents in the time range with a request filter', async () => {
+    const query = jest.fn().mockResolvedValue({ columns: [{ name: 'count' }], values: [[42]] });
+
+    await expect(callDetails(query)).resolves.toEqual({ details: { count: 42 } });
+
+    expect(query).toHaveBeenCalledWith({
+      query: 'FROM logs | STATS count = COUNT(*)',
+      params: [],
+      filter: { range: { '@timestamp': { gte: 'now-15m', lte: 'now' } } },
     });
   });
 });

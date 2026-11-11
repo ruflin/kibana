@@ -6,49 +6,19 @@
  */
 
 import { getIsUsingTransactionEvents } from './get_is_using_transaction_events';
-import type { SearchParamsMock } from '../../../utils/test_helpers';
-import { inspectSearchParams } from '../../../utils/test_helpers';
+import type { EsqlParamsMock } from '../../../utils/esql_test_helpers';
+import { inspectEsqlParams, toEsqlRequest } from '../../../utils/esql_test_helpers';
 import { SearchAggregatedTransactionSetting } from '../../../../common/aggregated_transactions';
 
-const mockResponseNoHits = {
-  took: 398,
-  timed_out: false,
-  _shards: {
-    total: 1,
-    successful: 1,
-    skipped: 0,
-    failed: 0,
-  },
-  hits: {
-    total: {
-      value: 0,
-      relation: 'gte' as const,
-      max_score: 0,
-    },
-    hits: [],
-  },
-};
+const mockResponseNoHits = { columns: [{ name: '@timestamp', type: 'date' as const }], values: [] };
 
 const mockResponseSomeHits = {
-  took: 398,
-  timed_out: false,
-  _shards: {
-    total: 1,
-    successful: 1,
-    skipped: 0,
-    failed: 0,
-  },
-  hits: {
-    total: {
-      value: 3,
-      relation: 'gte' as const,
-    },
-    hits: [],
-  },
+  columns: [{ name: '@timestamp', type: 'date' as const }],
+  values: [['2024-01-01T00:00:00.000Z']],
 };
 
 describe('getIsUsingTransactionEvents', () => {
-  let mock: SearchParamsMock;
+  let mock: EsqlParamsMock;
 
   afterEach(() => {
     mock.teardown();
@@ -60,7 +30,7 @@ describe('getIsUsingTransactionEvents', () => {
     };
 
     it('should be false', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
@@ -73,7 +43,7 @@ describe('getIsUsingTransactionEvents', () => {
     });
 
     it('should not query for data', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
@@ -82,7 +52,7 @@ describe('getIsUsingTransactionEvents', () => {
           }),
         { config }
       );
-      expect(mock.spy).toHaveBeenCalledTimes(0);
+      expect(mock.esqlSpy).toHaveBeenCalledTimes(0);
     });
   });
 
@@ -91,7 +61,7 @@ describe('getIsUsingTransactionEvents', () => {
       searchAggregatedTransactions: SearchAggregatedTransactionSetting.always,
     };
     it('should be false when kuery is empty', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
@@ -104,7 +74,7 @@ describe('getIsUsingTransactionEvents', () => {
     });
 
     it('should be false when kuery is set and metrics data found', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
@@ -113,12 +83,10 @@ describe('getIsUsingTransactionEvents', () => {
           }),
         {
           config,
-          mockResponse: (request) => {
-            // @ts-expect-error upgrade typescript v4.9.5
+          mockEsqlResponse: (request) => {
             if (request === 'get_has_aggregated_transactions') {
               return mockResponseSomeHits;
             }
-            // @ts-expect-error upgrade typescript v4.9.5
             if (request === 'get_has_transactions') {
               return mockResponseNoHits;
             }
@@ -126,12 +94,12 @@ describe('getIsUsingTransactionEvents', () => {
           },
         }
       );
-      expect(mock.spy).toHaveBeenCalledTimes(1);
+      expect(mock.esqlSpy).toHaveBeenCalledTimes(1);
       expect(mock.response).toBe(false);
     });
 
     it('should be true when kuery is set and metrics data are not found', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
@@ -140,12 +108,10 @@ describe('getIsUsingTransactionEvents', () => {
           }),
         {
           config,
-          mockResponse: (request) => {
-            // @ts-expect-error upgrade typescript v4.9.5
+          mockEsqlResponse: (request) => {
             if (request === 'get_has_aggregated_transactions') {
               return mockResponseNoHits;
             }
-            // @ts-expect-error upgrade typescript v4.9.5
             if (request === 'get_has_transactions') {
               return mockResponseSomeHits;
             }
@@ -153,12 +119,12 @@ describe('getIsUsingTransactionEvents', () => {
           },
         }
       );
-      expect(mock.spy).toHaveBeenCalledTimes(2);
+      expect(mock.esqlSpy).toHaveBeenCalledTimes(2);
       expect(mock.response).toBe(true);
     });
 
     it('should not query for data when kuery is empty', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
@@ -167,21 +133,21 @@ describe('getIsUsingTransactionEvents', () => {
           }),
         { config }
       );
-      expect(mock.spy).toHaveBeenCalledTimes(0);
+      expect(mock.esqlSpy).toHaveBeenCalledTimes(0);
     });
 
     it('should query for data when kuery is set', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
             apmEventClient: mockApmEventClient,
             kuery: 'proccessor.event: "transaction"',
           }),
-        { config }
+        { config, mockEsqlResponse: () => mockResponseSomeHits }
       );
-      expect(mock.spy).toHaveBeenCalledTimes(1);
-      expect(mock.params).toMatchSnapshot();
+      expect(mock.esqlSpy).toHaveBeenCalledTimes(1);
+      expect(toEsqlRequest(mock.params)).toMatchSnapshot();
     });
   });
 
@@ -191,7 +157,7 @@ describe('getIsUsingTransactionEvents', () => {
     };
 
     it('should query for data once if metrics data found', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
@@ -200,12 +166,10 @@ describe('getIsUsingTransactionEvents', () => {
           }),
         {
           config,
-          mockResponse: (request) => {
-            // @ts-expect-error upgrade typescript v4.9.5
+          mockEsqlResponse: (request) => {
             if (request === 'get_has_aggregated_transactions') {
               return mockResponseSomeHits;
             }
-            // @ts-expect-error upgrade typescript v4.9.5
             if (request === 'get_has_transactions') {
               return mockResponseNoHits;
             }
@@ -213,12 +177,12 @@ describe('getIsUsingTransactionEvents', () => {
           },
         }
       );
-      expect(mock.spy).toHaveBeenCalledTimes(1);
-      expect(mock.params).toMatchSnapshot();
+      expect(mock.esqlSpy).toHaveBeenCalledTimes(1);
+      expect(toEsqlRequest(mock.params)).toMatchSnapshot();
     });
 
     it('should query for data twice if metrics data not found', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
@@ -227,12 +191,10 @@ describe('getIsUsingTransactionEvents', () => {
           }),
         {
           config,
-          mockResponse: (request) => {
-            // @ts-expect-error upgrade typescript v4.9.5
+          mockEsqlResponse: (request) => {
             if (request === 'get_has_aggregated_transactions') {
               return mockResponseNoHits;
             }
-            // @ts-expect-error upgrade typescript v4.9.5
             if (request === 'get_has_transactions') {
               return mockResponseSomeHits;
             }
@@ -240,12 +202,17 @@ describe('getIsUsingTransactionEvents', () => {
           },
         }
       );
-      expect(mock.spy).toHaveBeenCalledTimes(2);
-      expect(mock.spy.mock.calls).toMatchSnapshot();
+      expect(mock.esqlSpy).toHaveBeenCalledTimes(2);
+      expect(
+        mock.esqlSpy.mock.calls.map(([operationName, params]) => ({
+          operationName,
+          ...toEsqlRequest(params),
+        }))
+      ).toMatchSnapshot();
     });
 
     it('should be false if metrics data are found', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
@@ -254,12 +221,10 @@ describe('getIsUsingTransactionEvents', () => {
           }),
         {
           config,
-          mockResponse: (request) => {
-            // @ts-expect-error upgrade typescript v4.9.5
+          mockEsqlResponse: (request) => {
             if (request === 'get_has_aggregated_transactions') {
               return mockResponseSomeHits;
             }
-            // @ts-expect-error upgrade typescript v4.9.5
             if (request === 'get_has_transactions') {
               return mockResponseNoHits;
             }
@@ -271,7 +236,7 @@ describe('getIsUsingTransactionEvents', () => {
     });
 
     it('should be true if no metrics data are found', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
@@ -280,12 +245,10 @@ describe('getIsUsingTransactionEvents', () => {
           }),
         {
           config,
-          mockResponse: (request) => {
-            // @ts-expect-error upgrade typescript v4.9.5
+          mockEsqlResponse: (request) => {
             if (request === 'get_has_aggregated_transactions') {
               return mockResponseNoHits;
             }
-            // @ts-expect-error upgrade typescript v4.9.5
             if (request === 'get_has_transactions') {
               return mockResponseSomeHits;
             }
@@ -297,14 +260,14 @@ describe('getIsUsingTransactionEvents', () => {
     });
 
     it('should be false if no metrics or transactions data are found', async () => {
-      mock = await inspectSearchParams(
+      mock = await inspectEsqlParams(
         ({ mockApmEventClient, mockConfig }) =>
           getIsUsingTransactionEvents({
             config: mockConfig,
             apmEventClient: mockApmEventClient,
             kuery: '',
           }),
-        { config, mockResponse: () => mockResponseNoHits }
+        { config, mockEsqlResponse: () => mockResponseNoHits }
       );
       expect(mock.response).toBe(false);
     });

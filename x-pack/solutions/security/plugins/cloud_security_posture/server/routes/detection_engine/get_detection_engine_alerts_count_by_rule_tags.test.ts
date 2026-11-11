@@ -5,9 +5,12 @@
  * 2.0.
  */
 
-import { httpServiceMock } from '@kbn/core/server/mocks';
+import { elasticsearchServiceMock, httpServiceMock } from '@kbn/core/server/mocks';
 import type { CspRouter } from '../../types';
-import { defineGetDetectionEngineAlertsStatus } from './get_detection_engine_alerts_count_by_rule_tags';
+import {
+  defineGetDetectionEngineAlertsStatus,
+  getDetectionEngineAlertsCountByRuleTags,
+} from './get_detection_engine_alerts_count_by_rule_tags';
 
 describe('detection engine alerts status request validation', () => {
   it('accepts rule tags up to the alerting limit of 512 characters and rejects longer tags', () => {
@@ -22,5 +25,30 @@ describe('detection engine alerts status request validation', () => {
 
     expect(() => querySchema.validate({ tags: ['a'.repeat(512)] })).not.toThrow();
     expect(() => querySchema.validate({ tags: ['a'.repeat(513)] })).toThrow();
+  });
+});
+
+describe('getDetectionEngineAlertsCountByRuleTags', () => {
+  it('counts alerts with ES|QL and keeps the multi-valued tag terms in the request filter', async () => {
+    const esClient = elasticsearchServiceMock.createElasticsearchClient();
+    esClient.esql.query.mockResolvedValue({
+      columns: [{ name: 'total', type: 'long' }],
+      values: [[12345]],
+    });
+
+    const total = await getDetectionEngineAlertsCountByRuleTags(esClient, ['CIS']);
+
+    expect(esClient.esql.query).toHaveBeenCalledWith({
+      query: 'FROM .alerts-security.alerts-default | STATS total = COUNT(*)',
+      filter: {
+        bool: {
+          filter: [
+            { term: { 'kibana.alert.rule.tags': 'Cloud Security' } },
+            { term: { 'kibana.alert.rule.tags': 'CIS' } },
+          ],
+        },
+      },
+    });
+    expect(total).toBe(12345);
   });
 });

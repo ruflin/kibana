@@ -108,22 +108,35 @@ interface AvailabilityFlags {
   oneMinute?: boolean;
 }
 
-const AVAILABILITY_KEYS = ['sixtyMinutes', 'tenMinutes', 'oneMinute'] as const;
+const AVAILABILITY_ROLLUPS = {
+  sixtyMinutes: RollupInterval.SixtyMinutes,
+  tenMinutes: RollupInterval.TenMinutes,
+  oneMinute: RollupInterval.OneMinute,
+} as const;
 
-function availabilityResponse(flags: AvailabilityFlags) {
-  return {
-    responses: AVAILABILITY_KEYS.map((key) => ({
-      hits: { total: { value: flags[key] ? 1 : 0, relation: 'eq' as const } },
-    })),
+/** One ES|QL existence check per rollup: a row when the rollup has data, none otherwise. */
+function availabilityResponder(flags: AvailabilityFlags) {
+  return async (
+    _operationName: string,
+    params: { apm: { sources: Array<{ rollupInterval: string }> } }
+  ) => {
+    const [{ rollupInterval }] = params.apm.sources;
+    const key = (Object.keys(AVAILABILITY_ROLLUPS) as Array<keyof AvailabilityFlags>).find(
+      (candidate) => AVAILABILITY_ROLLUPS[candidate] === rollupInterval
+    );
+    return {
+      columns: [{ name: 'service.name', type: 'keyword' }],
+      values: key && flags[key] ? [['cart']] : [],
+    };
   };
 }
 
 function clientFor(search: SearchMock, flags: AvailabilityFlags) {
-  const msearch = jest.fn().mockResolvedValue(availabilityResponse(flags));
+  const esqlMock = jest.fn().mockImplementation(availabilityResponder(flags));
   return {
-    msearch,
+    esql: esqlMock,
     options: makeOptions({
-      apmEventClient: { search, msearch } as unknown as APMEventClient,
+      apmEventClient: { search, esql: esqlMock } as unknown as APMEventClient,
     }),
   };
 }
@@ -196,11 +209,11 @@ describe('getServiceCallGraph', () => {
 
   it('returns no calls when every rollup is empty', async () => {
     const search: SearchMock = jest.fn().mockResolvedValue(callResponse([]));
-    const { msearch, options } = clientFor(search, {});
+    const { esql, options } = clientFor(search, {});
 
     const graph = await getServiceCallGraph(options);
 
-    expect(msearch).toHaveBeenCalledTimes(1);
+    expect(esql).toHaveBeenCalledTimes(3);
     expect(search).not.toHaveBeenCalled();
     expect(graph).toEqual({});
   });
@@ -317,7 +330,7 @@ describe('getServiceCallGraph', () => {
       .fn()
       .mockResolvedValueOnce(callResponse([bucket('checkout', 'payment', 1)]))
       .mockResolvedValue(callResponse([]));
-    const { msearch, options } = clientFor(search, { sixtyMinutes: true });
+    const { esql, options } = clientFor(search, { sixtyMinutes: true });
 
     await getServiceCallGraph({ ...options, serviceGroupKuery });
 
@@ -327,21 +340,14 @@ describe('getServiceCallGraph', () => {
       ...kqlQuery(serviceGroupKuery),
     ];
     expect(getSearchCall(search, 0).params.query.bool.filter).toEqual(expectedFilter);
-    expect(msearch).toHaveBeenCalledWith(
-      'get_service_call_graph_availability',
-      expect.objectContaining({
-        size: 0,
-        terminate_after: 1,
-        track_total_hits: 1,
-        query: { bool: { filter: expectedFilter } },
-      }),
-      expect.objectContaining({
-        query: { bool: { filter: expectedFilter } },
-      }),
-      expect.objectContaining({
-        query: { bool: { filter: expectedFilter } },
-      })
-    );
+    expect(esql).toHaveBeenCalledTimes(3);
+    for (const [operationName, params] of esql.mock.calls) {
+      expect(operationName).toMatch(/^get_service_call_graph_availability_/);
+      expect(params.filter).toEqual({ bool: { filter: expectedFilter } });
+      expect(params.query(['metrics-*']).toRequest().query).toBe(
+        'FROM metrics-* | KEEP `service.name` | LIMIT 1'
+      );
+    }
   });
 
   it('leaves the service group out when the map is not scoped to one', async () => {
@@ -419,12 +425,12 @@ describe('getServiceCallGraph', () => {
 
   it('rejects when the availability check fails, without reading a rollup', async () => {
     const search: SearchMock = jest.fn();
-    const msearch = jest.fn().mockRejectedValue(new Error('search failed'));
+    const esqlMock = jest.fn().mockRejectedValue(new Error('search failed'));
 
     await expect(
       getServiceCallGraph(
         makeOptions({
-          apmEventClient: { search, msearch } as unknown as APMEventClient,
+          apmEventClient: { search, esql: esqlMock } as unknown as APMEventClient,
         })
       )
     ).rejects.toThrow('search failed');
@@ -433,14 +439,14 @@ describe('getServiceCallGraph', () => {
 
   it('rejects when a rollup check returns an error, without reading another rollup', async () => {
     const search: SearchMock = jest.fn();
-    const msearch = jest.fn().mockResolvedValue({
-      responses: [{ error: { type: 'search_phase_execution_exception' } }],
-    });
+    const esqlMock = jest
+      .fn()
+      .mockRejectedValue(new Error('Unable to check sixtyMinutes service destination metrics'));
 
     await expect(
       getServiceCallGraph(
         makeOptions({
-          apmEventClient: { search, msearch } as unknown as APMEventClient,
+          apmEventClient: { search, esql: esqlMock } as unknown as APMEventClient,
         })
       )
     ).rejects.toThrow('Unable to check sixtyMinutes service destination metrics');

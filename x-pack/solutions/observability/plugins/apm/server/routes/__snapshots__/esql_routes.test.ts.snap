@@ -1,0 +1,295 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`ES|QL reads of the APM routes dependency charts computes the failure rate of every bucket 1`] = `
+Array [
+  Object {
+    "operationName": "get_error_rate_for_dependency",
+    "params": Array [
+      Object {
+        "dependencyName": "postgres",
+      },
+      Object {
+        "spanName": "SELECT",
+      },
+      Object {
+        "success": "success",
+      },
+      Object {
+        "failureOutcome": "failure",
+      },
+      Object {
+        "failure": "failure",
+      },
+      Object {
+        "intervalInMs": 60000,
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`span.destination.service.resource\` == ?dependencyName | WHERE \`span.name\` == ?spanName | WHERE \`event.outcome\` IN (?success, ?failureOutcome) | STATS total_count = SUM(\`span.destination.service.response_time.count\`), failure_count = SUM(\`span.destination.service.response_time.count\`) WHERE \`event.outcome\` == ?failure BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ?intervalInMs | SORT bucket ASC | LIMIT 10000",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes dependency charts computes the latency of every bucket and leaves the empty ones as NaN 1`] = `
+Array [
+  Object {
+    "operationName": "get_latency_for_dependency",
+    "params": Array [
+      Object {
+        "dependencyName": "postgres",
+      },
+      Object {
+        "spanName": "SELECT",
+      },
+      Object {
+        "intervalInMs": 60000,
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`span.destination.service.resource\` == ?dependencyName | WHERE \`span.name\` == ?spanName | STATS latency_sum = SUM(\`span.destination.service.response_time.sum.us\`), latency_count = SUM(\`span.destination.service.response_time.count\`) BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ?intervalInMs | SORT bucket ASC | LIMIT 10000",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes dependency charts reads the type and subtype of the latest span of a dependency 1`] = `
+Array [
+  Object {
+    "operationName": "get_metadata_for_dependency",
+    "params": Array [
+      Object {
+        "dependencyName": "postgres",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`span.destination.service.resource\` == ?dependencyName | SORT @timestamp DESC NULLS LAST | KEEP span.type, span.subtype | LIMIT 1",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes dependency charts turns the counts of a bucket into a rate per minute 1`] = `
+Array [
+  Object {
+    "operationName": "get_throughput_for_dependency",
+    "params": Array [
+      Object {
+        "dependencyName": "postgres",
+      },
+      Object {
+        "spanName": "SELECT",
+      },
+      Object {
+        "intervalInMs": 60000,
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`span.destination.service.resource\` == ?dependencyName | WHERE \`span.name\` == ?spanName | STATS total_count = SUM(\`span.destination.service.response_time.count\`) BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ?intervalInMs | SORT bucket ASC | LIMIT 10000",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes infrastructure and profiling fields lists the containers, hosts and pods of a service by number of documents 1`] = `
+Array [
+  Object {
+    "operationName": "get_service_infrastructure",
+    "params": Array [
+      Object {
+        "service_name": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`container.id\` IS NOT NULL | WHERE \`service.name\` == ?service_name | STATS doc_count = COUNT(*) BY \`container.id\` | SORT doc_count DESC, \`container.id\` ASC | LIMIT 500",
+  },
+  Object {
+    "operationName": "get_service_infrastructure",
+    "params": Array [
+      Object {
+        "service_name": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`host.name\` IS NOT NULL | WHERE \`service.name\` == ?service_name | STATS doc_count = COUNT(*) BY \`host.name\` | SORT doc_count DESC, \`host.name\` ASC | LIMIT 500",
+  },
+  Object {
+    "operationName": "get_service_infrastructure",
+    "params": Array [
+      Object {
+        "service_name": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`kubernetes.pod.name\` IS NOT NULL | WHERE \`service.name\` == ?service_name | STATS doc_count = COUNT(*) BY \`kubernetes.pod.name\` | SORT doc_count DESC, \`kubernetes.pod.name\` ASC | LIMIT 500",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes infrastructure and profiling fields merges the host names of the service 1`] = `
+Array [
+  Object {
+    "operationName": "get_service_host_names",
+    "params": Array [
+      Object {
+        "service_name": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`host.hostname\` IS NOT NULL | WHERE \`service.name\` == ?service_name | STATS doc_count = COUNT(*) BY \`host.hostname\` | SORT doc_count DESC, \`host.hostname\` ASC | LIMIT 500",
+  },
+  Object {
+    "operationName": "get_service_host_names",
+    "params": Array [
+      Object {
+        "service_name": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`host.name\` IS NOT NULL | WHERE \`service.name\` == ?service_name | STATS doc_count = COUNT(*) BY \`host.name\` | SORT doc_count DESC, \`host.name\` ASC | LIMIT 500",
+  },
+  Object {
+    "operationName": "get_service_host_names",
+    "params": Array [
+      Object {
+        "service_name": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`container.id\` IS NOT NULL | WHERE \`service.name\` == ?service_name | STATS doc_count = COUNT(*) BY \`container.id\` | SORT doc_count DESC, \`container.id\` ASC | LIMIT 500",
+  },
+  Object {
+    "operationName": "get_service_host_names",
+    "params": Array [
+      Object {
+        "service_name": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`kubernetes.deployment.name\` IS NOT NULL | WHERE \`service.name\` == ?service_name | STATS doc_count = COUNT(*) BY \`kubernetes.deployment.name\` | SORT doc_count DESC, \`kubernetes.deployment.name\` ASC | LIMIT 500",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes probes and single values counts the distinct services 1`] = `
+Array [
+  Object {
+    "operationName": "observability_overview_get_service_count",
+    "params": Array [],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | STATS service_count = COUNT_DISTINCT(\`service.name\`) | LIMIT 1",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes probes and single values finds out whether a service has OpenTelemetry process metrics 1`] = `
+Array [
+  Object {
+    "operationName": "has_otel_process_metrics",
+    "params": Array [
+      Object {
+        "service_name": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`service.name\` == ?service_name | WHERE \`process.runtime.jvm.cpu.utilization\` IS NOT NULL OR \`process.runtime.jvm.memory.usage\` IS NOT NULL OR \`process.runtime.jvm.threads.count\` IS NOT NULL OR \`system.cpu.utilization\` IS NOT NULL OR \`system.memory.utilization\` IS NOT NULL | KEEP @timestamp | LIMIT 1",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes probes and single values lists the etags the agents applied in the last 15 minutes 1`] = `
+Array [
+  Object {
+    "operationName": "get_agent_config_etag_metrics",
+    "params": Array [
+      Object {
+        "metricset_name": "agent_config",
+      },
+      Object {
+        "labels_etag": "etag1",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`labels.etag\` IS NOT NULL | WHERE \`metricset.name\` == ?metricset_name | WHERE \`labels.etag\` == ?labels_etag | STATS doc_count = COUNT(*) BY \`labels.etag\` | SORT doc_count DESC, \`labels.etag\` ASC | LIMIT 200",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes probes and single values reads the agent name of a service 1`] = `
+Array [
+  Object {
+    "operationName": "get_agent_name_by_service",
+    "params": Array [
+      Object {
+        "serviceName": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`service.name\` == ?serviceName | WHERE \`agent.name\` IS NOT NULL | KEEP agent.name | LIMIT 1",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes probes and single values reads the destination of the failed span of a trace 1`] = `
+Array [
+  Object {
+    "operationName": "get_error_group_main_statistics",
+    "params": Array [
+      Object {
+        "traceId": "t",
+      },
+      Object {
+        "outcome": "failure",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`trace.id\` == ?traceId | WHERE \`event.outcome\` == ?outcome | WHERE \`span.destination.service.resource\` IS NOT NULL | KEEP span.destination.service.resource | LIMIT 1",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes serverless metrics counts the active instances of every bucket 1`] = `
+Array [
+  Object {
+    "operationName": "get_active_instances",
+    "params": Array [
+      Object {
+        "metricset": "app",
+      },
+      Object {
+        "serviceName": "svc",
+      },
+      Object {
+        "serverlessId": "fn",
+      },
+      Object {
+        "intervalInMs": 60000,
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`metricset.name\` == ?metricset | WHERE \`service.name\` == ?serviceName | WHERE \`faas.id\` == ?serverlessId | STATS active_instances = COUNT_DISTINCT(\`service.node.name\`) BY bucket = TO_LONG(@timestamp) - TO_LONG(@timestamp) % ?intervalInMs | SORT bucket ASC | LIMIT 10000",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes serverless metrics lists the functions with their averages 1`] = `
+Array [
+  Object {
+    "operationName": "ger_serverless_functions_overview",
+    "params": Array [
+      Object {
+        "metricset": "app",
+      },
+      Object {
+        "serviceName": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`metricset.name\` == ?metricset | WHERE \`service.name\` == ?serviceName | WHERE \`faas.id\` IS NOT NULL | STATS doc_count = COUNT(*), faas_duration_avg = AVG(\`faas.duration\`), faas_billed_duration_avg = AVG(\`faas.billed_duration\`), cold_start_count = COUNT(*) WHERE \`faas.coldstart\` == TRUE, max_total_memory = MAX(\`system.memory.total\`), avg_total_memory = AVG(\`system.memory.total\`), avg_free_memory = AVG(\`system.memory.actual.free\`) BY \`faas.id\` | SORT doc_count DESC, \`faas.id\` ASC | LIMIT 10",
+  },
+]
+`;
+
+exports[`ES|QL reads of the APM routes serverless metrics summarizes the functions in one row and counts the transactions apart 1`] = `
+Array [
+  Object {
+    "operationName": "get_serverless_summary",
+    "params": Array [
+      Object {
+        "metricset": "app",
+      },
+      Object {
+        "serviceName": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`metricset.name\` == ?metricset | WHERE \`service.name\` == ?serviceName | STATS total_functions = COUNT_DISTINCT(\`faas.id\`), faas_duration_avg = AVG(\`faas.duration\`), faas_billed_duration_avg = AVG(\`faas.billed_duration\`), avg_total_memory = AVG(\`system.memory.total\`), avg_free_memory = AVG(\`system.memory.actual.free\`), count_invocations = COUNT(\`faas.billed_duration\`), avg_compute_usage_bytes_ms = AVG(TO_DOUBLE(COALESCE(\`system.memory.total\`, 0)) * COALESCE(\`faas.billed_duration\`, 0)), architecture = LAST(\`host.architecture\`, @timestamp) | LIMIT 1",
+  },
+  Object {
+    "operationName": "get_serverless_transaction_throughout",
+    "params": Array [
+      Object {
+        "serviceName": "svc",
+      },
+    ],
+    "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`service.name\` == ?serviceName | STATS transaction_count = COUNT(*) | LIMIT 1",
+  },
+]
+`;

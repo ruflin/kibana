@@ -69,6 +69,7 @@ describe('createEntitySourcesService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    esClient.esql.query.mockResolvedValue({ columns: [], values: [] } as never);
     mockGetStartServices.mockResolvedValue([
       { elasticsearch: { client: {} } },
       { encryptedSavedObjects: undefined },
@@ -537,17 +538,17 @@ describe('createEntitySourcesService', () => {
       mockListEntitySources.mockResolvedValue({ sources: [] });
 
       // Mock: aggregation returns one orphaned source ID (not csv)
+      esClient.esql.query.mockResolvedValueOnce({
+        columns: [
+          { name: 'docs', type: 'long' },
+          { name: 'labels.source_ids', type: 'keyword' },
+        ],
+        values: [
+          [3, 'orphaned-source-1'],
+          [2, 'csv'],
+        ],
+      } as never);
       esClient.search
-        .mockResolvedValueOnce({
-          aggregations: {
-            source_ids: {
-              buckets: [
-                { key: 'orphaned-source-1', doc_count: 3 },
-                { key: 'csv', doc_count: 2 },
-              ],
-            },
-          },
-        } as never)
         // Mock: buildWatchlistsByEuid — first search returns euids
         .mockResolvedValueOnce({
           hits: { hits: [{ _source: { entity: { id: 'user:alice' } } }] },
@@ -571,6 +572,15 @@ describe('createEntitySourcesService', () => {
 
       await service.syncAllWatchlists();
 
+      expect(esClient.esql.query).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.stringContaining(
+            'WHERE watchlist.id == ?watchlistId | STATS docs = COUNT(*) BY labels.source_ids | SORT docs DESC | LIMIT 100'
+          ),
+          params: [{ watchlistId: 'wl-1' }],
+        }),
+        expect.anything()
+      );
       expect(mockApplyBulkRemoveSource).toHaveBeenCalledWith(
         expect.objectContaining({
           staleEntities: [{ docId: 'user:alice:doc1', sourceId: 'orphaned-source-1' }],
@@ -590,12 +600,14 @@ describe('createEntitySourcesService', () => {
       mockGetEntitySourceIds.mockResolvedValue(['deleted-source-1']);
       mockListEntitySources.mockResolvedValue({ sources: [] });
 
+      esClient.esql.query.mockResolvedValueOnce({
+        columns: [
+          { name: 'docs', type: 'long' },
+          { name: 'labels.source_ids', type: 'keyword' },
+        ],
+        values: [[3, 'deleted-source-1']],
+      } as never);
       esClient.search
-        .mockResolvedValueOnce({
-          aggregations: {
-            source_ids: { buckets: [{ key: 'deleted-source-1', doc_count: 3 }] },
-          },
-        } as never)
         // buildWatchlistsByEuid — euids from the watchlist index
         .mockResolvedValueOnce({
           hits: { hits: [{ _source: { entity: { id: 'user:alice' } } }] },
@@ -741,8 +753,9 @@ describe('createEntitySourcesService', () => {
 
       // First page pass calls plainIndexSync; abort fires so tail pass is skipped
       expect(mockPlainIndexSync).toHaveBeenCalledTimes(1);
-      // cleanupOrphanedEntities triggers an esClient.search for orphaned source agg —
+      // cleanupOrphanedEntities runs an ES|QL query for the orphaned source agg —
       // it should not be called after abort
+      expect(esClient.esql.query).not.toHaveBeenCalled();
       expect(esClient.search).not.toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(
         expect.stringContaining(

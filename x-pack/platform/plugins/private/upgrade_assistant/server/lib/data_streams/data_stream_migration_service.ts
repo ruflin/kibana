@@ -12,6 +12,8 @@ import type { LicensingPluginSetup } from '@kbn/licensing-plugin/server';
 
 import type { TransportResult } from '@elastic/elasticsearch';
 import _ from 'lodash';
+import { esql } from '@elastic/esql';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
 import type {
   DataStreamMigrationOperation,
   DataStreamMetadata,
@@ -355,17 +357,15 @@ export const dataStreamMigrationServiceFactory = ({
           if ((indexStats[1] as any).primaries.docs.count > 0) {
             try {
               // Find the oldest document timestamp in incompatible index
-              const timestampResponse = await esClient.search({
-                index,
-                size: 0,
-                aggs: {
-                  oldest_incompatible_doc: { min: { field: '@timestamp' } },
-                },
-              });
+              const timestampResponse = await esClient.esql.query(
+                esql.from([index])
+                  .pipe`STATS oldest_incompatible_doc = MIN(@timestamp)`.toRequest() as unknown as EsqlQueryRequest
+              );
 
+              // MIN returns a date: the epoch milliseconds of it are what the DSL `min` aggregation did
+              const oldestValue = timestampResponse.values[0]?.[0];
               const oldestTimestamp =
-                // @ts-ignore - value doesnt exist in the es type yet
-                timestampResponse.aggregations?.oldest_incompatible_doc?.value;
+                typeof oldestValue === 'string' ? Date.parse(oldestValue) : undefined;
 
               if (
                 oldestTimestamp &&
@@ -375,7 +375,7 @@ export const dataStreamMigrationServiceFactory = ({
                 oldestIncompatibleDocTimestamp = oldestTimestamp;
               }
             } catch (err) {
-              // If aggregation fails (possibly due to missing @timestamp field), continue without setting timestamp
+              // If the query fails (possibly due to missing @timestamp field), continue without setting timestamp
               // This prevents a single index without proper timestamps from breaking the entire metadata function
             }
           }

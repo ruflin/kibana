@@ -13,7 +13,6 @@ import type { Client } from '@elastic/elasticsearch';
 
 type IndexApi = Client['create'];
 type GetApi = Client['get'];
-type SearchApi = Client['search'];
 import type { SiemMigrationsClientDependencies } from '../../common/types';
 
 describe('RuleMigrationsDataMigrationClient', () => {
@@ -152,41 +151,23 @@ describe('RuleMigrationsDataMigrationClient', () => {
 
   describe('getAll', () => {
     it('should return all migrations', async () => {
+      const createdAt = new Date().toISOString();
       const response = {
-        hits: {
-          hits: [
-            {
-              _index: '.kibana-siem-rule-migrations',
-              _id: '1',
-              _source: {
-                created_by: currentUser.profile_uid,
-                created_at: new Date().toISOString(),
-              },
-            },
-            {
-              _index: '.kibana-siem-rule-migrations',
-              _id: '2',
-              _source: {
-                created_by: currentUser.profile_uid,
-                created_at: new Date().toISOString(),
-              },
-            },
-          ],
-        },
-      } as unknown as ReturnType<typeof esClient.asInternalUser.search>;
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [
+          ['1', { created_by: currentUser.profile_uid, created_at: createdAt }],
+          ['2', { created_by: currentUser.profile_uid, created_at: createdAt }],
+        ],
+      };
 
-      (esClient.asInternalUser.search as unknown as jest.MockedFn<SearchApi>).mockResolvedValueOnce(
-        response
-      );
+      (esClient.asInternalUser.esql.query as jest.Mock).mockResolvedValueOnce(response);
 
       await ruleMigrationsDataMigrationClient.getAll();
-      expect(esClient.asInternalUser.search).toHaveBeenCalledWith({
-        index: '.kibana-siem-rule-migrations',
-        size: 10000,
-        query: {
-          match_all: {},
-        },
-        _source: true,
+      expect(esClient.asInternalUser.esql.query).toHaveBeenCalledWith({
+        query: 'FROM .kibana-siem-rule-migrations METADATA _id, _source | LIMIT 10000',
       });
     });
   });

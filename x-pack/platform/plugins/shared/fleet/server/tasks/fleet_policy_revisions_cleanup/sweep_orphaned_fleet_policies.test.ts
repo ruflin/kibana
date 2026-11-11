@@ -51,13 +51,14 @@ describe('sweepOrphanedFleetPolicies', () => {
     mockedAppContextService.getInternalUserSOClientWithoutSpaceExtension.mockReturnValue(soClient);
 
     // Default: no active agents on any policy
-    esClient.search.mockResolvedValue({
-      aggregations: { active_policy_ids: { buckets: [] } },
+    esClient.esql.query.mockResolvedValue({
+      columns: [{ name: 'policy_id', type: 'keyword' }],
+      values: [],
     } as any);
   });
 
   it('returns 0 and skips SO lookup when .fleet-policies has no documents', async () => {
-    // First search: base_policy_ids aggregation; second: agents check (not reached)
+    // First search: base_policy_ids aggregation; the ES|QL agents check is not reached
     esClient.search.mockResolvedValueOnce({
       aggregations: { base_policy_ids: { buckets: [], sum_other_doc_count: 0 } },
     } as any);
@@ -93,19 +94,14 @@ describe('sweepOrphanedFleetPolicies', () => {
   });
 
   it('deletes .fleet-policies documents for orphaned policy IDs using policy_base_id', async () => {
-    esClient.search
-      .mockResolvedValueOnce({
-        aggregations: {
-          base_policy_ids: {
-            buckets: [{ key: 'policy-1' }, { key: 'policy-2' }, { key: 'policy-3' }],
-            sum_other_doc_count: 0,
-          },
+    esClient.search.mockResolvedValueOnce({
+      aggregations: {
+        base_policy_ids: {
+          buckets: [{ key: 'policy-1' }, { key: 'policy-2' }, { key: 'policy-3' }],
+          sum_other_doc_count: 0,
         },
-      } as any)
-      // agents check: no active agents
-      .mockResolvedValueOnce({
-        aggregations: { active_policy_ids: { buckets: [] } },
-      } as any);
+      },
+    } as any);
 
     soClient.bulkGet.mockResolvedValueOnce({
       saved_objects: [
@@ -145,18 +141,14 @@ describe('sweepOrphanedFleetPolicies', () => {
     // "live-policy#custom" is a valid policy ID (not a version-specific variant).
     // With the old prefix approach, sweeping "live-policy" would have deleted its docs.
     // With policy_base_id aggregation it is its own distinct base ID and is not swept.
-    esClient.search
-      .mockResolvedValueOnce({
-        aggregations: {
-          base_policy_ids: {
-            buckets: [{ key: 'orphan-policy' }, { key: 'live-policy#custom' }],
-            sum_other_doc_count: 0,
-          },
+    esClient.search.mockResolvedValueOnce({
+      aggregations: {
+        base_policy_ids: {
+          buckets: [{ key: 'orphan-policy' }, { key: 'live-policy#custom' }],
+          sum_other_doc_count: 0,
         },
-      } as any)
-      .mockResolvedValueOnce({
-        aggregations: { active_policy_ids: { buckets: [] } },
-      } as any);
+      },
+    } as any);
 
     soClient.bulkGet.mockResolvedValueOnce({
       saved_objects: [
@@ -270,18 +262,16 @@ describe('sweepOrphanedFleetPolicies', () => {
 
   describe('agent in-use guard', () => {
     it('skips deletion and logs a warning when orphan candidates still have active agents', async () => {
-      esClient.search
-        .mockResolvedValueOnce({
-          aggregations: {
-            base_policy_ids: { buckets: [{ key: 'orphan-with-agents' }], sum_other_doc_count: 0 },
-          },
-        } as any)
-        // agents check: one agent still on the policy
-        .mockResolvedValueOnce({
-          aggregations: {
-            active_policy_ids: { buckets: [{ key: 'orphan-with-agents' }] },
-          },
-        } as any);
+      // agents check: one agent still on the policy
+      esClient.esql.query.mockResolvedValueOnce({
+        columns: [{ name: 'policy_id', type: 'keyword' }],
+        values: [['orphan-with-agents']],
+      } as any);
+      esClient.search.mockResolvedValueOnce({
+        aggregations: {
+          base_policy_ids: { buckets: [{ key: 'orphan-with-agents' }], sum_other_doc_count: 0 },
+        },
+      } as any);
 
       soClient.bulkGet.mockResolvedValueOnce({
         saved_objects: [
@@ -301,15 +291,11 @@ describe('sweepOrphanedFleetPolicies', () => {
     });
 
     it('queries .fleet-agents using policy_id with the active filter', async () => {
-      esClient.search
-        .mockResolvedValueOnce({
-          aggregations: {
-            base_policy_ids: { buckets: [{ key: 'policy-1' }], sum_other_doc_count: 0 },
-          },
-        } as any)
-        .mockResolvedValueOnce({
-          aggregations: { active_policy_ids: { buckets: [] } },
-        } as any);
+      esClient.search.mockResolvedValueOnce({
+        aggregations: {
+          base_policy_ids: { buckets: [{ key: 'policy-1' }], sum_other_doc_count: 0 },
+        },
+      } as any);
 
       soClient.bulkGet.mockResolvedValueOnce({
         saved_objects: [
@@ -325,36 +311,22 @@ describe('sweepOrphanedFleetPolicies', () => {
 
       await sweepOrphanedFleetPolicies(esClient, { logger, config: defaultConfig });
 
-      expect(esClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: AGENTS_INDEX,
-          query: expect.objectContaining({
-            bool: expect.objectContaining({
-              filter: expect.arrayContaining([
-                { term: { active: true } },
-                { terms: { policy_id: ['policy-1'] } },
-              ]),
-            }),
-          }),
-        }),
-        expect.anything()
-      );
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query: `FROM ${AGENTS_INDEX} | WHERE active == TRUE AND (policy_id IN (?candidateIds)) | STATS agents = COUNT(*) BY policy_id | LIMIT 1`,
+        params: [{ candidateIds: ['policy-1'] }],
+      });
     });
   });
 
   it('skips IDs that fail with non-404 errors and logs a warning', async () => {
-    esClient.search
-      .mockResolvedValueOnce({
-        aggregations: {
-          base_policy_ids: {
-            buckets: [{ key: 'policy-1' }, { key: 'policy-2' }],
-            sum_other_doc_count: 0,
-          },
+    esClient.search.mockResolvedValueOnce({
+      aggregations: {
+        base_policy_ids: {
+          buckets: [{ key: 'policy-1' }, { key: 'policy-2' }],
+          sum_other_doc_count: 0,
         },
-      } as any)
-      .mockResolvedValueOnce({
-        aggregations: { active_policy_ids: { buckets: [] } },
-      } as any);
+      },
+    } as any);
 
     soClient.bulkGet.mockResolvedValueOnce({
       saved_objects: [
@@ -411,15 +383,11 @@ describe('sweepOrphanedFleetPolicies', () => {
   it('applies conflicts: proceed and max_docs from config on the deleteByQuery', async () => {
     const config = { ...defaultConfig, maxDocsToDelete: 123 };
 
-    esClient.search
-      .mockResolvedValueOnce({
-        aggregations: {
-          base_policy_ids: { buckets: [{ key: 'gone-policy' }], sum_other_doc_count: 0 },
-        },
-      } as any)
-      .mockResolvedValueOnce({
-        aggregations: { active_policy_ids: { buckets: [] } },
-      } as any);
+    esClient.search.mockResolvedValueOnce({
+      aggregations: {
+        base_policy_ids: { buckets: [{ key: 'gone-policy' }], sum_other_doc_count: 0 },
+      },
+    } as any);
 
     soClient.bulkGet.mockResolvedValueOnce({
       saved_objects: [
@@ -441,19 +409,15 @@ describe('sweepOrphanedFleetPolicies', () => {
     );
   });
 
-  it('passes the abort signal to both search calls and to deleteByQuery', async () => {
+  it('passes the abort signal to the search, the ES|QL agents check and deleteByQuery', async () => {
     const controller = new AbortController();
     const { signal } = controller;
 
-    esClient.search
-      .mockResolvedValueOnce({
-        aggregations: {
-          base_policy_ids: { buckets: [{ key: 'gone-policy' }], sum_other_doc_count: 0 },
-        },
-      } as any)
-      .mockResolvedValueOnce({
-        aggregations: { active_policy_ids: { buckets: [] } },
-      } as any);
+    esClient.search.mockResolvedValueOnce({
+      aggregations: {
+        base_policy_ids: { buckets: [{ key: 'gone-policy' }], sum_other_doc_count: 0 },
+      },
+    } as any);
 
     soClient.bulkGet.mockResolvedValueOnce({
       saved_objects: [
@@ -469,15 +433,16 @@ describe('sweepOrphanedFleetPolicies', () => {
 
     await sweepOrphanedFleetPolicies(esClient, { logger, signal, config: defaultConfig });
 
-    // Both esClient.search calls should receive the signal
-    expect(esClient.search).toHaveBeenCalledTimes(2);
+    // The search and the ES|QL agents check should receive the signal
+    expect(esClient.search).toHaveBeenCalledTimes(1);
     expect(esClient.search).toHaveBeenNthCalledWith(
       1,
       expect.anything(),
       expect.objectContaining({ signal })
     );
-    expect(esClient.search).toHaveBeenNthCalledWith(
-      2,
+    expect(esClient.esql.query).toHaveBeenCalledTimes(1);
+    expect(esClient.esql.query).toHaveBeenNthCalledWith(
+      1,
       expect.anything(),
       expect.objectContaining({ signal })
     );

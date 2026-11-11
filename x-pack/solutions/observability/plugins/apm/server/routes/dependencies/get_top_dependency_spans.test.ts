@@ -10,20 +10,28 @@ import { loggingSystemMock } from '@kbn/core/server/mocks';
 import { getTopDependencySpans } from './get_top_dependency_spans';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
 import type { Environment } from '../../../common/environment_rt';
+import { esqlResponseFromRows, toEsqlRequest } from '../../utils/esql_test_helpers';
 
-function createApmEventClientMock(
-  spanHits: Array<Record<string, unknown>>,
-  transactionHits: Array<Record<string, unknown>> = []
-): APMEventClient {
+type Hit = { _id: string; _index: string; fields: Record<string, unknown[]> };
+
+function hitToRow({ _id, _index, fields }: Hit) {
   return {
-    search: jest
+    _id,
+    _index,
+    ...Object.fromEntries(Object.entries(fields).map(([name, values]) => [name, values[0]])),
+  };
+}
+
+function createApmEventClientMock(spanHits: Hit[], transactionHits: Hit[] = []): APMEventClient {
+  return {
+    esql: jest
       .fn()
-      .mockResolvedValueOnce({ hits: { hits: spanHits } })
-      .mockResolvedValueOnce({ hits: { hits: transactionHits } }),
+      .mockResolvedValueOnce(esqlResponseFromRows(spanHits.map(hitToRow)))
+      .mockResolvedValueOnce(esqlResponseFromRows(transactionHits.map(hitToRow))),
   } as unknown as APMEventClient;
 }
 
-function validSpanHit(overrides: Record<string, unknown[]> = {}) {
+function validSpanHit(overrides: Record<string, unknown[]> = {}): Hit {
   return {
     _id: 'span-1',
     _index: 'apm-span',
@@ -95,7 +103,7 @@ describe('getTopDependencySpans', () => {
   });
 
   describe('transaction hits', () => {
-    function validTransactionHit(overrides: Record<string, unknown[]> = {}) {
+    function validTransactionHit(overrides: Record<string, unknown[]> = {}): Hit {
       return {
         _id: 'tx-1',
         _index: 'apm-transaction',
@@ -172,5 +180,36 @@ describe('getTopDependencySpans', () => {
 
     expect(spans).toHaveLength(2);
     expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('queries the spans of the dependency and then the transactions of their traces', async () => {
+    const apmEventClient = createApmEventClientMock([validSpanHit()]);
+
+    await getTopDependencySpans({
+      apmEventClient,
+      logger: loggingSystemMock.createLogger(),
+      ...baseParams,
+      sampleRangeFrom: 10,
+      sampleRangeTo: 20,
+    });
+
+    const [spanCall, transactionCall] = (apmEventClient.esql as jest.Mock).mock.calls;
+    expect(toEsqlRequest(spanCall[1])).toMatchObject({
+      query: expect.stringContaining(
+        'WHERE `span.destination.service.resource` == ?dependencyName | WHERE `span.name` == ?spanName | WHERE `span.duration.us` >= ?sampleRangeFrom | WHERE `span.duration.us` <= ?sampleRangeTo | KEEP _id, _index'
+      ),
+      params: expect.arrayContaining([
+        { dependencyName: 'postgres' },
+        { spanName: 'SELECT' },
+        { sampleRangeFrom: 10 },
+        { sampleRangeTo: 20 },
+      ]),
+    });
+    expect(toEsqlRequest(transactionCall[1])).toMatchObject({
+      query: expect.stringContaining(
+        'WHERE (`trace.id` IN (?traceIds)) AND `transaction.id` IS NOT NULL | SORT @timestamp DESC NULLS LAST'
+      ),
+      params: [{ traceIds: ['trace-1'] }],
+    });
   });
 });

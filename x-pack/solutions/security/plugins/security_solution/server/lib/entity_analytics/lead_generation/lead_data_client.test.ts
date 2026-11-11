@@ -834,20 +834,22 @@ describe('LeadDataClient', () => {
 
   describe('getStatus', () => {
     it('returns status with total count and last run timestamp', async () => {
-      esClient.search.mockResolvedValueOnce({
-        hits: {
-          total: { value: 42, relation: 'eq' },
-          hits: [
-            {
-              _id: 'lead-1',
-              _index: indexName,
-              _source: { timestamp: '2026-03-10T00:00:00.000Z' },
-            },
-          ],
-        },
-      } as never);
+      esClient.esql.query.mockResolvedValueOnce({
+        columns: [
+          { name: 'total', type: 'long' },
+          { name: 'last_run', type: 'date' },
+        ],
+        values: [[42, '2026-03-10T00:00:00.000Z']],
+      });
 
       const status = await client.getStatus();
+      expect(esClient.esql.query).toHaveBeenCalledWith(
+        {
+          query: `FROM ${indexName} | STATS total = COUNT(*), last_run = MAX(timestamp)`,
+          params: [],
+        },
+        { signal: undefined }
+      );
       expect(status).toEqual({
         isEnabled: false,
         indexExists: true,
@@ -857,7 +859,7 @@ describe('LeadDataClient', () => {
     });
 
     it('returns defaults when indices do not exist', async () => {
-      esClient.search.mockRejectedValueOnce(new Error('index_not_found'));
+      esClient.esql.query.mockRejectedValueOnce(new Error('index_not_found'));
 
       const status = await client.getStatus();
       expect(status).toEqual({
@@ -869,7 +871,7 @@ describe('LeadDataClient', () => {
     });
 
     it('returns defaults for any generic ES error', async () => {
-      esClient.search.mockRejectedValueOnce(new Error('cluster timeout'));
+      esClient.esql.query.mockRejectedValueOnce(new Error('cluster timeout'));
 
       const status = await client.getStatus();
       expect(status).toEqual({
@@ -882,7 +884,7 @@ describe('LeadDataClient', () => {
 
     it('re-throws when ES returns security_exception so the route can return 403', async () => {
       const securityException = makeEsSecurityException();
-      esClient.search.mockRejectedValueOnce(securityException);
+      esClient.esql.query.mockRejectedValueOnce(securityException);
 
       await expect(client.getStatus()).rejects.toBe(securityException);
     });

@@ -8,10 +8,18 @@
 import { elasticsearchServiceMock, loggingSystemMock } from '@kbn/core/server/mocks';
 import { getAlertSnoozeSnapshot } from './get_alert_snooze_snapshot';
 
+const sourceResponse = (source?: Record<string, unknown>) =>
+  ({
+    columns: [{ name: '_source', type: 'unsupported' }],
+    values: source ? [[source]] : [],
+  } as never);
+
 describe('getAlertSnoozeSnapshot', () => {
   test('searches with the correct params using _source filtering', async () => {
     const logger = loggingSystemMock.createLogger();
     const clusterClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
+
+    clusterClient.esql.query.mockResolvedValueOnce(sourceResponse());
 
     await getAlertSnoozeSnapshot({
       logger,
@@ -22,45 +30,26 @@ describe('getAlertSnoozeSnapshot', () => {
       fields: ['host.name', 'kibana.alert.severity'],
     });
 
-    expect(clusterClient.search).toHaveBeenCalledWith({
-      index: ['test-index'],
-      allow_no_indices: true,
-      size: 1,
-      _source: ['host.name', 'kibana.alert.severity'],
-      query: {
-        bool: {
-          must: [
-            { term: { ['kibana.alert.rule.uuid']: 'test-rule-id' } },
-            { term: { ['kibana.alert.status']: 'active' } },
-          ],
-          filter: [{ term: { ['kibana.alert.instance.id']: 'test-alert-id' } }],
-        },
+    expect(clusterClient.esql.query).toHaveBeenCalledWith(
+      {
+        query:
+          'FROM test-index METADATA _source | WHERE kibana.alert.rule.uuid == ?ruleId AND kibana.alert.status == ?status AND kibana.alert.instance.id == ?alertId | LIMIT 1',
+        params: [{ ruleId: 'test-rule-id' }, { status: 'active' }, { alertId: 'test-alert-id' }],
       },
-    });
+      expect.anything()
+    );
   });
 
   test('returns snapshot values from _source in their original stored form', async () => {
     const logger = loggingSystemMock.createLogger();
     const clusterClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
 
-    clusterClient.search.mockResponseOnce({
-      hits: {
-        total: 1,
-        hits: [
-          {
-            _index: 'test-index',
-            _id: 'test-alert-id',
-            _source: {
-              'host.name': 'web-01',
-              'kibana.alert.severity': 'high',
-            },
-          },
-        ],
-      },
-      took: 0,
-      timed_out: false,
-      _shards: { total: 0, successful: 0, skipped: 0, failed: 0 },
-    });
+    clusterClient.esql.query.mockResolvedValueOnce(
+      sourceResponse({
+        'host.name': 'web-01',
+        'kibana.alert.severity': 'high',
+      })
+    );
 
     const result = await getAlertSnoozeSnapshot({
       logger,
@@ -81,24 +70,12 @@ describe('getAlertSnoozeSnapshot', () => {
     const logger = loggingSystemMock.createLogger();
     const clusterClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
 
-    clusterClient.search.mockResponseOnce({
-      hits: {
-        total: 1,
-        hits: [
-          {
-            _index: 'test-index',
-            _id: 'test-alert-id',
-            _source: {
-              // Stored as a single-element array — must NOT be unwrapped to scalar
-              'kibana.alert.rule.tags': ['web'],
-            },
-          },
-        ],
-      },
-      took: 0,
-      timed_out: false,
-      _shards: { total: 0, successful: 0, skipped: 0, failed: 0 },
-    });
+    clusterClient.esql.query.mockResolvedValueOnce(
+      sourceResponse({
+        // Stored as a single-element array — must NOT be unwrapped to scalar
+        'kibana.alert.rule.tags': ['web'],
+      })
+    );
 
     const result = await getAlertSnoozeSnapshot({
       logger,
@@ -119,24 +96,12 @@ describe('getAlertSnoozeSnapshot', () => {
 
     const params = { threshold: [1], size: 100, aggType: 'count' };
 
-    clusterClient.search.mockResponseOnce({
-      hits: {
-        total: 1,
-        hits: [
-          {
-            _index: 'test-index',
-            _id: 'test-alert-id',
-            _source: {
-              // Object field stored exactly as the alert builder produced it
-              'kibana.alert.rule.parameters': params,
-            },
-          },
-        ],
-      },
-      took: 0,
-      timed_out: false,
-      _shards: { total: 0, successful: 0, skipped: 0, failed: 0 },
-    });
+    clusterClient.esql.query.mockResolvedValueOnce(
+      sourceResponse({
+        // Object field stored exactly as the alert builder produced it
+        'kibana.alert.rule.parameters': params,
+      })
+    );
 
     const result = await getAlertSnoozeSnapshot({
       logger,
@@ -155,15 +120,7 @@ describe('getAlertSnoozeSnapshot', () => {
     const logger = loggingSystemMock.createLogger();
     const clusterClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
 
-    clusterClient.search.mockResponseOnce({
-      hits: {
-        total: 0,
-        hits: [],
-      },
-      took: 0,
-      timed_out: false,
-      _shards: { total: 0, successful: 0, skipped: 0, failed: 0 },
-    });
+    clusterClient.esql.query.mockResolvedValueOnce(sourceResponse());
 
     const result = await getAlertSnoozeSnapshot({
       logger,
@@ -181,24 +138,12 @@ describe('getAlertSnoozeSnapshot', () => {
     const logger = loggingSystemMock.createLogger();
     const clusterClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
 
-    clusterClient.search.mockResponseOnce({
-      hits: {
-        total: 1,
-        hits: [
-          {
-            _index: 'test-index',
-            _id: 'test-alert-id',
-            _source: {
-              // kibana.alert.severity not present
-              'host.name': 'web-01',
-            },
-          },
-        ],
-      },
-      took: 0,
-      timed_out: false,
-      _shards: { total: 0, successful: 0, skipped: 0, failed: 0 },
-    });
+    clusterClient.esql.query.mockResolvedValueOnce(
+      sourceResponse({
+        // kibana.alert.severity not present
+        'host.name': 'web-01',
+      })
+    );
 
     const result = await getAlertSnoozeSnapshot({
       logger,
@@ -219,7 +164,7 @@ describe('getAlertSnoozeSnapshot', () => {
     const logger = loggingSystemMock.createLogger();
     const clusterClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
 
-    clusterClient.search.mockRejectedValueOnce(new Error('Test error'));
+    clusterClient.esql.query.mockRejectedValueOnce(new Error('Test error'));
 
     const result = await getAlertSnoozeSnapshot({
       logger,
@@ -240,7 +185,7 @@ describe('getAlertSnoozeSnapshot', () => {
     const logger = loggingSystemMock.createLogger();
     const clusterClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
 
-    clusterClient.search.mockRejectedValueOnce('unexpected string error');
+    clusterClient.esql.query.mockRejectedValueOnce('unexpected string error');
 
     const result = await getAlertSnoozeSnapshot({
       logger,

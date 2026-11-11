@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import type { estypes } from '@elastic/elasticsearch';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
 
 import type { ElasticsearchClient } from '@kbn/core/server';
 
@@ -30,18 +30,14 @@ describe('fetchIndexInfo', () => {
         myNumericFieldName: { number: {} },
       },
     }));
-    const esClientSearchMock = jest.fn((req: estypes.SearchRequest): estypes.SearchResponse => {
-      return {
-        hits: {
-          hits: [],
-          total: { value: 5000000 },
-        },
-      } as unknown as estypes.SearchResponse;
-    });
+    const esClientSearchMock = jest.fn(async (_req: EsqlQueryRequest) => ({
+      columns: [{ name: 'total', type: 'long' }],
+      values: [[5000000]],
+    }));
 
     const esClientMock = {
       fieldCaps: esClientFieldCapsMock,
-      search: esClientSearchMock,
+      esql: { query: esClientSearchMock },
     } as unknown as ElasticsearchClient;
 
     const { baselineTotalDocCount, deviationTotalDocCount, keywordFieldCandidates } =
@@ -59,18 +55,14 @@ describe('fetchIndexInfo', () => {
 
   it('returns field candidates and total hits for pgBench mappings', async () => {
     const esClientFieldCapsMock = jest.fn(() => fieldCapsPgBenchMock);
-    const esClientSearchMock = jest.fn((req: estypes.SearchRequest): estypes.SearchResponse => {
-      return {
-        hits: {
-          hits: [],
-          total: { value: 5000000 },
-        },
-      } as unknown as estypes.SearchResponse;
-    });
+    const esClientSearchMock = jest.fn(async (_req: EsqlQueryRequest) => ({
+      columns: [{ name: 'total', type: 'long' }],
+      values: [[5000000]],
+    }));
 
     const esClientMock = {
       fieldCaps: esClientFieldCapsMock,
-      search: esClientSearchMock,
+      esql: { query: esClientSearchMock },
     } as unknown as ElasticsearchClient;
 
     const {
@@ -140,18 +132,14 @@ describe('fetchIndexInfo', () => {
 
   it('returns field candidates and total hits for ecommerce mappings', async () => {
     const esClientFieldCapsMock = jest.fn(() => fieldCapsEcommerceMock);
-    const esClientSearchMock = jest.fn((req: estypes.SearchRequest): estypes.SearchResponse => {
-      return {
-        hits: {
-          hits: [],
-          total: { value: 5000000 },
-        },
-      } as unknown as estypes.SearchResponse;
-    });
+    const esClientSearchMock = jest.fn(async (_req: EsqlQueryRequest) => ({
+      columns: [{ name: 'total', type: 'long' }],
+      values: [[5000000]],
+    }));
 
     const esClientMock = {
       fieldCaps: esClientFieldCapsMock,
-      search: esClientSearchMock,
+      esql: { query: esClientSearchMock },
     } as unknown as ElasticsearchClient;
 
     const {
@@ -200,18 +188,14 @@ describe('fetchIndexInfo', () => {
 
   it('returns field candidates and total hits for large-arrays mappings', async () => {
     const esClientFieldCapsMock = jest.fn(() => fieldCapsLargeArraysMock);
-    const esClientSearchMock = jest.fn((req: estypes.SearchRequest): estypes.SearchResponse => {
-      return {
-        hits: {
-          hits: [],
-          total: { value: 5000000 },
-        },
-      } as unknown as estypes.SearchResponse;
-    });
+    const esClientSearchMock = jest.fn(async (_req: EsqlQueryRequest) => ({
+      columns: [{ name: 'total', type: 'long' }],
+      values: [[5000000]],
+    }));
 
     const esClientMock = {
       fieldCaps: esClientFieldCapsMock,
-      search: esClientSearchMock,
+      esql: { query: esClientSearchMock },
     } as unknown as ElasticsearchClient;
 
     const {
@@ -230,5 +214,74 @@ describe('fetchIndexInfo', () => {
     expect(deviationTotalDocCount).toEqual(5000000);
     expect(esClientFieldCapsMock).toHaveBeenCalledTimes(1);
     expect(esClientSearchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts the documents of each window with a STATS query and the search query as filter', async () => {
+    const esClientSearchMock = jest.fn(async (_req: EsqlQueryRequest) => ({
+      columns: [{ name: 'total', type: 'long' }],
+      values: [[7]],
+    }));
+    const esClientMock = {
+      fieldCaps: jest.fn(() => ({ fields: {} })),
+      esql: { query: esClientSearchMock },
+    } as unknown as ElasticsearchClient;
+
+    const { baselineTotalDocCount, zeroDocsFallback } = await fetchIndexInfo({
+      esClient: esClientMock,
+      arguments: {
+        ...paramsSearchQueryMock,
+        textFieldCandidatesOverrides: [],
+        skipFieldCandidates: true,
+      },
+    });
+
+    expect(baselineTotalDocCount).toBe(7);
+    expect(zeroDocsFallback).toBe(false);
+    expect(esClientSearchMock).toHaveBeenCalledTimes(2);
+    const request = esClientSearchMock.mock.calls[0][0];
+    expect(request.query).toBe(`FROM ${paramsSearchQueryMock.index} | STATS total = COUNT(*)`);
+    expect(request.filter).toEqual({
+      bool: {
+        filter: expect.arrayContaining([
+          {
+            range: {
+              [paramsSearchQueryMock.timeFieldName]: {
+                gte: paramsSearchQueryMock.baselineMin,
+                lte: paramsSearchQueryMock.baselineMax,
+                format: 'epoch_millis',
+              },
+            },
+          },
+        ]),
+      },
+    });
+  });
+
+  it('counts no documents for a missing index', async () => {
+    const esClientMock = {
+      fieldCaps: jest.fn(() => ({ fields: {} })),
+      esql: {
+        query: jest.fn().mockRejectedValue({
+          statusCode: 400,
+          body: {
+            error: { type: 'verification_exception', reason: 'Unknown index [my-index]' },
+          },
+        }),
+      },
+    } as unknown as ElasticsearchClient;
+
+    const { baselineTotalDocCount, deviationTotalDocCount, zeroDocsFallback } =
+      await fetchIndexInfo({
+        esClient: esClientMock,
+        arguments: {
+          ...paramsSearchQueryMock,
+          textFieldCandidatesOverrides: [],
+          skipFieldCandidates: true,
+        },
+      });
+
+    expect(baselineTotalDocCount).toBe(0);
+    expect(deviationTotalDocCount).toBe(0);
+    expect(zeroDocsFallback).toBe(true);
   });
 });

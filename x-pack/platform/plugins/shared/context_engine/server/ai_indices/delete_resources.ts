@@ -11,8 +11,10 @@ import type {
   KibanaRequest,
   Logger,
 } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 import { DEFAULT_SPACE_ID } from '@kbn/core-spaces-common';
 import { isResponseError } from '@kbn/es-errors';
+import { esqlRows, runEsqlRead } from '../utils/esql_read';
 import { formatErrorMessage } from '../utils/format_es_error';
 import { MAX_AI_INDICES } from '../../common/constants';
 import { isIndexPattern } from '../../common/ai_index_dest';
@@ -30,24 +32,26 @@ const findOtherUsersOfDest = async (
   destValue: string,
   exclude: { aiIndexId: string; spaceId: string }
 ): Promise<string[]> => {
-  const response = await esClient.search<StoredAiIndexDocument>({
-    index: aiIndicesIndexName,
-    size: MAX_AI_INDICES,
-    track_total_hits: false,
-    query: {
+  // The identity of the entry being deleted is Query DSL (`ids` and the default-space match).
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([aiIndicesIndexName], ['_id', '_source']).pipe`WHERE dest.value == ${{
+      dest: destValue,
+    }}`.pipe`KEEP _id, _source`.pipe`LIMIT ${{ limit: MAX_AI_INDICES }}`,
+    filter: {
       bool: {
-        filter: [{ term: { 'dest.value': destValue } }],
         must_not: [createAiIndexIdentityDslFilter(exclude.aiIndexId, exclude.spaceId)],
       },
     },
   });
-  return response.hits.hits.flatMap((hit) => {
-    const id = hit._source?.id ?? hit._id;
+  return esqlRows(response).flatMap((row) => {
+    const source = row._source as StoredAiIndexDocument | null | undefined;
+    const id = source?.id ?? (typeof row._id === 'string' ? row._id : undefined);
     if (id === undefined) {
       return [];
     }
     // Pre-upgrade documents carry no `space` and belong to the default space.
-    const space = hit._source?.space ?? DEFAULT_SPACE_ID;
+    const space = source?.space ?? DEFAULT_SPACE_ID;
     return [space === exclude.spaceId ? id : `${space}/${id}`];
   });
 };

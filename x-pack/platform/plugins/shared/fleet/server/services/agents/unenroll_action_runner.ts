@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { SavedObjectsClientContract, ElasticsearchClient } from '@kbn/core/server';
 
 import { intersection } from 'lodash';
+import { esql } from '@elastic/esql';
 
 import { AGENT_ACTIONS_RESULTS_INDEX } from '../../../common';
 
@@ -24,6 +25,7 @@ import { outputType } from '../../../common/constants';
 import { invalidateAPIKeys } from '../api_keys';
 
 import { appContextService } from '../app_context';
+import { esqlRows, runEsqlRead } from '../esql_read';
 import { outputService } from '../output';
 
 import { getCurrentNamespace } from '../spaces/get_current_namespace';
@@ -238,18 +240,18 @@ async function getAgentsWithoutActionResults(
   commonAgents: string[]
 ): Promise<string[]> {
   try {
-    const res = await esClient.search({
-      index: AGENT_ACTIONS_RESULTS_INDEX,
-      query: {
-        bool: {
-          must: [{ term: { action_id: actionId } }, { terms: { agent_id: commonAgents } }],
-        },
-      },
-      size: commonAgents.length,
+    const res = await runEsqlRead({
+      esClient,
+      query: esql.from([AGENT_ACTIONS_RESULTS_INDEX]).where`action_id == ${{
+        actionId,
+      }} AND agent_id IN (${{ commonAgents }})`
+        .keep('agent_id')
+        .limit(commonAgents.length),
+      // .fleet-actions-results does not yet exist: no action results
+      ignoreUnknownIndex: true,
     });
-    const agentsToUpdate = commonAgents.filter(
-      (agentId) => !res.hits.hits.find((hit) => (hit._source as any)?.agent_id === agentId)
-    );
+    const agentsWithResults = new Set(esqlRows(res).map((row) => row.agent_id));
+    const agentsToUpdate = commonAgents.filter((agentId) => !agentsWithResults.has(agentId));
     return agentsToUpdate;
   } catch (err) {
     if (err.statusCode === 404) {

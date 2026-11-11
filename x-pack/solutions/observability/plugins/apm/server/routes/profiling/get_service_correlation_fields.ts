@@ -15,15 +15,8 @@ import {
 } from '../../../common/es_fields/apm';
 import type { RollupInterval } from '../../../common/rollup';
 import { environmentQuery } from '../../../common/utils/environment_query';
+import { boolFilter, getTopValues } from '../../lib/helpers/esql_apm';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
-
-const getBucketKeysAsString = (
-  buckets?: Array<{
-    doc_count: number;
-    key: string | number;
-    key_as_string?: string | undefined;
-  }>
-) => buckets?.map((bucket) => bucket.key as string) || [];
 
 export async function getServiceCorrelationFields({
   apmEventClient,
@@ -42,59 +35,31 @@ export async function getServiceCorrelationFields({
   documentType: ApmServiceTransactionDocumentType;
   rollupInterval: RollupInterval;
 }) {
-  const response = await apmEventClient.search('get_service_host_names', {
-    apm: {
-      sources: [{ documentType, rollupInterval }],
-    },
-    track_total_hits: false,
-    size: 0,
-    query: {
-      bool: {
-        filter: [
-          { term: { [SERVICE_NAME]: serviceName } },
-          ...rangeQuery(start, end),
-          ...environmentQuery(environment),
-        ],
-      },
-    },
-    aggs: {
-      hostHostNames: {
-        terms: {
-          field: HOST_HOSTNAME,
-          size: 500,
-        },
-      },
-      hostNames: {
-        terms: {
-          field: HOST_NAME,
-          size: 500,
-        },
-      },
-      containerIds: {
-        terms: {
-          field: CONTAINER_ID,
-          size: 500,
-        },
-      },
-      deploymentNames: {
-        terms: {
-          field: KUBERNETES_DEPLOYMENT_NAME,
-          size: 500,
-        },
-      },
-    },
-  });
+  const apm = { sources: [{ documentType, rollupInterval }] };
+  const filter = boolFilter(...rangeQuery(start, end), ...environmentQuery(environment));
+  const getValues = (field: string) =>
+    getTopValues({
+      apmEventClient,
+      operationName: 'get_service_host_names',
+      apm,
+      field,
+      size: 500,
+      where: [[SERVICE_NAME, serviceName]],
+      filter,
+    });
 
-  const allHostNames = [
-    ...getBucketKeysAsString(response.aggregations?.hostHostNames.buckets),
-    ...getBucketKeysAsString(response.aggregations?.hostNames.buckets),
-  ];
-  const hostNames = new Set<string>(allHostNames);
-  const deploymentNames = getBucketKeysAsString(response.aggregations?.deploymentNames.buckets);
+  const [hostHostNames, hostNamesOfService, containerIds, deploymentNames] = await Promise.all([
+    getValues(HOST_HOSTNAME),
+    getValues(HOST_NAME),
+    getValues(CONTAINER_ID),
+    getValues(KUBERNETES_DEPLOYMENT_NAME),
+  ]);
+
+  const hostNames = new Set<string>([...hostHostNames, ...hostNamesOfService]);
 
   return {
     hostNames: Array.from(hostNames),
-    containerIds: getBucketKeysAsString(response.aggregations?.containerIds.buckets),
+    containerIds,
     // Profiling samples carry the Kubernetes workload name as `orchestrator.resource.name`. Prefer
     // the deployment name when the collector enriched the APM data with it; otherwise fall back to
     // the service name, which is what the workload is called in most deployments.

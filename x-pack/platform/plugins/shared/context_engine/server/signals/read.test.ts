@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { errors } from '@elastic/elasticsearch';
 import { elasticsearchServiceMock } from '@kbn/core/server/mocks';
 import type { Signal } from '../../common/http_api/signals';
 import { getSignalGroups, getSignalsByTag } from './read';
@@ -35,34 +36,31 @@ const buildSignal = (overrides: Partial<Signal> = {}): Signal => ({
 });
 
 describe('getSignalGroups', () => {
-  it("runs a terms aggregation over the tags keyword field of the current space's signals index", async () => {
-    const esClient = elasticsearchServiceMock.createElasticsearchClient();
-    esClient.search.mockResolvedValue({
-      aggregations: {
-        tags: {
-          buckets: [
-            { key: 'query_error', doc_count: 7 },
-            { key: 'empty_retrieval', doc_count: 3 },
-          ],
-        },
-      },
+  const tagCounts = (rows: Array<[number, string]>) =>
+    ({
+      columns: [
+        { name: 'count', type: 'long' },
+        { name: 'tag', type: 'keyword' },
+      ],
+      values: rows,
     } as any);
+
+  it("counts the tags keyword field of the current space's signals index with STATS", async () => {
+    const esClient = elasticsearchServiceMock.createElasticsearchClient();
+    esClient.esql.query.mockResolvedValue(
+      tagCounts([
+        [7, 'query_error'],
+        [3, 'empty_retrieval'],
+      ])
+    );
 
     const result = await getSignalGroups(esClient, { spaceId: 'default', maxGroups: 100 });
 
-    expect(esClient.search).toHaveBeenCalledWith(
-      expect.objectContaining({
-        index: 'context-engine-signals-default',
-        size: 0,
-        ignore_unavailable: true,
-        allow_no_indices: true,
-        aggs: {
-          tags: {
-            terms: { field: 'tags', size: 100, order: { _count: 'desc' } },
-          },
-        },
-      })
-    );
+    expect(esClient.esql.query).toHaveBeenCalledWith({
+      query:
+        'FROM context-engine-signals-default | WHERE tags IS NOT NULL | STATS count = COUNT(*) BY tag = tags | SORT count DESC, tag ASC | LIMIT ?limit',
+      params: [{ limit: 100 }],
+    });
     expect(result).toEqual({
       groups: [
         { tag: 'query_error', count: 7 },
@@ -73,22 +71,46 @@ describe('getSignalGroups', () => {
 
   it('reads the index for the requested space', async () => {
     const esClient = elasticsearchServiceMock.createElasticsearchClient();
-    esClient.search.mockResolvedValue({ aggregations: { tags: { buckets: [] } } } as any);
+    esClient.esql.query.mockResolvedValue(tagCounts([]));
 
     await getSignalGroups(esClient, { spaceId: 'marketing', maxGroups: 100 });
 
-    expect(esClient.search).toHaveBeenCalledWith(
-      expect.objectContaining({ index: 'context-engine-signals-marketing' })
+    expect(esClient.esql.query).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: expect.stringContaining('FROM context-engine-signals-marketing'),
+      })
     );
   });
 
   it('returns an empty group list when the index has no signals', async () => {
     const esClient = elasticsearchServiceMock.createElasticsearchClient();
-    esClient.search.mockResolvedValue({} as any);
+    esClient.esql.query.mockResolvedValue({ columns: [], values: [] } as any);
 
     const result = await getSignalGroups(esClient, { spaceId: 'default', maxGroups: 100 });
 
     expect(result).toEqual({ groups: [] });
+  });
+
+  it('returns an empty group list when the index does not exist', async () => {
+    const esClient = elasticsearchServiceMock.createElasticsearchClient();
+    esClient.esql.query.mockRejectedValue(
+      new errors.ResponseError({
+        statusCode: 400,
+        body: {
+          error: {
+            type: 'verification_exception',
+            reason: 'Unknown index [context-engine-signals-default]',
+          },
+        },
+        warnings: [],
+        headers: {},
+        meta: {} as never,
+      })
+    );
+
+    expect(await getSignalGroups(esClient, { spaceId: 'default', maxGroups: 100 })).toEqual({
+      groups: [],
+    });
   });
 });
 

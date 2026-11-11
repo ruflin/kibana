@@ -32,15 +32,29 @@ describe('getAgentUploads', () => {
   });
 
   it('should return right list of files', async () => {
+    esClient.esql = {
+      query: jest.fn().mockImplementation(({ query }: { query: string }) => {
+        if (query.startsWith(`FROM ${AGENT_ACTIONS_INDEX} `)) {
+          return {
+            columns: [
+              { name: 'action_id', type: 'keyword' },
+              { name: '@timestamp', type: 'date' },
+              { name: 'expiration', type: 'date' },
+            ],
+            values: AGENT_ACTIONS_FIXTURES.map(({ _source }) => [
+              _source.action_id,
+              _source['@timestamp'],
+              _source.expiration,
+            ]),
+          };
+        }
+        return {
+          columns: [{ name: '_source', type: '_source' }],
+          values: AGENT_ACTIONS_RESULTS_FIXTURES.map(({ _source }) => [_source]),
+        };
+      }),
+    } as unknown as ElasticsearchClient['esql'];
     esClient.search = jest.fn().mockImplementation(({ index, query }) => {
-      if (index === AGENT_ACTIONS_INDEX) {
-        return { hits: { hits: AGENT_ACTIONS_FIXTURES } };
-      }
-
-      if (index === AGENT_ACTIONS_RESULTS_INDEX) {
-        return { hits: { hits: AGENT_ACTIONS_RESULTS_FIXTURES } };
-      }
-
       if (index === FILE_STORAGE_METADATA_AGENT_INDEX) {
         const actionId = query.bool.filter.bool.must[1].term.action_id as string;
         if (FILES_METADATA_BY_ACTION_ID[actionId]) {
@@ -63,6 +77,17 @@ describe('getAgentUploads', () => {
       }
     });
     expect(response.map(({ createTime, name, ...rest }) => rest)).toMatchSnapshot();
+
+    const [actionsRequest, resultsRequest] = (esClient.esql.query as jest.Mock).mock.calls.map(
+      ([request]) => request
+    );
+    expect(actionsRequest.query).toBe(
+      `FROM ${AGENT_ACTIONS_INDEX} | WHERE type == "REQUEST_DIAGNOSTICS" | SORT @timestamp DESC NULLS LAST | KEEP action_id, @timestamp, expiration | LIMIT 10000`
+    );
+    // the multi-valued `agents` field is matched by the Query DSL filter
+    expect(actionsRequest.filter).toEqual({ term: { agents: 'agent-1' } });
+    expect(resultsRequest.query).toContain(`FROM ${AGENT_ACTIONS_RESULTS_INDEX} METADATA _source`);
+    expect(resultsRequest.query).toContain('AND agent_id == ?agentId');
   });
 });
 
@@ -78,24 +103,31 @@ describe('getAgentIdForUploadFile', () => {
   });
 
   it('should return the agent id from file metadata', async () => {
-    esClient.search = jest.fn().mockResolvedValueOnce({
-      hits: { hits: [{ _id: 'file-1', _source: { agent_id: 'agent-1' } }] },
-    });
+    esClient.esql = {
+      query: jest.fn().mockResolvedValueOnce({
+        columns: [{ name: 'agent_id', type: 'keyword' }],
+        values: [['agent-1']],
+      }),
+    } as unknown as ElasticsearchClient['esql'];
 
     const result = await getAgentIdForUploadFile(esClient, 'file-1');
 
     expect(result).toBe('agent-1');
-    expect(esClient.search).toHaveBeenCalledWith(
+    expect(esClient.esql.query).toHaveBeenCalledWith(
       expect.objectContaining({
-        index: FILE_STORAGE_METADATA_AGENT_INDEX,
-        query: { ids: { values: ['file-1'] } },
-        _source: ['agent_id'],
+        query: `FROM ${FILE_STORAGE_METADATA_AGENT_INDEX} METADATA _id | WHERE _id == ?fileId | KEEP agent_id | LIMIT 1`,
+        params: [{ fileId: 'file-1' }],
       })
     );
   });
 
   it('should throw FleetNotFoundError when file is not found', async () => {
-    esClient.search = jest.fn().mockResolvedValueOnce({ hits: { hits: [] } });
+    esClient.esql = {
+      query: jest.fn().mockResolvedValueOnce({
+        columns: [{ name: 'agent_id', type: 'keyword' }],
+        values: [],
+      }),
+    } as unknown as ElasticsearchClient['esql'];
 
     await expect(getAgentIdForUploadFile(esClient, 'missing-file')).rejects.toThrow(
       'File missing-file not found'

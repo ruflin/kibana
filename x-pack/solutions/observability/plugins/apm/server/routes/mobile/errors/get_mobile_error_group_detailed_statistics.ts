@@ -5,15 +5,24 @@
  * 2.0.
  */
 import { keyBy } from 'lodash';
-import { rangeQuery, kqlQuery, termQuery, termsQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { rangeQuery, kqlQuery, termQuery } from '@kbn/observability-plugin/server';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import type { MobileErrorGroupPeriodsResponse } from '@kbn/apm-api-shared';
 import { offsetPreviousPeriodCoordinates } from '../../../../common/utils/offset_previous_period_coordinate';
 import type { Coordinate } from '../../../../typings/timeseries';
-import { ERROR_GROUP_ID, SERVICE_NAME } from '../../../../common/es_fields/apm';
+import { ERROR_GROUP_ID, ERROR_TYPE, SERVICE_NAME } from '../../../../common/es_fields/apm';
 import { environmentQuery } from '../../../../common/utils/environment_query';
 import { getBucketSize } from '../../../../common/utils/get_bucket_size';
 import { getOffsetInMs } from '../../../../common/utils/get_offset_in_ms';
+import {
+  addTimeBucket,
+  countByGroupAndBucket,
+  esqlGroupedSeries,
+  getTimeBucketKeys,
+  whereIn,
+  whereTerm,
+} from '../../../lib/helpers/esql_values';
 import type { APMEventClient } from '../../../lib/helpers/create_es_client/create_apm_event_client';
 
 interface ErrorGroupDetailedStat {
@@ -48,74 +57,57 @@ export async function getMobileErrorGroupDetailedStatistics({
     offset,
   });
 
-  const { intervalString } = getBucketSize({
+  const { bucketSize } = getBucketSize({
     start: startWithOffset,
     end: endWithOffset,
     numBuckets,
   });
+  const intervalMs = bucketSize * 1000;
+  const bucketKeys = getTimeBucketKeys({
+    start: startWithOffset,
+    end: endWithOffset,
+    intervalMs,
+  });
 
-  const timeseriesResponse = await apmEventClient.search(
+  const timeseriesResponse = await apmEventClient.esql(
     'get_service_error_group_detailed_statistics',
     {
       apm: {
         events: [ProcessorEvent.error],
       },
-      track_total_hits: false,
-      size: 0,
-      query: {
+      query: (index) =>
+        countByGroupAndBucket(
+          addTimeBucket(
+            whereIn(
+              whereTerm(esql.from(index), SERVICE_NAME, serviceName),
+              ERROR_GROUP_ID,
+              groupIds
+            ),
+            intervalMs
+          ),
+          ERROR_GROUP_ID,
+          { groupIds, bucketCount: bucketKeys.length }
+        ),
+      filter: {
         bool: {
+          // Documents without an error type are not crashes.
+          must_not: termQuery(ERROR_TYPE, 'crash'),
           filter: [
-            ...termsQuery(ERROR_GROUP_ID, ...groupIds),
-            ...termQuery(SERVICE_NAME, serviceName),
             ...rangeQuery(startWithOffset, endWithOffset),
             ...environmentQuery(environment),
             ...kqlQuery(kuery),
           ],
-          must_not: {
-            term: { 'error.type': 'crash' },
-          },
-        },
-      },
-      aggs: {
-        error_groups: {
-          terms: {
-            field: ERROR_GROUP_ID,
-            size: 500,
-          },
-          aggs: {
-            timeseries: {
-              date_histogram: {
-                field: '@timestamp',
-                fixed_interval: intervalString,
-                min_doc_count: 0,
-                extended_bounds: {
-                  min: startWithOffset,
-                  max: endWithOffset,
-                },
-              },
-            },
-          },
         },
       },
     }
   );
 
-  if (!timeseriesResponse.aggregations) {
-    return [];
-  }
-
-  return timeseriesResponse.aggregations.error_groups.buckets.map((bucket) => {
-    const groupId = bucket.key as string;
-    return {
-      groupId,
-      timeseries: bucket.timeseries.buckets.map((timeseriesBucket) => {
-        return {
-          x: timeseriesBucket.key,
-          y: timeseriesBucket.doc_count,
-        };
-      }),
-    };
-  });
+  return esqlGroupedSeries(timeseriesResponse, ERROR_GROUP_ID, bucketKeys).map(
+    ({ group, timeseries }) => ({
+      groupId: group,
+      timeseries,
+    })
+  );
 }
 
 export async function getMobileErrorGroupPeriods({

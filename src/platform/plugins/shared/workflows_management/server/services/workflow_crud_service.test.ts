@@ -91,9 +91,16 @@ const occSearchHit = (
 
 const makeStorageClient = () => ({
   search: jest.fn(),
+  esql: jest.fn().mockResolvedValue({ columns: [], values: [] }),
   index: jest.fn().mockResolvedValue({ result: 'created', _seq_no: 1, _primary_term: 1 }),
   bulk: jest.fn(),
   delete: jest.fn().mockResolvedValue({ result: 'deleted' }),
+});
+
+/** The ES|QL response of the existing-id lookup: one `_id` row per workflow found. */
+const idsResponse = (...ids: string[]) => ({
+  columns: [{ name: '_id', type: 'keyword' }],
+  values: ids.map((id) => [id]),
 });
 
 const makeSecurityMock = (username: string = 'alice') =>
@@ -527,7 +534,7 @@ describe('WorkflowCrudService', () => {
     it('indexes a new workflow and returns the resulting DTO', async () => {
       const { deps, client } = makeDeps();
       // No existing workflow for the generated id.
-      client.search.mockResolvedValue({ hits: { hits: [] } });
+      client.esql.mockResolvedValue(idsResponse());
 
       const service = new WorkflowCrudService(deps);
       const result = await service.createWorkflow({ yaml: validYaml }, 'default', request);
@@ -553,7 +560,7 @@ describe('WorkflowCrudService', () => {
       };
       const { deps, client } = makeDeps();
       deps.changeHistoryService = changeHistoryService as any;
-      client.search.mockResolvedValue({ hits: { hits: [] } });
+      client.esql.mockResolvedValue(idsResponse());
 
       const service = new WorkflowCrudService(deps);
       await service.createWorkflow({ yaml: validYaml }, 'default', request);
@@ -574,7 +581,7 @@ describe('WorkflowCrudService', () => {
 
     it('does not generate a reserved workflow ID from the YAML name', async () => {
       const { deps, client } = makeDeps();
-      client.search.mockResolvedValue({ hits: { hits: [] } });
+      client.esql.mockResolvedValue(idsResponse());
       const reservedNameYaml = validYaml.replace('name: My Workflow', 'name: system-workflow Copy');
 
       const service = new WorkflowCrudService(deps);
@@ -597,11 +604,7 @@ describe('WorkflowCrudService', () => {
       // checkExistingIds uses an ids query (no bool/must_not) and is index-wide
       // so it implicitly includes tombstones — soft-deleted workflows still have
       // their _id, so they will be returned.
-      client.search.mockResolvedValue({
-        hits: {
-          hits: [{ _id: 'dup-id', _source: makeSource({ name: 'existing' }) }],
-        },
-      });
+      client.esql.mockResolvedValue(idsResponse('dup-id'));
 
       const service = new WorkflowCrudService(deps);
       await expect(
@@ -611,8 +614,12 @@ describe('WorkflowCrudService', () => {
 
       // The ID-uniqueness check must NOT be space-scoped (workflow IDs are globally
       // unique to preserve the human-readable quality) and must NOT exclude tombstones.
-      const searchArgs = client.search.mock.calls[0][0];
-      expect(searchArgs.query).toEqual({ ids: { values: ['dup-id'] } });
+      const esqlArgs = client.esql.mock.calls[0][0];
+      expect(esqlArgs.pipeline.toRequest().query).toBe(
+        'WHERE _id IN ("dup-id") | KEEP _id | LIMIT ?limit'
+      );
+      expect(esqlArgs.metadata).toEqual(['_id']);
+      expect(esqlArgs.filter).toBeUndefined();
     });
 
     // --- Global uniqueness + TOCTOU regression coverage ---------------------
@@ -643,18 +650,14 @@ describe('WorkflowCrudService', () => {
       ].join('\n');
 
       // Space A: nothing in the index yet.
-      client.search.mockResolvedValueOnce({ hits: { hits: [] } });
+      client.esql.mockResolvedValueOnce(idsResponse());
 
       const service = new WorkflowCrudService(deps);
       const resultA = await service.createWorkflow({ yaml: yamlA }, 'space-a', request);
 
       // Space B: the same human-readable base ID ("my-workflow") is now taken
       // globally, so the resolver must skip it and fall through to "my-workflow-1".
-      client.search.mockResolvedValueOnce({
-        hits: {
-          hits: [{ _id: resultA.id, _source: makeSource({ spaceId: 'space-a' }) }],
-        },
-      });
+      client.esql.mockResolvedValueOnce(idsResponse(resultA.id));
       const resultB = await service.createWorkflow({ yaml: yamlA }, 'space-b', request);
 
       expect(resultA.id).toBe('my-workflow');
@@ -685,11 +688,7 @@ describe('WorkflowCrudService', () => {
     it('rejects a user-supplied ID that is taken in another space (global uniqueness)', async () => {
       const { deps, client } = makeDeps();
       // The user picks "shared-id" in space-b, but it is already taken in space-a.
-      client.search.mockResolvedValue({
-        hits: {
-          hits: [{ _id: 'shared-id', _source: makeSource({ spaceId: 'space-a' }) }],
-        },
-      });
+      client.esql.mockResolvedValue(idsResponse('shared-id'));
 
       const service = new WorkflowCrudService(deps);
       await expect(
@@ -704,19 +703,7 @@ describe('WorkflowCrudService', () => {
       // owns the `_id`, so reusing it would resurrect or collide with that doc.
       // The check must surface this case even though the document carries a
       // `deleted_at` timestamp and lives in a different space.
-      client.search.mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _id: 'recycled-id',
-              _source: makeSource({
-                spaceId: 'space-other',
-                deleted_at: '2024-06-01T00:00:00.000Z' as unknown as null,
-              }),
-            },
-          ],
-        },
-      });
+      client.esql.mockResolvedValue(idsResponse('recycled-id'));
 
       const service = new WorkflowCrudService(deps);
       await expect(
@@ -727,8 +714,11 @@ describe('WorkflowCrudService', () => {
       // The check must use a flat ids query — a `bool.must_not exists deleted_at`
       // clause would silently let the caller reuse a tombstoned ID, which the
       // human-readable-ID contract forbids.
-      const searchArgs = client.search.mock.calls[0][0];
-      expect(searchArgs.query).toEqual({ ids: { values: ['recycled-id'] } });
+      const esqlArgs = client.esql.mock.calls[0][0];
+      expect(esqlArgs.pipeline.toRequest().query).toBe(
+        'WHERE _id IN ("recycled-id") | KEEP _id | LIMIT ?limit'
+      );
+      expect(esqlArgs.filter).toBeUndefined();
     });
 
     it('skips a server-generated base ID that matches a soft-deleted tombstone', async () => {
@@ -736,19 +726,7 @@ describe('WorkflowCrudService', () => {
       // The natural base ID derived from the YAML name ("my-workflow") is a
       // tombstone in some other space. The resolver must walk past it instead
       // of handing it back as available.
-      client.search.mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _id: 'my-workflow',
-              _source: makeSource({
-                spaceId: 'space-other',
-                deleted_at: '2024-06-01T00:00:00.000Z' as unknown as null,
-              }),
-            },
-          ],
-        },
-      });
+      client.esql.mockResolvedValue(idsResponse('my-workflow'));
 
       const service = new WorkflowCrudService(deps);
       const result = await service.createWorkflow({ yaml: validYaml }, 'default', request);
@@ -762,13 +740,9 @@ describe('WorkflowCrudService', () => {
     it('retries a server-generated ID that loses a TOCTOU race (op_type:create returns 409)', async () => {
       const { deps, client } = makeDeps();
       // Precheck #1 (resolver): nothing exists, picks "my-workflow".
-      client.search.mockResolvedValueOnce({ hits: { hits: [] } });
+      client.esql.mockResolvedValueOnce(idsResponse());
       // Precheck #2 after the 409 (re-resolve): "my-workflow" now appears taken.
-      client.search.mockResolvedValueOnce({
-        hits: {
-          hits: [{ _id: 'my-workflow', _source: makeSource() }],
-        },
-      });
+      client.esql.mockResolvedValueOnce(idsResponse('my-workflow'));
 
       const conflict = Object.assign(new Error('version conflict'), {
         statusCode: 409,
@@ -796,7 +770,7 @@ describe('WorkflowCrudService', () => {
     it('does NOT retry a user-supplied ID that loses a TOCTOU race (caller picked the ID)', async () => {
       const { deps, client } = makeDeps();
       // Precheck says it is free at the moment of the call.
-      client.search.mockResolvedValue({ hits: { hits: [] } });
+      client.esql.mockResolvedValue(idsResponse());
       const conflict = Object.assign(new Error('version conflict'), {
         statusCode: 409,
         meta: { statusCode: 409 },
@@ -813,7 +787,7 @@ describe('WorkflowCrudService', () => {
 
     it('re-throws non-409 errors from index() without retrying', async () => {
       const { deps, client } = makeDeps();
-      client.search.mockResolvedValue({ hits: { hits: [] } });
+      client.esql.mockResolvedValue(idsResponse());
       const serverErr = Object.assign(new Error('cluster_block_exception'), {
         statusCode: 503,
       });
@@ -829,7 +803,7 @@ describe('WorkflowCrudService', () => {
     it('gives up after the TOCTOU retry budget when every attempt loses the race', async () => {
       const { deps, client } = makeDeps();
       // Every precheck reports the index is free, but every write loses to a concurrent writer.
-      client.search.mockResolvedValue({ hits: { hits: [] } });
+      client.esql.mockResolvedValue(idsResponse());
       const conflict = Object.assign(new Error('version conflict'), {
         statusCode: 409,
         meta: { statusCode: 409 },
@@ -864,9 +838,7 @@ describe('WorkflowCrudService', () => {
 
     it('returns only the subset of IDs that exist', async () => {
       const { deps, client } = makeDeps();
-      client.search.mockResolvedValueOnce({
-        hits: { hits: [{ _id: 'a' }] },
-      });
+      client.esql.mockResolvedValueOnce(idsResponse('a'));
       const service = new WorkflowCrudService(deps);
       const result = await service.findExistingWorkflowIds(['a', 'b', 'c']);
       expect(result).toEqual(['a']);
@@ -878,19 +850,17 @@ describe('WorkflowCrudService', () => {
       // conflict was silently missed. findExistingWorkflowIds must use a plain ids
       // query with no bool/must clause so cross-space documents are matched.
       const { deps, client } = makeDeps();
-      client.search.mockResolvedValueOnce({
-        hits: {
-          hits: [{ _id: 'cross-space-id', _source: makeSource({ spaceId: 'space-other' }) }],
-        },
-      });
+      client.esql.mockResolvedValueOnce(idsResponse('cross-space-id'));
       const service = new WorkflowCrudService(deps);
       const result = await service.findExistingWorkflowIds(['cross-space-id']);
       expect(result).toContain('cross-space-id');
 
-      const searchArgs = client.search.mock.calls[0][0];
-      expect(searchArgs.query).toEqual({ ids: { values: ['cross-space-id'] } });
-      // Must NOT have a bool.must clause that would scope the query to a space.
-      expect(searchArgs.query.bool).toBeUndefined();
+      const esqlArgs = client.esql.mock.calls[0][0];
+      expect(esqlArgs.pipeline.toRequest().query).toBe(
+        'WHERE _id IN ("cross-space-id") | KEEP _id | LIMIT ?limit'
+      );
+      // Must NOT have a filter or a space clause that would scope the query to a space.
+      expect(esqlArgs.filter).toBeUndefined();
     });
 
     it('returns soft-deleted tombstone IDs so import-preflight detects resurrection conflicts', async () => {
@@ -899,27 +869,18 @@ describe('WorkflowCrudService', () => {
       // and the import then failed with an opaque write conflict.
       // findExistingWorkflowIds uses a plain ids query that matches deleted docs.
       const { deps, client } = makeDeps();
-      client.search.mockResolvedValueOnce({
-        hits: {
-          hits: [
-            {
-              _id: 'tombstoned-id',
-              _source: makeSource({
-                spaceId: 'default',
-                deleted_at: '2024-01-01T00:00:00.000Z' as unknown as null,
-              }),
-            },
-          ],
-        },
-      });
+      client.esql.mockResolvedValueOnce(idsResponse('tombstoned-id'));
       const service = new WorkflowCrudService(deps);
       const result = await service.findExistingWorkflowIds(['tombstoned-id', 'new-id']);
       expect(result).toContain('tombstoned-id');
       expect(result).not.toContain('new-id');
 
       // The search must NOT include a must_not deleted_at clause.
-      const searchArgs = client.search.mock.calls[0][0];
-      expect(searchArgs.query).toEqual({ ids: { values: ['tombstoned-id', 'new-id'] } });
+      const esqlArgs = client.esql.mock.calls[0][0];
+      expect(esqlArgs.pipeline.toRequest().query).toBe(
+        'WHERE _id IN ("tombstoned-id", "new-id") | KEEP _id | LIMIT ?limit'
+      );
+      expect(esqlArgs.pipeline.toRequest().query).not.toContain('deleted_at');
     });
   });
 
@@ -1601,11 +1562,7 @@ describe('WorkflowCrudService', () => {
     it('rejects a user-supplied id that collides with an existing workflow when overwrite=false', async () => {
       const { deps, client } = makeDeps();
       // Initial dup-check search during resolveAndDeduplicateBulkIds.
-      client.search.mockResolvedValue({
-        hits: {
-          hits: [{ _id: 'taken-id', _source: makeSource() }],
-        },
-      });
+      client.esql.mockResolvedValue(idsResponse('taken-id'));
 
       const service = new WorkflowCrudService(deps);
       const result = await service.bulkCreateWorkflows(
@@ -1623,7 +1580,7 @@ describe('WorkflowCrudService', () => {
 
     it('dedupes duplicate user-supplied ids within the same batch (first one wins)', async () => {
       const { deps, client } = makeDeps();
-      client.search.mockResolvedValue({ hits: { hits: [] } });
+      client.esql.mockResolvedValue(idsResponse());
       client.bulk.mockResolvedValue({
         items: [{ create: { _id: 'same', status: 201 } }],
       });
@@ -1800,7 +1757,7 @@ describe('WorkflowCrudService', () => {
       const { deps, client } = makeDeps();
       (deps as any).getTaskScheduler = () => taskScheduler;
 
-      client.search.mockResolvedValue({ hits: { hits: [] } });
+      client.esql.mockResolvedValue(idsResponse());
       client.bulk.mockResolvedValue({ items: [{ create: { _id: 'gen-id', status: 201 } }] });
 
       const service = new WorkflowCrudService(deps);
@@ -1810,7 +1767,8 @@ describe('WorkflowCrudService', () => {
       expect(taskScheduler.unscheduleWorkflowTasks).not.toHaveBeenCalled();
       expect(taskScheduler.scheduleWorkflowTask).not.toHaveBeenCalled();
       // Only the ID-resolution search runs — no post-write re-read for `syncSchedulerAfterSave`.
-      expect(client.search).toHaveBeenCalledTimes(1);
+      expect(client.esql).toHaveBeenCalledTimes(1);
+      expect(client.search).not.toHaveBeenCalled();
     });
 
     // --- Global uniqueness + TOCTOU regression coverage ---------------------
@@ -1819,11 +1777,7 @@ describe('WorkflowCrudService', () => {
       const { deps, client } = makeDeps();
       // resolveAndDeduplicateBulkIds queries existing IDs across the whole index;
       // a hit in another space must still surface as a conflict.
-      client.search.mockResolvedValue({
-        hits: {
-          hits: [{ _id: 'taken', _source: makeSource({ spaceId: 'space-other' }) }],
-        },
-      });
+      client.esql.mockResolvedValue(idsResponse('taken'));
 
       const service = new WorkflowCrudService(deps);
       const result = await service.bulkCreateWorkflows(
@@ -1839,27 +1793,18 @@ describe('WorkflowCrudService', () => {
 
       // The lookup must NOT include a spaceId filter — that's the regression
       // we're guarding. The query should be a flat ids query.
-      const searchArgs = client.search.mock.calls[0][0];
-      expect(searchArgs.query).toEqual({ ids: { values: ['taken'] } });
+      const esqlArgs = client.esql.mock.calls[0][0];
+      expect(esqlArgs.pipeline.toRequest().query).toBe(
+        'WHERE _id IN ("taken") | KEEP _id | LIMIT ?limit'
+      );
+      expect(esqlArgs.filter).toBeUndefined();
     });
 
     it('rejects a bulk user-supplied ID that matches a soft-deleted tombstone', async () => {
       const { deps, client } = makeDeps();
       // The collision lookup must include tombstones — bulk reuse of a
       // soft-deleted ID is just as wrong as direct create reuse.
-      client.search.mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _id: 'recycled-id',
-              _source: makeSource({
-                spaceId: 'space-other',
-                deleted_at: '2024-06-01T00:00:00.000Z' as unknown as null,
-              }),
-            },
-          ],
-        },
-      });
+      client.esql.mockResolvedValue(idsResponse('recycled-id'));
 
       const service = new WorkflowCrudService(deps);
       const result = await service.bulkCreateWorkflows(
@@ -1876,22 +1821,22 @@ describe('WorkflowCrudService', () => {
 
     it('queries the ID index globally without a spaceId filter for server-generated IDs', async () => {
       const { deps, client } = makeDeps();
-      client.search.mockResolvedValue({ hits: { hits: [] } });
+      client.esql.mockResolvedValue(idsResponse());
       client.bulk.mockResolvedValue({ items: [{ create: { _id: 'a', status: 201 } }] });
 
       const service = new WorkflowCrudService(deps);
       await service.bulkCreateWorkflows([{ yaml: validYaml('A') }], 'space-x', request);
 
       // The collision query must be a flat ids query — no `bool.must` term on spaceId.
-      const searchArgs = client.search.mock.calls[0][0];
-      expect(searchArgs.query).toMatchObject({ ids: { values: expect.any(Array) } });
-      expect(searchArgs.query.bool).toBeUndefined();
+      const esqlArgs = client.esql.mock.calls[0][0];
+      expect(esqlArgs.pipeline.toRequest().query).toMatch(/^WHERE _id IN \(.+\) \| KEEP _id/);
+      expect(esqlArgs.filter).toBeUndefined();
     });
 
     it('retries server-generated bulk entries that hit a 409 in the bulk response', async () => {
       const { deps, client } = makeDeps();
       // First lookup: nothing is taken — resolver picks "my-workflow".
-      client.search.mockResolvedValueOnce({ hits: { hits: [] } });
+      client.esql.mockResolvedValueOnce(idsResponse());
       // First bulk: the only entry loses the race with status 409.
       client.bulk.mockResolvedValueOnce({
         items: [
@@ -1905,9 +1850,7 @@ describe('WorkflowCrudService', () => {
         ],
       });
       // Re-resolve lookup: "my-workflow" is now taken in the index.
-      client.search.mockResolvedValueOnce({
-        hits: { hits: [{ _id: 'my-workflow', _source: makeSource() }] },
-      });
+      client.esql.mockResolvedValueOnce(idsResponse('my-workflow'));
       // Second bulk: succeeds with the next candidate "my-workflow-1".
       client.bulk.mockResolvedValueOnce({
         items: [{ create: { _id: 'my-workflow-1', status: 201 } }],
@@ -1928,7 +1871,7 @@ describe('WorkflowCrudService', () => {
 
     it('does NOT retry user-supplied bulk entries that hit a 409 in the bulk response', async () => {
       const { deps, client } = makeDeps();
-      client.search.mockResolvedValue({ hits: { hits: [] } });
+      client.esql.mockResolvedValue(idsResponse());
       client.bulk.mockResolvedValueOnce({
         items: [
           {

@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type {
   Signal,
@@ -14,6 +15,7 @@ import type {
   ListSignalsResponse,
 } from '../../common/http_api/signals';
 import { buildSignalsIndexName } from '../../common/http_api/signals';
+import { esqlRows, runEsqlRead } from '../utils/esql_read';
 
 /**
  * Reads run as free functions (rather than via `SignalsService`) because they need the
@@ -30,41 +32,30 @@ const LENIENT_INDEX_OPTIONS = {
 /** Fields never rendered by the UI are excluded from the per-group fetch. */
 const SIGNAL_SOURCE_EXCLUDES = ['data.returned.columns'] as const;
 
-interface TagsAggregation {
-  tags: {
-    buckets: Array<{ key: SignalTag; doc_count: number }>;
-  };
-}
-
 /**
- * Preaggregated grouped-by-tag list: a terms aggregation over the `tags` keyword field of the
- * current space's signals index. Returns one `{ tag, count }` per distinct tag, highest count first.
+ * Preaggregated grouped-by-tag list: one count per distinct value of the multi-valued `tags`
+ * keyword field of the current space's signals index, highest count first. A document carrying
+ * several tags is counted once under each.
  */
 export const getSignalGroups = async (
   esClient: ElasticsearchClient,
   { spaceId, maxGroups }: { spaceId: string; maxGroups: number }
 ): Promise<ListSignalGroupsResponse> => {
-  const response = await esClient.search<unknown, TagsAggregation>({
-    index: buildSignalsIndexName(spaceId),
-    ...LENIENT_INDEX_OPTIONS,
-    size: 0,
-    track_total_hits: false,
-    aggs: {
-      tags: {
-        terms: {
-          field: 'tags',
-          size: maxGroups,
-          order: { _count: 'desc' },
-        },
-      },
-    },
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([buildSignalsIndexName(spaceId)]).pipe`WHERE tags IS NOT NULL`
+      .pipe`STATS count = COUNT(*) BY tag = tags`.pipe`SORT count DESC, tag ASC`.pipe`LIMIT ${{
+      limit: maxGroups,
+    }}`,
+    // A missing index yields an empty result rather than an error.
+    ignoreUnknownIndex: true,
   });
 
-  const buckets = response.aggregations?.tags?.buckets ?? [];
-  const groups: SignalGroup[] = buckets.map((bucket) => ({
-    tag: bucket.key,
-    count: bucket.doc_count,
-  }));
+  const groups = esqlRows(response).flatMap((row): SignalGroup[] =>
+    typeof row.tag === 'string' && typeof row.count === 'number'
+      ? [{ tag: row.tag as SignalTag, count: row.count }]
+      : []
+  );
 
   return { groups };
 };

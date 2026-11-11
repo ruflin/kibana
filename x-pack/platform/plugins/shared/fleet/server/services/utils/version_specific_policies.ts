@@ -5,7 +5,9 @@
  * 2.0.
  */
 
+import { chunk } from 'lodash';
 import { coerce, satisfies } from 'semver';
+import { esql } from '@elastic/esql';
 
 import type { SearchResponse } from '@elastic/elasticsearch/lib/api/types';
 
@@ -13,6 +15,7 @@ import type { ElasticsearchClient, SavedObjectsClientContract } from '@kbn/core/
 import { escapeQuotes } from '@kbn/es-query';
 
 import { appContextService } from '../app_context';
+import { esqlRows, runEsqlRead } from '../esql_read';
 import { collectCompiledSecretRefIds } from '../secrets';
 import * as AgentService from '../agents';
 import type { FleetServerPolicy, FullAgentPolicy, FullAgentPolicyInput } from '../../types';
@@ -58,6 +61,9 @@ export function buildVariantAgentsKuery(
 }
 
 const MAX_VARIANT_POLICY_IDS_PER_PARENT = 1000;
+const MAX_VARIANTS_PER_PARENT = 100;
+/** `MAX_PARENTS_PER_VARIANT_QUERY * MAX_VARIANTS_PER_PARENT` stays within the 10,000 ES|QL rows. */
+const MAX_PARENTS_PER_VARIANT_QUERY = 100;
 const POLICY_ID_DISCOVERY_PAGE_SIZE = 1000;
 
 /**
@@ -68,26 +74,16 @@ export async function getVariantPolicyIdsForParent(
   esClient: ElasticsearchClient,
   parentPolicyId: string
 ): Promise<string[]> {
-  const response = await esClient.search<
-    unknown,
-    { variant_policy_ids: { buckets: Array<{ key: string }> } }
-  >({
-    index: AGENT_POLICY_INDEX,
-    ignore_unavailable: true,
-    size: 0,
-    query: {
-      bool: {
-        filter: [{ term: { [POLICY_BASE_ID_FIELD]: parentPolicyId } }],
-        must_not: [{ term: { policy_id: parentPolicyId } }],
-      },
-    },
-    aggs: {
-      variant_policy_ids: {
-        terms: { field: 'policy_id', size: MAX_VARIANT_POLICY_IDS_PER_PARENT },
-      },
-    },
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([AGENT_POLICY_INDEX]).where`policy_base_id == ${{
+      parentPolicyId,
+    }} AND policy_id != ${{
+      excludedPolicyId: parentPolicyId,
+    }}`.pipe`STATS BY policy_id`.limit(MAX_VARIANT_POLICY_IDS_PER_PARENT),
+    ignoreUnknownIndex: true,
   });
-  return (response.aggregations?.variant_policy_ids?.buckets ?? []).map((b) => b.key);
+  return esqlRows(response).map((row) => row.policy_id as string);
 }
 
 /**
@@ -400,31 +396,21 @@ export async function getAgentAssignedVersionsForPolicies(
   // Step 1: enumerate the variant policy_ids that currently exist in .fleet-policies.
   // Driving from .fleet-policies is cheaper than a prefix/wildcard scan on .fleet-agents
   // and is compatible with `search.allow_expensive_queries: false`.
-  const policiesResponse = await esClient.search<
-    unknown,
-    { variant_policy_ids: { buckets: Array<{ key: string }> } }
-  >({
-    index: AGENT_POLICY_INDEX,
-    ignore_unavailable: true,
-    size: 0,
-    query: {
-      bool: {
-        filter: [{ terms: { [POLICY_BASE_ID_FIELD]: parentPolicyIds } }],
-      },
-    },
-    aggs: {
-      variant_policy_ids: {
-        terms: {
-          field: 'policy_id',
-          size: parentPolicyIds.length * 100,
-        },
-      },
-    },
-  });
-
-  const variantIds = (policiesResponse.aggregations?.variant_policy_ids?.buckets ?? [])
-    .map((b) => b.key)
-    .filter((id) => hasAgentVersionSuffix(id));
+  // ES|QL returns at most 10,000 rows, so the parents go in chunks whose variants (up to 100 each) fit.
+  const variantIds: string[] = [];
+  for (const parentIds of chunk(parentPolicyIds, MAX_PARENTS_PER_VARIANT_QUERY)) {
+    const policiesResponse = await runEsqlRead({
+      esClient,
+      query: esql.from([AGENT_POLICY_INDEX]).where`policy_base_id IN (${{ parentIds }})`
+        .pipe`STATS BY policy_id`.limit(parentIds.length * MAX_VARIANTS_PER_PARENT),
+      ignoreUnknownIndex: true,
+    });
+    variantIds.push(
+      ...esqlRows(policiesResponse)
+        .map((row) => row.policy_id as string)
+        .filter((id) => hasAgentVersionSuffix(id))
+    );
+  }
 
   if (variantIds.length === 0) {
     return result;
@@ -432,35 +418,22 @@ export async function getAgentAssignedVersionsForPolicies(
 
   // Step 2: query .fleet-agents by the exact variant policy_ids — same field the sweep uses.
   // This catches agents enrolled by a downlevel fleet-server that have no policy_base_id.
-  const agentsResponse = await esClient.search<
-    unknown,
-    { agents_by_policy_id: { buckets: Array<{ key: string }> } }
-  >({
-    index: '.fleet-agents',
-    ignore_unavailable: true,
-    size: 0,
-    query: {
-      bool: {
-        filter: [{ terms: { policy_id: variantIds } }],
-      },
-    },
-    aggs: {
-      agents_by_policy_id: {
-        terms: {
-          field: 'policy_id',
-          size: variantIds.length,
-        },
-      },
-    },
-  });
+  // Chunked like the agent counts below, to stay within the 10,000 rows of an ES|QL response.
+  for (const variantIdsChunk of chunk(variantIds, AGENT_COUNT_CHUNK_SIZE)) {
+    const agentsResponse = await runEsqlRead({
+      esClient,
+      query: esql.from([AGENTS_INDEX]).where`policy_id IN (${{ variantIdsChunk }})`
+        .pipe`STATS BY policy_id`.limit(variantIdsChunk.length),
+      ignoreUnknownIndex: true,
+    });
 
-  const buckets = agentsResponse.aggregations?.agents_by_policy_id?.buckets ?? [];
-  for (const { key } of buckets) {
-    const { kind, baseId, version } = classifyPolicyId(key);
-    // Only agent versions have a variant to compile, not the sentinel.
-    if (kind !== 'agentVersion') continue;
-    if (!result.has(baseId)) result.set(baseId, new Set());
-    result.get(baseId)!.add(version);
+    for (const { policy_id: key } of esqlRows(agentsResponse)) {
+      const { kind, baseId, version } = classifyPolicyId(key as string);
+      // Only agent versions have a variant to compile, not the sentinel.
+      if (kind !== 'agentVersion') continue;
+      if (!result.has(baseId)) result.set(baseId, new Set());
+      result.get(baseId)!.add(version);
+    }
   }
   return result;
 }
@@ -487,26 +460,19 @@ export async function getAgentCountsForVariantPolicyIds(
     return counts;
   }
 
-  // Chunk to avoid excessively large `terms` filters.
+  // Chunk to avoid excessively large filters and to stay within the 10,000 rows of an ES|QL response.
   for (let i = 0; i < variantPolicyIds.length; i += AGENT_COUNT_CHUNK_SIZE) {
-    const chunk = variantPolicyIds.slice(i, i + AGENT_COUNT_CHUNK_SIZE);
-    const response = await esClient.search<
-      unknown,
-      { agents_by_policy_id: { buckets: Array<{ key: string; doc_count: number }> } }
-    >({
-      index: '.fleet-agents',
-      ignore_unavailable: true,
-      size: 0,
-      // No active/status filter: inactive and unenrolled agents block deletion too.
-      query: { bool: { filter: [{ terms: { policy_id: chunk } }] } },
-      aggs: {
-        agents_by_policy_id: {
-          terms: { field: 'policy_id', size: chunk.length },
-        },
-      },
+    const idsChunk = variantPolicyIds.slice(i, i + AGENT_COUNT_CHUNK_SIZE);
+    // No active/status filter: inactive and unenrolled agents block deletion too.
+    const response = await runEsqlRead({
+      esClient,
+      query: esql.from([AGENTS_INDEX]).where`policy_id IN (${{ idsChunk }})`
+        .pipe`STATS agents = COUNT(*) BY policy_id`.limit(idsChunk.length),
+      ignoreUnknownIndex: true,
     });
-    for (const { key, doc_count } of response.aggregations?.agents_by_policy_id?.buckets ?? []) {
-      counts.set(key, (counts.get(key) ?? 0) + doc_count);
+    for (const row of esqlRows(response)) {
+      const key = row.policy_id as string;
+      counts.set(key, (counts.get(key) ?? 0) + (row.agents as number));
     }
   }
   return counts;

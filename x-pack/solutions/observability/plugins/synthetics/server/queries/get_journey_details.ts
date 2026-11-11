@@ -5,9 +5,9 @@
  * 2.0.
  */
 
-import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { SyntheticsEsClient } from '../lib';
-import { createEsParams } from '../lib';
+import { esqlRows } from '../lib/esql_read';
 import { getCheckGroupTimeRangeFilter } from '../../common/constants/client_defaults';
 import { getSyntheticsScopedIndex } from '../../common/get_synthetics_indices';
 import type { JourneyStep, Ping, SyntheticsJourneyApiResponse } from '../../common/runtime_types';
@@ -28,44 +28,34 @@ export const getJourneyDetails = async ({
 }: GetJourneyDetails & {
   syntheticsEsClient: SyntheticsEsClient;
 }): Promise<SyntheticsJourneyApiResponse['details']> => {
-  const index = getSyntheticsScopedIndex(remoteName, syntheticsEsClient.heartbeatIndices);
-
-  const params = createEsParams({
-    index,
-    query: {
-      bool: {
-        // The current-run lookup targets a single `check_group`, so it can be
-        // bounded to the run's `@timestamp` to prune frozen-tier shards. The
-        // sibling (previous/next) queries below are intentionally left unbounded
-        // since an adjacent run can be arbitrarily far away in time.
-        filter: [
-          {
-            term: {
-              'monitor.check_group': checkGroup,
-            },
-          },
-          {
-            terms: {
-              'synthetics.type': ['journey/start', 'heartbeat/summary'],
-            },
-          },
-          ...(timestamp ? [getCheckGroupTimeRangeFilter(timestamp)] : []),
-        ] as QueryDslQueryContainer[],
-      },
-    },
-    size: 2,
-  });
-
-  const { body: thisJourney } = await syntheticsEsClient.search<DocumentSource, typeof params>(
-    params,
-    'getJourneyDetailsCurrentJourney'
+  const indices = getSyntheticsScopedIndex(remoteName, syntheticsEsClient.heartbeatIndices).split(
+    ','
   );
 
-  const journeyStartHit = thisJourney.hits.hits.find(
+  // The current-run lookup targets a single `check_group`, so it can be bounded to the run's
+  // `@timestamp` to prune frozen-tier shards. The sibling (previous/next) queries below are
+  // intentionally left unbounded since an adjacent run can be arbitrarily far away in time.
+  const thisJourneyResponse = await syntheticsEsClient.esql(
+    esql.from(indices, ['_id', '_source']).pipe`WHERE monitor.check_group == ${{ checkGroup }}`
+      .pipe`WHERE synthetics.type IN ("journey/start", "heartbeat/summary")`
+      .pipe`KEEP _id, _source`.limit(2),
+    {
+      operationName: 'getJourneyDetailsCurrentJourney',
+      ...(timestamp ? { filter: getCheckGroupTimeRangeFilter(timestamp) } : {}),
+    }
+  );
+
+  const thisJourney = esqlRows(thisJourneyResponse).flatMap(({ _id, _source }) =>
+    typeof _id === 'string' && _source !== null && typeof _source === 'object'
+      ? [{ _id, _source: _source as DocumentSource }]
+      : []
+  );
+
+  const journeyStartHit = thisJourney.find(
     (hit) => hit._source.synthetics?.type === 'journey/start'
   );
 
-  const journeySummaryHit = thisJourney.hits.hits.find(
+  const journeySummaryHit = thisJourney.find(
     ({ _source: summarySource }) => summarySource.synthetics?.type === 'heartbeat/summary'
   );
 
@@ -74,106 +64,51 @@ export const getJourneyDetails = async ({
   const journeySource = journeySummaryHit?._source ?? journeyStartHit?._source;
 
   if (journeySource && foundJourney) {
-    const baseSiblingParams = createEsParams({
-      index,
-      query: {
-        bool: {
-          must_not: [
-            {
-              term: {
-                'monitor.check_group': {
-                  value: journeySource.monitor.check_group,
-                },
-              },
-            },
-          ],
-          filter: [
-            {
-              term: {
-                'monitor.id': journeySource.monitor.id,
-              },
-            },
-            {
-              term: {
-                'observer.geo.name': journeySource.observer?.geo?.name,
-              },
-            },
-            {
-              terms: {
-                'synthetics.type': ['journey/start', 'heartbeat/summary'],
-              },
-            },
-          ] as QueryDslQueryContainer[],
-        },
-      },
-      _source: ['@timestamp', 'monitor.check_group'],
-      size: 1,
-    });
+    const siblingQuery = (comparison: '<' | '>', order: 'ASC' | 'DESC') => {
+      const location = journeySource.observer?.geo?.name;
+      const base = esql.from(indices).pipe`WHERE monitor.check_group != ${{
+        checkGroup: journeySource.monitor.check_group,
+      }}`.pipe`WHERE monitor.id == ${{ monitorId: journeySource.monitor.id }}`;
+      const withLocation = location
+        ? base.pipe`WHERE observer.geo.name == ${{ location }}`
+        : base.pipe`WHERE observer.geo.name IS NULL`;
+      const withType = withLocation.pipe`WHERE synthetics.type IN ("journey/start", "heartbeat/summary")`;
+      const withRange =
+        comparison === '<'
+          ? withType.pipe`WHERE @timestamp < TO_DATETIME(${{ ts: journeySource['@timestamp'] }})`
+          : withType.pipe`WHERE @timestamp > TO_DATETIME(${{ ts: journeySource['@timestamp'] }})`;
+      return (order === 'DESC'
+        ? withRange.pipe`SORT @timestamp DESC NULLS LAST`
+        : withRange.pipe`SORT @timestamp ASC NULLS LAST`
+      ).pipe`KEEP @timestamp, monitor.check_group`.limit(1);
+    };
 
-    const previousParams = createEsParams({
-      ...baseSiblingParams,
-      query: {
-        bool: {
-          must_not: baseSiblingParams.query.bool.must_not,
-          filter: [
-            ...baseSiblingParams.query.bool.filter,
-            {
-              range: {
-                '@timestamp': {
-                  lt: journeySource['@timestamp'],
-                },
-              },
-            },
-          ],
-        },
-      },
-      sort: [{ '@timestamp': { order: 'desc' as const } }],
-    });
-
-    const nextParams = createEsParams({
-      ...baseSiblingParams,
-      query: {
-        bool: {
-          must_not: baseSiblingParams.query.bool.must_not,
-          filter: [
-            ...baseSiblingParams.query.bool.filter,
-            {
-              range: {
-                '@timestamp': {
-                  gt: journeySource['@timestamp'],
-                },
-              },
-            },
-          ],
-        },
-      },
-      sort: [{ '@timestamp': { order: 'asc' as const } }],
-    });
-
-    const [previousJourneyPromise, nextJourneyPromise] = await Promise.all([
-      syntheticsEsClient.search<JourneyStep, typeof previousParams>(
-        previousParams,
-        'getJourneyDetailsPreviousJourney'
-      ),
-      syntheticsEsClient.search<JourneyStep, typeof nextParams>(
-        nextParams,
-        'getJourneyDetailsNextJourney'
-      ),
+    const [previousResponse, nextResponse] = await Promise.all([
+      syntheticsEsClient.esql(siblingQuery('<', 'DESC'), {
+        operationName: 'getJourneyDetailsPreviousJourney',
+      }),
+      syntheticsEsClient.esql(siblingQuery('>', 'ASC'), {
+        operationName: 'getJourneyDetailsNextJourney',
+      }),
     ]);
 
-    const { body: previousJourneyResult } = previousJourneyPromise;
-    const { body: nextJourneyResult } = nextJourneyPromise;
+    const toSibling = (response: typeof previousResponse): DocumentSource | undefined => {
+      const row = esqlRows(response)[0];
+      return row
+        ? ({
+            '@timestamp': row['@timestamp'],
+            monitor: { check_group: row['monitor.check_group'] },
+          } as DocumentSource)
+        : undefined;
+    };
 
-    const previousJourney = previousJourneyResult?.hits?.hits?.[0];
-    const nextJourney = nextJourneyResult?.hits?.hits?.[0];
-
-    const summaryPing = thisJourney.hits.hits.find(
+    const summaryPing = thisJourney.find(
       ({ _source: summarySource }) => summarySource.synthetics?.type === 'heartbeat/summary'
     )?._source;
 
     return {
       timestamp: journeySource['@timestamp'],
-      journey: { ...journeySource, _id: foundJourney._id! },
+      journey: { ...journeySource, _id: foundJourney._id },
       ...(summaryPing && 'state' in summaryPing && summaryPing.state
         ? {
             summary: {
@@ -181,15 +116,18 @@ export const getJourneyDetails = async ({
             },
           }
         : {}),
-      previous: filterNextPrevJourney(journeySource.monitor.check_group, previousJourney?._source),
-      next: filterNextPrevJourney(journeySource.monitor.check_group, nextJourney?._source),
+      previous: filterNextPrevJourney(
+        journeySource.monitor.check_group,
+        toSibling(previousResponse)
+      ),
+      next: filterNextPrevJourney(journeySource.monitor.check_group, toSibling(nextResponse)),
     };
   } else {
     return null;
   }
 };
 
-const filterNextPrevJourney = (checkGroup: string, pingSource: DocumentSource) => {
+const filterNextPrevJourney = (checkGroup: string, pingSource?: DocumentSource) => {
   return pingSource && pingSource.monitor.check_group !== checkGroup
     ? {
         checkGroup: pingSource.monitor.check_group,

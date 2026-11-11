@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { FieldMap } from '@kbn/data-stream-adapter';
 import { DataStreamSpacesAdapter } from '@kbn/data-stream-adapter';
 import { DEFAULT_NAMESPACE_STRING } from '@kbn/core-saved-objects-utils-server';
@@ -31,8 +32,6 @@ import type { IRuleDataClient } from '@kbn/rule-registry-plugin/server';
 import { defaultInferenceEndpoints } from '@kbn/inference-common';
 import { IndexPatternAdapter } from '@kbn/index-adapter';
 import { ElasticSearchSaver } from '@kbn/langgraph-checkpoint-saver/server/elastic-search-checkpoint-saver';
-import type { AnonymizationFieldResponse } from '@kbn/elastic-assistant-common';
-import type { ESSearchRequest } from '@kbn/es-types';
 import {
   AttackDiscoveryScheduleDataClient,
   type CreateAttackDiscoveryScheduleDataClientParams,
@@ -79,6 +78,7 @@ import {
   ANONYMIZATION_FIELDS_RESOURCE,
 } from './constants';
 import { getIndexTemplateAndPattern } from '../lib/data_stream/helpers';
+import { esqlRows, runEsql } from '../lib/esql_read';
 
 const TOTAL_FIELDS_LIMIT = 2500;
 
@@ -947,30 +947,23 @@ export class AIAssistantService {
     });
 
     const defaultAnonymizationFields = getDefaultAnonymizationFields(spaceId);
-    // ElasticSearch query to returns all default anonymization fields that exist in the environment
-    const defaultAnonymizationFieldsQuery = {
-      terms: { field: defaultAnonymizationFields.map((field) => field.field) },
-    };
-
     // It only contains default anonymization fields that are stored in the environment.
     // It does not contain fields created by the user that are not present in defaultAnonymizationFields array.
     // If a user created a field with the same name as a default anonymization field, it will be returned in the response.
-    const existingAnonymizationFieldsResponse = await (
-      await dataClient?.getReader()
-    ).search<ESSearchRequest, AnonymizationFieldResponse>({
-      size: defaultAnonymizationFields.length,
-      allow_no_indices: true,
-      query: defaultAnonymizationFieldsQuery,
+    const esClient = await this.options.elasticsearchClientPromise;
+    const existingAnonymizationFieldsResponse = await runEsql({
+      esClient,
+      query: esql.from([dataClient.indexTemplateAndPattern.alias]).pipe`WHERE field IN (${{
+        fields: defaultAnonymizationFields.map(({ field }) => field),
+      }})`.pipe`STATS total = COUNT(*) BY field`.limit(defaultAnonymizationFields.length),
+      ignoreUnknownIndex: true,
     });
+    const existingAnonymizationFields = new Set(
+      esqlRows(existingAnonymizationFieldsResponse).map((row) => row.field)
+    );
 
     // Verify if the stored default anonymization fields in the environment count is equal to DefaultAnonymizationFields array length.
-    if (
-      existingAnonymizationFieldsResponse.hits.total.value !== defaultAnonymizationFields.length
-    ) {
-      const existingAnonymizationFields = new Set(
-        existingAnonymizationFieldsResponse.hits.hits.map((doc) => doc._source.field)
-      );
-
+    if (existingAnonymizationFields.size !== defaultAnonymizationFields.length) {
       // Only create fields that are not present in the environment, we don't want to update any fields that the users might have already created with the same name.
       const documentsToCreate = defaultAnonymizationFields.filter(
         (field) => !existingAnonymizationFields.has(field.field)

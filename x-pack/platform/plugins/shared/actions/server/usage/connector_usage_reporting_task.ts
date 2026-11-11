@@ -14,7 +14,8 @@ import type {
   TaskManagerSetupContract,
 } from '@kbn/task-manager-plugin/server';
 import { type ConcreteTaskInstance } from '@kbn/task-manager-plugin/server';
-import type { AggregationsSumAggregate } from '@elastic/elasticsearch/lib/api/types';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import axios from 'axios';
 import https from 'https';
 import type { ActionsConfig } from '../config';
@@ -238,45 +239,27 @@ export class ConnectorUsageReportingTask {
     fromDate: Date;
     toDate: Date;
   }): Promise<number> => {
-    const usageResult = await esClient.search({
-      index: this.eventLogIndex,
-      sort: '@timestamp',
-      size: 0,
-      query: {
-        bool: {
-          filter: {
-            bool: {
-              must: [
-                {
-                  term: { 'event.action': 'execute' },
-                },
-                {
-                  term: { 'event.provider': 'actions' },
-                },
-                {
-                  exists: {
-                    field: 'kibana.action.execution.usage.request_body_bytes',
-                  },
-                },
-                {
-                  range: {
-                    '@timestamp': {
-                      gt: fromDate,
-                      lte: toDate,
-                    },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      },
-      aggs: {
-        total_usage: { sum: { field: 'kibana.action.execution.usage.request_body_bytes' } },
-      },
-    });
+    // `SUM` of a long overflows to null in ES|QL, so the bytes are summed as doubles like the DSL sum did.
+    const { query, params } = esql.from([this.eventLogIndex]).pipe`WHERE event.action == "execute"
+      AND event.provider == "actions"
+      AND kibana.action.execution.usage.request_body_bytes IS NOT NULL
+      AND @timestamp > TO_DATETIME(${{ fromDate: fromDate.toISOString() }})
+      AND @timestamp <= TO_DATETIME(${{ toDate: toDate.toISOString() }})`
+      .pipe`STATS total_usage = SUM(TO_DOUBLE(kibana.action.execution.usage.request_body_bytes))`.toRequest();
 
-    return (usageResult.aggregations?.total_usage as AggregationsSumAggregate)?.value ?? 0;
+    try {
+      const usageResult = (await esClient.esql.query({
+        query,
+        params,
+      } as EsqlQueryRequest)) as unknown as { values: unknown[][] };
+      const totalUsage = usageResult.values[0]?.[0];
+      return typeof totalUsage === 'number' ? totalUsage : 0;
+    } catch (error) {
+      // A wildcard that matches no event log index summed to 0 with the search API, and ES|QL
+      // reports it as a 400 `verification_exception` ("Unknown index").
+      if (isEsqlUnknownIndexError(error)) return 0;
+      throw error;
+    }
   };
 
   private createUsageRecord = ({
@@ -339,3 +322,16 @@ export class ConnectorUsageReportingTask {
     return new Date(delayedTime);
   };
 }
+
+const isEsqlUnknownIndexError = (error: unknown): boolean => {
+  const { statusCode, body } = (error ?? {}) as {
+    statusCode?: number;
+    body?: { error?: { type?: string; reason?: string } };
+  };
+  return (
+    statusCode === 400 &&
+    body?.error?.type === 'verification_exception' &&
+    typeof body.error.reason === 'string' &&
+    body.error.reason.includes('Unknown index')
+  );
+};

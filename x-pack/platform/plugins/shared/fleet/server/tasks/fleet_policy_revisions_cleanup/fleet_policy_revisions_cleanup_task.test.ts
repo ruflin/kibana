@@ -39,6 +39,25 @@ const expectedDeleteByQueryConfig = {
   wait_for_completion: true,
 };
 
+const latestRevisionsResponse = (rows: Array<[string, number, number]>) =>
+  ({
+    columns: [
+      { name: 'policy_id', type: 'keyword' },
+      { name: 'doc_count', type: 'long' },
+      { name: 'latest_revision', type: 'integer' },
+    ],
+    values: rows,
+  } as any);
+
+const minUsedResponse = (rows: Array<[string, number]>) =>
+  ({
+    columns: [
+      { name: 'policy_id', type: 'keyword' },
+      { name: 'min_used_revision', type: 'integer' },
+    ],
+    values: rows,
+  } as any);
+
 describe('FleetPolicyRevisionsCleanupTask', () => {
   let mockTask: FleetPolicyRevisionsCleanupTask;
   let mockCore: ReturnType<typeof coreMock.createSetup>;
@@ -204,7 +223,7 @@ describe('FleetPolicyRevisionsCleanupTask', () => {
 
     it('should log errors if one is thrown', async () => {
       const error = new Error('Test error');
-      mockEsClient.search.mockRejectedValue(error);
+      mockEsClient.esql.query.mockRejectedValue(error);
 
       await mockTask.runTask(taskInstance, mockCore, signal);
 
@@ -220,55 +239,25 @@ describe('FleetPolicyRevisionsCleanupTask', () => {
     });
 
     it('should exit early when no policies need cleanup', async () => {
-      mockEsClient.search.mockResolvedValue({
-        aggregations: {
-          latest_revisions_by_policy_id: {
-            buckets: [],
-          },
-        },
-      } as any);
+      mockEsClient.esql.query.mockResolvedValue(latestRevisionsResponse([]));
 
       await mockTask.runTask(taskInstance, mockCore, signal);
 
       expect(logger.info).toHaveBeenCalledWith(
         expect.stringContaining('No policies found with more than 10 revisions')
       );
-      expect(mockEsClient.search).toHaveBeenCalledTimes(1);
+      expect(mockEsClient.esql.query).toHaveBeenCalledTimes(1);
     });
 
     it('should process policies that exceed max revisions', async () => {
-      mockEsClient.search
-        .mockResolvedValueOnce({
-          aggregations: {
-            latest_revisions_by_policy_id: {
-              buckets: [
-                {
-                  key: 'policy-1',
-                  doc_count: 15, // More than max_revisions (10)
-                  latest_revision: { value: 15 },
-                },
-                {
-                  key: 'policy-2',
-                  doc_count: 5, // Less than max_revisions, should be filtered out
-                  latest_revision: { value: 5 },
-                },
-              ],
-            },
-          },
-        } as any)
-        .mockResolvedValueOnce({
-          aggregations: {
-            min_used_revisions_by_policy_id: {
-              buckets: [
-                {
-                  key: 'policy-1',
-                  doc_count: 100,
-                  min_used_revision: { value: 15 },
-                },
-              ],
-            },
-          },
-        } as any);
+      mockEsClient.esql.query
+        .mockResolvedValueOnce(
+          latestRevisionsResponse([
+            ['policy-1', 15, 15],
+            ['policy-2', 5, 5],
+          ])
+        )
+        .mockResolvedValueOnce(minUsedResponse([['policy-1', 15]]));
 
       mockEsClient.deleteByQuery.mockResolvedValue({
         deleted: 5,
@@ -305,38 +294,14 @@ describe('FleetPolicyRevisionsCleanupTask', () => {
     });
 
     it('should favor cutting off deletions from the minimum used revision', async () => {
-      mockEsClient.search
-        .mockResolvedValueOnce({
-          aggregations: {
-            latest_revisions_by_policy_id: {
-              buckets: [
-                {
-                  key: 'policy-1',
-                  doc_count: 15, // More than max_revisions (10)
-                  latest_revision: { value: 15 },
-                },
-                {
-                  key: 'policy-2',
-                  doc_count: 5, // Less than max_revisions, should be filtered out
-                  latest_revision: { value: 5 },
-                },
-              ],
-            },
-          },
-        } as any)
-        .mockResolvedValueOnce({
-          aggregations: {
-            min_used_revisions_by_policy_id: {
-              buckets: [
-                {
-                  key: 'policy-1',
-                  doc_count: 100,
-                  min_used_revision: { value: 12 }, // Cutoff will be 2 (12 - 10 = 2)
-                },
-              ],
-            },
-          },
-        } as any);
+      mockEsClient.esql.query
+        .mockResolvedValueOnce(
+          latestRevisionsResponse([
+            ['policy-1', 15, 15],
+            ['policy-2', 5, 5],
+          ])
+        )
+        .mockResolvedValueOnce(minUsedResponse([['policy-1', 12]]));
 
       mockEsClient.deleteByQuery.mockResolvedValue({
         deleted: 5,
@@ -374,33 +339,9 @@ describe('FleetPolicyRevisionsCleanupTask', () => {
 
     // Important case: We do not want deleteByQuery to be called with an empty bool.should, this can result in all revision docs being deleted
     it('should skip deletions of a policy revision if the calculated cutoff idx from minimum used revision is equal or below 0', async () => {
-      mockEsClient.search
-        .mockResolvedValueOnce({
-          aggregations: {
-            latest_revisions_by_policy_id: {
-              buckets: [
-                {
-                  key: 'policy-1',
-                  doc_count: 15,
-                  latest_revision: { value: 15 },
-                },
-              ],
-            },
-          },
-        } as any)
-        .mockResolvedValueOnce({
-          aggregations: {
-            min_used_revisions_by_policy_id: {
-              buckets: [
-                {
-                  key: 'policy-1',
-                  doc_count: 100,
-                  min_used_revision: { value: 5 }, // Cutoff will be -5 (5 - 10 = -5)
-                },
-              ],
-            },
-          },
-        } as any);
+      mockEsClient.esql.query
+        .mockResolvedValueOnce(latestRevisionsResponse([['policy-1', 15, 15]]))
+        .mockResolvedValueOnce(minUsedResponse([['policy-1', 5]]));
 
       mockEsClient.deleteByQuery.mockResolvedValue({
         deleted: 5,
@@ -414,43 +355,19 @@ describe('FleetPolicyRevisionsCleanupTask', () => {
       expect(mockEsClient.deleteByQuery).not.toHaveBeenCalledWith();
     });
     it('should never run deleteByQuery if after calculating revision cutoff indexes from minimum used by agents results in no revisions to delete', async () => {
-      mockEsClient.search
-        .mockResolvedValueOnce({
-          aggregations: {
-            latest_revisions_by_policy_id: {
-              buckets: [
-                {
-                  key: 'policy-1',
-                  doc_count: 15, // More than max_revisions (10)
-                  latest_revision: { value: 15 },
-                },
-                {
-                  key: 'policy-2',
-                  doc_count: 15, // Less than max_revisions, should be filtered out
-                  latest_revision: { value: 15 },
-                },
-              ],
-            },
-          },
-        } as any)
-        .mockResolvedValueOnce({
-          aggregations: {
-            min_used_revisions_by_policy_id: {
-              buckets: [
-                {
-                  key: 'policy-1',
-                  doc_count: 100,
-                  min_used_revision: { value: 15 },
-                },
-                {
-                  key: 'policy-2',
-                  doc_count: 100,
-                  min_used_revision: { value: 5 }, // Cutoff will be -5 (5 - 10 = -5)
-                },
-              ],
-            },
-          },
-        } as any);
+      mockEsClient.esql.query
+        .mockResolvedValueOnce(
+          latestRevisionsResponse([
+            ['policy-1', 15, 15],
+            ['policy-2', 15, 15],
+          ])
+        )
+        .mockResolvedValueOnce(
+          minUsedResponse([
+            ['policy-1', 15],
+            ['policy-2', 5],
+          ])
+        );
 
       mockEsClient.deleteByQuery.mockResolvedValue({
         deleted: 5,
@@ -487,28 +404,9 @@ describe('FleetPolicyRevisionsCleanupTask', () => {
     });
 
     it('should calculate the deletion cutoff for a policy from the latest revision if not used by agents', async () => {
-      mockEsClient.search
-        .mockResolvedValueOnce({
-          aggregations: {
-            latest_revisions_by_policy_id: {
-              buckets: [
-                {
-                  key: 'policy-1',
-                  doc_count: 20,
-                  latest_revision: { value: 20 },
-                },
-              ],
-            },
-          },
-        } as any)
-        // Mock the query for minimum revisions used by agents
-        .mockResolvedValueOnce({
-          aggregations: {
-            min_used_revisions_by_policy_id: {
-              buckets: [],
-            },
-          },
-        } as any);
+      mockEsClient.esql.query
+        .mockResolvedValueOnce(latestRevisionsResponse([['policy-1', 20, 20]]))
+        .mockResolvedValueOnce(minUsedResponse([]));
 
       mockEsClient.deleteByQuery.mockResolvedValue({
         deleted: 5,
@@ -547,9 +445,7 @@ describe('FleetPolicyRevisionsCleanupTask', () => {
     it('should invoke the orphan sweep on every run and log deleted count when documents are removed', async () => {
       mockedSweepOrphanedFleetPolicies.mockResolvedValueOnce({ deletedCount: 5 });
 
-      mockEsClient.search.mockResolvedValue({
-        aggregations: { latest_revisions_by_policy_id: { buckets: [] } },
-      } as any);
+      mockEsClient.esql.query.mockResolvedValue(latestRevisionsResponse([]));
 
       await mockTask.runTask(taskInstance, mockCore, signal);
 
@@ -569,9 +465,7 @@ describe('FleetPolicyRevisionsCleanupTask', () => {
         enableFleetOrphanedPolicySweep: false,
       } as any);
 
-      mockEsClient.search.mockResolvedValue({
-        aggregations: { latest_revisions_by_policy_id: { buckets: [] } },
-      } as any);
+      mockEsClient.esql.query.mockResolvedValue(latestRevisionsResponse([]));
 
       await mockTask.runTask(taskInstance, mockCore, signal);
 
@@ -585,37 +479,15 @@ describe('FleetPolicyRevisionsCleanupTask', () => {
     });
 
     it('should query max revisions and counts correctly', async () => {
-      mockEsClient.search.mockResolvedValue({
-        aggregations: {
-          latest_revisions_by_policy_id: {
-            buckets: [],
-          },
-        },
-      } as any);
+      mockEsClient.esql.query.mockResolvedValue(latestRevisionsResponse([]));
 
       await mockTask.runTask(taskInstance, mockCore, signal);
 
-      expect(mockEsClient.search).toHaveBeenCalledWith(
+      expect(mockEsClient.esql.query).toHaveBeenCalledWith(
         {
-          index: '.fleet-policies',
-          ignore_unavailable: true,
-          size: 0,
-          aggs: {
-            latest_revisions_by_policy_id: {
-              terms: {
-                field: 'policy_id',
-                order: { _count: 'desc' },
-                size: 100,
-              },
-              aggs: {
-                latest_revision: {
-                  max: {
-                    field: 'revision_idx',
-                  },
-                },
-              },
-            },
-          },
+          query:
+            'FROM .fleet-policies | STATS doc_count = COUNT(*), latest_revision = MAX(revision_idx) BY policy_id | SORT doc_count DESC, policy_id ASC | LIMIT 100',
+          params: [],
         },
         {
           signal,
@@ -624,82 +496,27 @@ describe('FleetPolicyRevisionsCleanupTask', () => {
     });
 
     it('should query minimum revisions used by agents filtered to the policy ids with more than max revisions', async () => {
-      mockEsClient.search
-        .mockResolvedValueOnce({
-          aggregations: {
-            latest_revisions_by_policy_id: {
-              buckets: [
-                {
-                  key: 'policy-1',
-                  doc_count: 15,
-                  latest_revision: { value: 15 },
-                },
-                {
-                  key: 'policy-2',
-                  doc_count: 1,
-                  latest_revision: { value: 20 },
-                },
-                {
-                  key: 'policy-3',
-                  doc_count: 10,
-                  latest_revision: { value: 12 },
-                },
-                {
-                  key: 'policy-4',
-                  doc_count: 12,
-                  latest_revision: { value: 12 },
-                },
-              ],
-            },
-          },
-        } as any)
-        .mockResolvedValueOnce({
-          aggregations: {
-            min_used_revisions_by_policy_id: {
-              buckets: [],
-            },
-          },
-        } as any);
+      mockEsClient.esql.query
+        .mockResolvedValueOnce(
+          latestRevisionsResponse([
+            ['policy-1', 15, 15],
+            ['policy-2', 1, 20],
+            ['policy-3', 10, 12],
+            ['policy-4', 12, 12],
+          ])
+        )
+        .mockResolvedValueOnce(minUsedResponse([]));
 
       mockEsClient.deleteByQuery.mockResolvedValue({ deleted: 0 } as any);
 
       await mockTask.runTask(taskInstance, mockCore, signal);
 
-      expect(mockEsClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: '.fleet-agents',
-          query: {
-            bool: {
-              filter: [
-                {
-                  terms: {
-                    policy_id: ['policy-1', 'policy-4'],
-                  },
-                },
-                {
-                  term: {
-                    active: true,
-                  },
-                },
-              ],
-            },
-          },
-          aggs: {
-            min_used_revisions_by_policy_id: {
-              terms: {
-                field: 'policy_id',
-                size: 100,
-              },
-              aggs: {
-                min_used_revision: {
-                  min: {
-                    field: 'policy_revision_idx',
-                  },
-                },
-              },
-            },
-          },
-        }),
+      expect(mockEsClient.esql.query).toHaveBeenCalledWith(
+        {
+          query:
+            'FROM .fleet-agents | WHERE (policy_id IN (?policyIds)) AND active == TRUE | STATS min_used_revision = MIN(policy_revision_idx) BY policy_id | LIMIT 100',
+          params: [{ policyIds: ['policy-1', 'policy-4'] }],
+        },
         {
           signal,
         }

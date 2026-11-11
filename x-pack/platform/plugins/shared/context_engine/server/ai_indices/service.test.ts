@@ -119,12 +119,35 @@ const storedHit = (
 
 describe('AiIndexService', () => {
   let esClient: ReturnType<typeof elasticsearchServiceMock.createElasticsearchClient>;
-  let storageClient: jest.Mocked<Pick<AiIndexStorageClient, 'index' | 'search' | 'delete'>>;
+  let storageClient: jest.Mocked<
+    Pick<AiIndexStorageClient, 'index' | 'search' | 'delete' | 'esql'>
+  >;
   let service: AiIndexService;
 
   const mockSearchHits = (...hits: SearchHitInput[]) => {
     storageClient.search.mockResolvedValue(
       searchResponse(hits) as Awaited<ReturnType<AiIndexStorageClient['search']>>
+    );
+  };
+
+  /** What `list` reads: an ES|QL response with one row per entry, as `METADATA _id, _source`. */
+  const esqlListResponse = (hits: SearchHitInput[] = []) => ({
+    columns: [
+      { name: '_id', type: 'keyword' },
+      { name: '_source', type: '_source' },
+    ],
+    values: hits.map((hit) => [hit._id, hit._source]),
+  });
+
+  const mockListHits = (...hits: SearchHitInput[]) => {
+    storageClient.esql.mockResolvedValue(
+      esqlListResponse(hits) as Awaited<ReturnType<AiIndexStorageClient['esql']>>
+    );
+  };
+
+  const mockListHitsOnce = (...hits: SearchHitInput[]) => {
+    storageClient.esql.mockResolvedValueOnce(
+      esqlListResponse(hits) as Awaited<ReturnType<AiIndexStorageClient['esql']>>
     );
   };
 
@@ -153,9 +176,11 @@ describe('AiIndexService', () => {
       index: jest.fn(),
       search: jest.fn(),
       delete: jest.fn(),
+      esql: jest.fn(),
     };
     createAiIndexStorageClientMock.mockReturnValue(storageClient);
     mockSearchHits();
+    mockListHits();
 
     service = new AiIndexService({
       esClient,
@@ -1123,7 +1148,7 @@ describe('AiIndexService', () => {
         ...aiIndexDocument,
         id: 'billing',
       };
-      mockSearchHits(storedHit(billingDocument, { id: 'billing' }), storedHit(aiIndexDocument));
+      mockListHits(storedHit(billingDocument, { id: 'billing' }), storedHit(aiIndexDocument));
 
       await expect(service.list(DEFAULT_SPACE)).resolves.toEqual([
         toHttpItem(billingDocument),
@@ -1132,16 +1157,17 @@ describe('AiIndexService', () => {
     });
 
     it('leaves the ordering to Elasticsearch, placing pre-upgrade documents last', async () => {
-      mockSearchHits(storedHit(aiIndexDocument));
+      mockListHits(storedHit(aiIndexDocument));
 
       await service.list(DEFAULT_SPACE);
 
-      expect(storageClient.search).toHaveBeenCalledWith({
-        size: 100,
-        track_total_hits: false,
-        query: createSpaceDslFilter(DEFAULT_SPACE),
-        sort: [{ id: { order: 'asc', missing: '_last' } }, { _doc: { order: 'asc' } }],
+      const [request] = storageClient.esql.mock.calls[0];
+      expect(request.pipeline.toRequest()).toEqual({
+        query: 'SORT id ASC NULLS LAST, _id ASC | LIMIT ?limit',
+        params: [{ limit: 100 }],
       });
+      expect(request.metadata).toEqual(['_id', '_source']);
+      expect(request.filter).toEqual(createSpaceDslFilter(DEFAULT_SPACE));
     });
 
     it("derives elastic_agent trace queries from the document's own stored space", async () => {
@@ -1150,7 +1176,7 @@ describe('AiIndexService', () => {
         space: 'other',
         traces: [{ type: 'elastic_agent', value: 'my-agent' }],
       };
-      mockSearchHits(storedHit(otherSpaceDocument));
+      mockListHits(storedHit(otherSpaceDocument));
 
       const [item] = await service.list('marketing');
 
@@ -1168,8 +1194,8 @@ describe('AiIndexService', () => {
         managed: true,
       };
       const ensure = jest.fn().mockResolvedValue(undefined);
-      mockSearchHitsOnce();
-      mockSearchHitsOnce(
+      mockListHitsOnce();
+      mockListHitsOnce(
         storedHit(managedDocument, { id: buildManagedAiIndexDocId(DEFAULT_SPACE, 'elastic') })
       );
       service = new AiIndexService({
@@ -1185,7 +1211,7 @@ describe('AiIndexService', () => {
 
       await expect(service.list(DEFAULT_SPACE)).resolves.toEqual([toHttpItem(managedDocument)]);
       expect(ensure).toHaveBeenCalledWith('elastic', DEFAULT_SPACE);
-      expect(storageClient.search).toHaveBeenCalledTimes(2);
+      expect(storageClient.esql).toHaveBeenCalledTimes(2);
     });
 
     it('resolves managed AI indices against their registration, leaving user-owned ones as stored', async () => {
@@ -1195,7 +1221,7 @@ describe('AiIndexService', () => {
         managed: true,
         dest: { type: 'index', value: 'ai-index-idx-sml-data' },
       };
-      mockSearchHits(
+      mockListHits(
         storedHit(managedDocument, { id: buildManagedAiIndexDocId(DEFAULT_SPACE, 'elastic') }),
         storedHit(aiIndexDocument)
       );
@@ -1222,13 +1248,13 @@ describe('AiIndexService', () => {
         }),
         toHttpItem(aiIndexDocument),
       ]);
-      expect(storageClient.search).toHaveBeenCalledTimes(1);
+      expect(storageClient.esql).toHaveBeenCalledTimes(1);
     });
 
     it('logs and continues when one managed AI index fails to bootstrap, returning the rest', async () => {
       const okDocument: AiIndexDocument = { ...aiIndexDocument, id: 'ok', managed: true };
-      mockSearchHitsOnce();
-      mockSearchHitsOnce(storedHit(okDocument, { id: 'ok' }));
+      mockListHitsOnce();
+      mockListHitsOnce(storedHit(okDocument, { id: 'ok' }));
       const logger = loggingSystemMock.createLogger();
       const ensure = jest.fn().mockImplementation(async (id: string) => {
         if (id === 'broken') {
@@ -1254,7 +1280,7 @@ describe('AiIndexService', () => {
 
     it('treats a missing traces field as an empty list', async () => {
       const { traces: _traces, ...documentWithoutTraces } = aiIndexDocument;
-      mockSearchHits(storedHit(documentWithoutTraces));
+      mockListHits(storedHit(documentWithoutTraces));
 
       await expect(service.list(DEFAULT_SPACE)).resolves.toEqual([
         toHttpItem({ ...documentWithoutTraces, traces: [] }),
@@ -1522,6 +1548,7 @@ describe('AiIndexService', () => {
 
     it('finds, lists, and updates a pre-upgrade document in place in the default space', async () => {
       mockSearchHits(storedHit(preUpgradeDocument, { id: 'orders', seqNo: 3, primaryTerm: 1 }));
+      mockListHits(storedHit(preUpgradeDocument, { id: 'orders', seqNo: 3, primaryTerm: 1 }));
 
       await expect(service.get('orders', DEFAULT_SPACE)).resolves.toEqual(
         expect.objectContaining({ id: 'orders', managed: false })

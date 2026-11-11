@@ -5,7 +5,8 @@
  * 2.0.
  */
 
-import type { estypes } from '@elastic/elasticsearch';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import { schema } from '@kbn/config-schema';
 import type { IScopedClusterClient } from '@kbn/core/server';
 import { reduce, size } from 'lodash';
@@ -30,11 +31,28 @@ function getIndexNamesFromAliasesResponse(json: Record<string, any>) {
   );
 }
 
-interface IndicesAggs extends estypes.AggregationsMultiBucketAggregateBase {
-  buckets: Array<{ key: unknown }>;
-}
+// Index names the ES|QL parser reads without quotes. Anything else is quoted, so that a pattern typed
+// into the autocomplete can never end the `FROM` command.
+const UNQUOTED_SOURCE = /^[A-Za-z0-9._*:-]+$/;
+const toEsqlSource = (source: string): string =>
+  UNQUOTED_SOURCE.test(source) ? source : `"${source.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
-async function getIndices(dataClient: IScopedClusterClient, pattern: string, limit = 10) {
+// ES|QL reports a missing index as a 400 `verification_exception` ("Unknown index [<name>]"),
+// where the search answered 404 or no buckets.
+const isEsqlUnknownIndexError = (error: unknown): boolean => {
+  const { statusCode, body } = (error ?? {}) as {
+    statusCode?: number;
+    body?: { error?: { type?: string; reason?: string } };
+  };
+  return (
+    statusCode === 400 &&
+    body?.error?.type === 'verification_exception' &&
+    typeof body.error.reason === 'string' &&
+    body.error.reason.includes('Unknown index')
+  );
+};
+
+export async function getIndices(dataClient: IScopedClusterClient, pattern: string, limit = 10) {
   const aliasResult = await dataClient.asCurrentUser.indices.getAlias(
     {
       index: pattern,
@@ -50,30 +68,34 @@ async function getIndices(dataClient: IScopedClusterClient, pattern: string, lim
     return indicesFromAliasResponse.slice(0, limit);
   }
 
-  const response = await dataClient.asCurrentUser.search<unknown, { indices: IndicesAggs }>(
-    {
-      index: pattern,
-      size: 0, // no hits
-      aggs: {
-        indices: {
-          terms: {
-            field: '_index',
-            size: limit,
-          },
-        },
-      },
-    },
-    {
-      ignore: [404],
-      meta: true,
-    }
-  );
-  if (response.statusCode === 404 || !response.body.aggregations) {
+  const sources = pattern
+    .split(',')
+    .map((source) => source.trim())
+    .filter((source) => source.length > 0)
+    .map(toEsqlSource);
+  if (sources.length === 0) {
     return [];
   }
-  const indices = response.body.aggregations.indices;
 
-  return indices.buckets ? indices.buckets.map((bucket) => bucket.key) : [];
+  // The search returned the indices by document count, then name.
+  const { query, params } = esql.from(sources, ['_index'])
+    .pipe`STATS doc_count = COUNT(*) BY _index`.pipe`SORT doc_count DESC, _index ASC`
+    .limit(limit)
+    .toRequest();
+
+  try {
+    const response = (await dataClient.asCurrentUser.esql.query({
+      query,
+      ...(params && params.length > 0 ? { params } : {}),
+    } as EsqlQueryRequest)) as unknown as { columns: Array<{ name: string }>; values: unknown[][] };
+    const indexColumn = response.columns.findIndex(({ name }) => name === '_index');
+    return response.values.map((row) => String(row[indexColumn]));
+  } catch (error) {
+    if (isEsqlUnknownIndexError(error)) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export function registerGetRoute({ router, license, lib: { handleEsError } }: RouteDependencies) {

@@ -21,6 +21,7 @@ import {
   deleteEnrollmentApiKeys,
   generateEnrollmentAPIKey,
   getEnrollmentAPIKey,
+  getEnrollmentAPIKeyById,
 } from './enrollment_api_key';
 
 jest.mock('../audit_logging');
@@ -393,6 +394,54 @@ describe('enrollment api keys', () => {
       await expect(
         getEnrollmentAPIKey(esClient, 'test-enrollment-api-key-id', 'test')
       ).rejects.toThrow('Enrollment api key test-enrollment-api-key-id not found in namespace');
+    });
+  });
+
+  describe('getEnrollmentAPIKeyById', () => {
+    it('should read the key document by api_key_id', async () => {
+      const esClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
+      esClient.esql.query.mockResolvedValue({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [
+          [
+            'doc-id',
+            {
+              active: true,
+              api_key_id: 'key-id',
+              api_key: 'secret',
+              name: 'Default',
+              policy_id: 'policy1',
+              created_at: '2026-01-01T00:00:00.000Z',
+            },
+          ],
+        ],
+      } as any);
+
+      const key = await getEnrollmentAPIKeyById(esClient, 'key-id');
+
+      expect(key).toEqual(expect.objectContaining({ id: 'doc-id', api_key_id: 'key-id' }));
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query: `FROM ${ENROLLMENT_API_KEYS_INDEX} METADATA _id, _source | WHERE api_key_id == ?apiKeyId | KEEP _id, _source | LIMIT 1`,
+        params: [{ apiKeyId: 'key-id' }],
+      });
+    });
+
+    it('should throw when no key is found', async () => {
+      const esClient = elasticsearchServiceMock.createClusterClient().asInternalUser;
+      esClient.esql.query.mockResolvedValue({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [],
+      } as any);
+
+      await expect(getEnrollmentAPIKeyById(esClient, 'missing')).rejects.toThrow(
+        'Find enrollmentKeyById returned an incorrect key'
+      );
     });
   });
 });

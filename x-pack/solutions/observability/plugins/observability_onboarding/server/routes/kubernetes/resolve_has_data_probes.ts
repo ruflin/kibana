@@ -5,7 +5,6 @@
  * 2.0.
  */
 
-import type { estypes } from '@elastic/elasticsearch';
 import {
   isNoShardsAvailableError,
   throwHasDataSearchError,
@@ -15,9 +14,9 @@ import {
  * Resolves a has-data probe result. Returns true if documents were found,
  * false for no-shards-available errors, and throws on unexpected errors.
  */
-export const resolveProbe = (result: PromiseSettledResult<estypes.SearchResponse>): boolean => {
+export const resolveProbe = (result: PromiseSettledResult<boolean>): boolean => {
   if (result.status === 'fulfilled') {
-    return (result.value.hits.total as estypes.SearchTotalHits).value > 0;
+    return result.value;
   }
   if (isNoShardsAvailableError(result.reason)) {
     return false;

@@ -6,7 +6,8 @@
  */
 
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
-import { kqlQuery, rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import type { Coordinate } from '@kbn/apm-types';
 import type { Maybe } from '@kbn/apm-types-shared';
 import {
@@ -17,6 +18,14 @@ import {
 } from '../../../common/es_fields/apm';
 import { MobileSpanSubtype, MobileSpanType } from '../../../common/mobile/constants';
 import { environmentQuery } from '../../../common/utils/environment_query';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import {
+  addTimeBucket,
+  esqlBucketMap,
+  getTimeBucketKeys,
+  toNumberOrNull,
+  whereTerm,
+} from '../../lib/helpers/esql_values';
 import { getBucketSize } from '../../../common/utils/get_bucket_size';
 import { getOffsetInMs } from '../../../common/utils/get_offset_in_ms';
 import { offsetPreviousPeriodCoordinates } from '../../../common/utils/offset_previous_period_coordinate';
@@ -53,60 +62,72 @@ async function getHttpRequestsTimeseries({
     offset,
   });
 
-  const { intervalString } = getBucketSize({
+  const { bucketSize } = getBucketSize({
     start: startWithOffset,
     end: endWithOffset,
     minBucketSize: 60,
   });
+  const intervalMs = bucketSize * 1000;
+  const bucketKeys = getTimeBucketKeys({
+    start: startWithOffset,
+    end: endWithOffset,
+    intervalMs,
+  });
 
-  const aggs = {
-    requests: {
-      filter: { term: { [SPAN_SUBTYPE]: MobileSpanSubtype.Http } },
-    },
-  };
-
-  const response = await apmEventClient.search('get_http_requests_chart', {
+  const request = {
     apm: { events: [ProcessorEvent.span, ProcessorEvent.transaction] },
-    track_total_hits: false,
-    size: 0,
-    query: {
+    filter: {
       bool: {
         filter: [
-          ...termQuery(SPAN_TYPE, MobileSpanType.External),
-          ...termQuery(SERVICE_NAME, serviceName),
-          ...termQuery(SPAN_TYPE, 'external'),
-          ...termQuery(TRANSACTION_NAME, transactionName),
           ...rangeQuery(startWithOffset, endWithOffset),
           ...environmentQuery(environment),
           ...kqlQuery(kuery),
         ],
       },
     },
-    aggs: {
-      timeseries: {
-        date_histogram: {
-          field: '@timestamp',
-          fixed_interval: intervalString,
-          min_doc_count: 0,
-          extended_bounds: { min: startWithOffset, max: endWithOffset },
-        },
-        aggs,
-      },
-      ...aggs,
-    },
-  });
+  };
+  // `span.subtype`, `span.type` and the transaction name are not mapped in every index, so
+  // unmapped fields read as null.
+  const scoped = (index: string[]) =>
+    whereTerm(
+      whereTerm(
+        whereTerm(
+          esql.from(index).addSetCommand('unmapped_fields', 'nullify'),
+          SPAN_TYPE,
+          MobileSpanType.External
+        ),
+        SERVICE_NAME,
+        serviceName
+      ),
+      TRANSACTION_NAME,
+      transactionName
+    );
+  const [timeseriesResponse, totalResponse] = await Promise.all([
+    apmEventClient.esql('get_http_requests_chart', {
+      ...request,
+      query: (index) =>
+        addTimeBucket(scoped(index), intervalMs).pipe`STATS requests = COUNT(*) WHERE ${esql.col(
+          SPAN_SUBTYPE
+        )} == ${{ spanSubtype: MobileSpanSubtype.Http }} BY bucket`.limit(bucketKeys.length),
+    }),
+    apmEventClient.esql('get_http_requests_chart_total', {
+      ...request,
+      query: (index) =>
+        scoped(index).pipe`STATS requests = COUNT(*) WHERE ${esql.col(SPAN_SUBTYPE)} == ${{
+          spanSubtype: MobileSpanSubtype.Http,
+        }}`.limit(1),
+    }),
+  ]);
 
-  const timeseries =
-    response?.aggregations?.timeseries.buckets.map((bucket) => {
-      return {
-        x: bucket.key,
-        y: bucket.requests.doc_count,
-      };
-    }) ?? [];
+  const buckets = esqlBucketMap(timeseriesResponse);
+  const timeseries = bucketKeys.map((key) => ({
+    x: key,
+    y: Number(buckets.get(key)?.requests ?? 0),
+  }));
 
   return {
     timeseries,
-    value: response.aggregations?.requests?.doc_count,
+    value: toNumberOrNull(esqlRows(totalResponse)[0]?.requests),
   };
 }
 

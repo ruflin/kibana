@@ -5,9 +5,15 @@
  * 2.0.
  */
 
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 import { isCcsTarget } from '../utils/ccs';
 import { frozenTierClauses } from '../utils/data_tiers';
+
+// An index name is interpolated into the ES|QL `FROM` command, so only characters that can
+// appear in an index name, an index pattern or a remote cluster prefix are accepted.
+const INDEX_NAME_PATTERN = /^[\w.\-*:+,]+$/;
 
 export interface GetDocumentByIdSuccess {
   id: string;
@@ -36,27 +42,39 @@ export const getDocumentById = async ({
   esClient: ElasticsearchClient;
 }): Promise<GetDocumentByIdResult> => {
   // CCS fallback: the _doc (GET) API does not support cross-cluster index patterns,
-  // so we use _search with a targeted term query on _id instead.
+  // so we use an ES|QL query on _id instead. The frozen tier exclusion stays a Query DSL
+  // request filter, as `_tier` is not a field ES|QL can filter on.
   if (isCcsTarget(index)) {
-    const response = await esClient.search({
-      index,
-      size: 1,
-      query: {
-        bool: {
-          filter: [{ term: { _id: id } }],
-          ...(includeFrozen ? {} : { must_not: frozenTierClauses() }),
-        },
-      },
-    });
-    const hit = response.hits?.hits?.[0];
-    if (!hit || hit._source === undefined) {
+    if (!INDEX_NAME_PATTERN.test(index)) {
+      throw new Error(`Invalid index name or pattern: ${index}`);
+    }
+    const { query, params } = esql.from(index.split(','), ['_id', '_index', '_source'])
+      .pipe`WHERE _id == ${{ id }}`
+      .keep('_id', '_index', '_source')
+      .limit(1)
+      .toRequest();
+    const response = (await esClient.esql.query({
+      query,
+      ...(params ? { params } : {}),
+      ...(includeFrozen ? {} : { filter: { bool: { must_not: frozenTierClauses() } } }),
+    } as unknown as EsqlQueryRequest)) as unknown as {
+      columns: Array<{ name: string }>;
+      values: unknown[][];
+    };
+    const row = response.values?.[0];
+    if (!row) {
+      return { id, index, found: false };
+    }
+    const column = (name: string) => row[response.columns.findIndex((c) => c.name === name)];
+    const source = column('_source');
+    if (source === undefined || source === null) {
       return { id, index, found: false };
     }
     return {
-      id: hit._id!,
-      index: hit._index ?? index,
+      id: column('_id') as string,
+      index: (column('_index') as string | undefined) ?? index,
       found: true,
-      _source: (hit._source as Record<string, unknown>) ?? {},
+      _source: source as Record<string, unknown>,
     };
   }
 

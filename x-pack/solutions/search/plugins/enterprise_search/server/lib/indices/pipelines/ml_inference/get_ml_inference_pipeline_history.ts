@@ -5,49 +5,42 @@
  * 2.0.
  */
 
-import type {
-  AggregationsMultiBucketAggregateBase,
-  AggregationsStringRareTermsBucketKeys,
-} from '@elastic/elasticsearch/lib/api/types';
-
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 
 import type { MlInferenceHistoryResponse } from '../../../../../common/types/pipelines';
+import {
+  esqlRows,
+  isEsqlUnknownColumnException,
+  runEsql,
+  toEsqlSource,
+} from '../../../../utils/esql_helpers';
 
 export const fetchMlInferencePipelineHistory = async (
   client: ElasticsearchClient,
   index: string
 ): Promise<MlInferenceHistoryResponse> => {
-  const ingestPipelineProcessorsResult = await client.search<
-    unknown,
-    {
-      inference_processors: AggregationsMultiBucketAggregateBase<AggregationsStringRareTermsBucketKeys>;
+  let response;
+  try {
+    response = await runEsql(
+      client,
+      esql.from([toEsqlSource(index)]).pipe`STATS doc_count = COUNT(*) BY pipeline = ${esql.col(
+        '_ingest.processors.pipeline.enum'
+      )}`.pipe`SORT doc_count DESC, pipeline ASC`.limit(100)
+    );
+  } catch (error) {
+    // An index that never ran an ingest pipeline does not map the field: no history.
+    if (isEsqlUnknownColumnException(error)) {
+      return { history: [] };
     }
-  >({
-    aggs: {
-      inference_processors: {
-        terms: {
-          field: '_ingest.processors.pipeline.enum',
-          size: 100,
-        },
-      },
-    },
-    index,
-    size: 0,
-  });
-
-  const processorBuckets =
-    ingestPipelineProcessorsResult.aggregations?.inference_processors.buckets;
-  if (!processorBuckets) {
-    return { history: [] };
+    throw error;
   }
-  const bucketsList = Array.isArray(processorBuckets)
-    ? processorBuckets
-    : Object.values(processorBuckets);
+
   return {
-    history: bucketsList.map((bucket) => ({
-      doc_count: bucket.doc_count,
-      pipeline: bucket.key,
-    })),
+    history: esqlRows(response).flatMap(({ pipeline, doc_count: docCount }) =>
+      pipeline === null || pipeline === undefined
+        ? []
+        : [{ doc_count: docCount as number, pipeline: pipeline as string }]
+    ),
   };
 };

@@ -9,6 +9,8 @@ import * as t from 'io-ts';
 import Boom from '@hapi/boom';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import { isResponseError } from '@kbn/es-errors';
+import { esql } from '@elastic/esql';
+import { runEsqlQuery } from '../../lib/esql';
 import { createObservabilityOnboardingServerRoute } from '../create_observability_onboarding_server_route';
 import { getFallbackESUrl } from '../../lib/get_fallback_urls';
 import { getManagedOtlpServiceUrl } from '../../lib/get_managed_otlp_service_url';
@@ -296,36 +298,35 @@ const verificationRoute = createObservabilityOnboardingServerRoute({
     }
 
     // Each endpoint gets its own key, so the key alone identifies the endpoint.
-    const response = await client.asInternalUser.search<Partial<Record<string, string>>>({
-      index: INGEST_RECEIPTS_DATA_STREAM,
-      ignore_unavailable: true,
-      size: 1,
-      _source: [INGEST_RECEIPT_FIELDS.ingestPath, INGEST_RECEIPT_FIELDS.signal],
-      sort: [{ [INGEST_RECEIPT_FIELDS.timestamp]: { order: 'desc' } }],
-      query: {
-        bool: {
-          filter: [
-            { term: { [INGEST_RECEIPT_FIELDS.apiKeyId]: apiKeyId } },
-            {
-              range: {
-                [INGEST_RECEIPT_FIELDS.timestamp]: {
-                  gte: `now-${INGEST_RECEIPTS_RECENCY_WINDOW}`,
-                },
-              },
-            },
-          ],
+    // The recency window is date math, so it stays a request filter (Query DSL). A missing receipts
+    // stream gives no response, like the `ignore_unavailable` search it replaces.
+    const response = await runEsqlQuery({
+      esClient: client.asInternalUser,
+      query: esql.from([INGEST_RECEIPTS_DATA_STREAM]).pipe`WHERE ${esql.col(
+        INGEST_RECEIPT_FIELDS.apiKeyId
+      )} == ${{ apiKeyId }}`.pipe`SORT ${esql.col(INGEST_RECEIPT_FIELDS.timestamp)} DESC NULLS LAST`
+        .keep(INGEST_RECEIPT_FIELDS.ingestPath, INGEST_RECEIPT_FIELDS.signal)
+        .limit(1),
+      filter: {
+        range: {
+          [INGEST_RECEIPT_FIELDS.timestamp]: { gte: `now-${INGEST_RECEIPTS_RECENCY_WINDOW}` },
         },
       },
     });
 
-    const [hit] = response.hits.hits;
-    if (!hit) {
+    const [row] = response?.values ?? [];
+    if (!row || !response) {
       return { received: false };
     }
+    const column = (name: string) => response.columns.findIndex((c) => c.name === name);
+    const cell = (name: string) => {
+      const value = row[column(name)];
+      return typeof value === 'string' ? value : undefined;
+    };
     return {
       received: true,
-      ingestPath: hit._source?.[INGEST_RECEIPT_FIELDS.ingestPath],
-      signal: hit._source?.[INGEST_RECEIPT_FIELDS.signal],
+      ingestPath: cell(INGEST_RECEIPT_FIELDS.ingestPath),
+      signal: cell(INGEST_RECEIPT_FIELDS.signal),
     };
   },
 });

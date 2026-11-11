@@ -4,6 +4,8 @@
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
+import { esql } from '@elastic/esql';
+import type { EsqlQueryRequest } from '@elastic/elasticsearch/lib/api/types';
 import type { CoreStart, Logger, SavedObjectsClientContract } from '@kbn/core/server';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 import { getCloudDefendStatus } from '../../../routes/status/status';
@@ -23,20 +25,14 @@ const getLatestDocTimestamp = async (
   esClient: ElasticsearchClient,
   index: string
 ): Promise<string | null> => {
-  const latestTimestamp = await esClient.search({
-    index,
-    query: {
-      match_all: {},
-    },
-    sort: '@timestamp:desc',
-    size: 1,
-    fields: ['@timestamp'],
-    _source: false,
-  });
+  const latestTimestamp = await esClient.esql.query(
+    esql.from([index])
+      .pipe`STATS latest = MAX(@timestamp)`.toRequest() as unknown as EsqlQueryRequest
+  );
 
-  const latestEventTimestamp = latestTimestamp.hits?.hits[0]?.fields;
+  const latestEventTimestamp = latestTimestamp.values[0]?.[0];
 
-  return latestEventTimestamp ? latestEventTimestamp['@timestamp'][0] : null;
+  return typeof latestEventTimestamp === 'string' ? latestEventTimestamp : null;
 };
 
 const getIndexStats = async (

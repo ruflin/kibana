@@ -15,7 +15,10 @@ describe('getSloSummary', () => {
 
   beforeEach(() => {
     esClient = elasticsearchServiceMock.createElasticsearchClient();
-    esClient.search.mockResolvedValue({ hits: { hits: [] } } as any);
+    esClient.esql.query.mockResolvedValue({
+      columns: [{ name: '_source', type: 'unsupported' }],
+      values: [],
+    });
   });
 
   it('includes project_routing in the search when projectRouting is provided', async () => {
@@ -23,7 +26,7 @@ describe('getSloSummary', () => {
 
     await getSloSummary(esClient, slo, '*', '_alias:_origin');
 
-    expect(esClient.search).toHaveBeenCalledWith(
+    expect(esClient.esql.query.mock.calls[0][0]).toEqual(
       expect.objectContaining({ project_routing: '_alias:_origin' })
     );
   });
@@ -33,8 +36,23 @@ describe('getSloSummary', () => {
 
     await getSloSummary(esClient, slo, '*');
 
-    expect(esClient.search).toHaveBeenCalledWith(
-      expect.not.objectContaining({ project_routing: expect.anything() })
-    );
+    expect(esClient.esql.query.mock.calls[0][0]).not.toHaveProperty('project_routing');
+  });
+
+  it('looks up the summary by slo id, revision and instance id and returns its source', async () => {
+    const slo = createSLO({ id: 'my-slo', revision: 3 });
+    esClient.esql.query.mockResolvedValue({
+      columns: [{ name: '_source', type: 'unsupported' }],
+      values: [[{ slo: { id: 'my-slo' }, status: 'VIOLATED' }]],
+    } as never);
+
+    const summary = await getSloSummary(esClient, slo, 'instance-1');
+
+    expect(esClient.esql.query.mock.calls[0][0]).toEqual({
+      query:
+        'FROM .slo-observability.summary-v3* METADATA _source | WHERE slo.id == ?sloId AND slo.revision == ?sloRevision AND slo.instanceId == ?instanceId | LIMIT 1',
+      params: [{ sloId: 'my-slo' }, { sloRevision: 3 }, { instanceId: 'instance-1' }],
+    });
+    expect(summary).toEqual({ slo: { id: 'my-slo' }, status: 'VIOLATED' });
   });
 });

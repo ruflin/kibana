@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql, type ComposerQuery } from '@elastic/esql';
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import { rangeQuery } from '@kbn/observability-plugin/server';
@@ -25,10 +26,11 @@ import { EventOutcome } from '../../../common/event_outcome';
 import { environmentQuery } from '../../../common/utils/environment_query';
 import type { Environment } from '../../../common/environment_rt';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import { esqlRowsAsFields } from '../../lib/helpers/esql_values';
 import { withApmSpan } from '../../utils/with_apm_span';
 import { CONNECTION_JOIN_TIME_BUFFER_MS, MAX_CONNECTION_IDS } from './connection_constants';
 import {
-  fieldsOf,
   getTopErrorOfSpans,
   getTopErrorOfTransactions,
   pickTopError,
@@ -92,45 +94,49 @@ export function getConnectionFailedCalls({
 }): Promise<ConnectionFailedCallsResponse> {
   return withApmSpan('get_connection_failed_calls', async () => {
     const exitSpansFilter: QueryDslQueryContainer[] = [
-      { term: { [SERVICE_NAME]: sourceServiceName } },
-      { terms: { [SPAN_DESTINATION_SERVICE_RESOURCE]: dependencies } },
       ...rangeQuery(start, end),
       ...environmentQuery(environment),
     ];
+    const exitSpans = (query: ComposerQuery) =>
+      query.pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ sourceServiceName }}`.pipe`WHERE ${esql.col(
+        SPAN_DESTINATION_SERVICE_RESOURCE
+      )} IN (${{ dependencies }})`;
 
     const [failedSpansResponse, totalCallsResponse] = await Promise.all([
-      apmEventClient.search('get_connection_failed_calls_failed_spans', {
+      apmEventClient.esql('get_connection_failed_calls_failed_spans', {
         apm: { events: [ProcessorEvent.span] },
-        track_total_hits: true,
-        size: MAX_CONNECTION_IDS,
-        sort: [{ [AT_TIMESTAMP]: 'desc' }],
-        _source: false,
-        fields: [
-          SPAN_ID,
-          TRACE_ID,
-          HTTP_RESPONSE_STATUS_CODE,
-          RPC_GRPC_STATUS_CODE,
-          ATTRIBUTE_RPC_GRPC_STATUS_CODE,
-        ],
-        query: {
-          bool: {
-            filter: [...exitSpansFilter, { term: { [EVENT_OUTCOME]: EventOutcome.failure } }],
-          },
-        },
+        // The gRPC status code fields are not mapped in every index, so unmapped fields read as null.
+        query: (index) =>
+          exitSpans(esql.from(index).addSetCommand('unmapped_fields', 'nullify'))
+            .pipe`WHERE ${esql.col(EVENT_OUTCOME)} == ${{ outcome: EventOutcome.failure }}`
+            .pipe`SORT ${esql.col(AT_TIMESTAMP)} DESC NULLS LAST`
+            .keep(
+              SPAN_ID,
+              TRACE_ID,
+              HTTP_RESPONSE_STATUS_CODE,
+              RPC_GRPC_STATUS_CODE,
+              ATTRIBUTE_RPC_GRPC_STATUS_CODE
+            )
+            .limit(MAX_CONNECTION_IDS),
+        filter: { bool: { filter: exitSpansFilter } },
       }),
-      apmEventClient.search('get_connection_failed_calls_total_calls', {
+      apmEventClient.esql('get_connection_failed_calls_total_calls', {
         apm: { events: [ProcessorEvent.span] },
-        track_total_hits: true,
-        size: 0,
-        query: { bool: { filter: exitSpansFilter } },
+        query: (index) =>
+          exitSpans(esql.from(index)).pipe`STATS
+              total_calls = COUNT(*),
+              total_failed = COUNT(*) WHERE ${esql.col(EVENT_OUTCOME)} == ${{
+            failure: EventOutcome.failure,
+          }}`.limit(1),
+        filter: { bool: { filter: exitSpansFilter } },
       }),
     ]);
 
-    const totalFailed = failedSpansResponse.hits.total.value;
-    const totalCalls = totalCallsResponse.hits.total.value;
+    const totals = esqlRows(totalCallsResponse)[0];
+    const totalFailed = Number(totals?.total_failed ?? 0);
+    const totalCalls = Number(totals?.total_calls ?? 0);
 
-    const failedSpans: FailedSpan[] = failedSpansResponse.hits.hits.map((hit) => {
-      const fields = fieldsOf(hit);
+    const failedSpans: FailedSpan[] = esqlRowsAsFields(failedSpansResponse).map((fields) => {
       return {
         spanId: String(fields[SPAN_ID]?.[0] ?? ''),
         traceId: (fields[TRACE_ID]?.[0] as string | undefined) ?? null,
@@ -171,29 +177,21 @@ export function getConnectionFailedCalls({
     // so the environment of the target is not filtered; the range reaches past the window's end
     // because the entry transaction starts after the exit span that called it.
     const failedSpanIds = failedSpans.map(({ spanId }) => spanId);
-    const entryTransactionsResponse = await apmEventClient.search(
+    const entryTransactionsResponse = await apmEventClient.esql(
       'get_connection_failed_calls_target_transactions',
       {
         apm: { events: [ProcessorEvent.transaction] },
-        track_total_hits: false,
-        size: MAX_CONNECTION_IDS,
-        _source: false,
-        fields: [PARENT_ID, TRANSACTION_ID, EVENT_OUTCOME],
-        query: {
-          bool: {
-            filter: [
-              { term: { [SERVICE_NAME]: targetServiceName } },
-              { terms: { [PARENT_ID]: failedSpanIds } },
-              ...rangeQuery(start, end + CONNECTION_JOIN_TIME_BUFFER_MS),
-            ],
-          },
-        },
+        query: (index) =>
+          esql.from(index).pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ targetServiceName }}`
+            .pipe`WHERE ${esql.col(PARENT_ID)} IN (${{ failedSpanIds }})`
+            .keep(PARENT_ID, TRANSACTION_ID, EVENT_OUTCOME)
+            .limit(MAX_CONNECTION_IDS),
+        filter: { bool: { filter: rangeQuery(start, end + CONNECTION_JOIN_TIME_BUFFER_MS) } },
       }
     );
 
     const entryTransactionByParentId = new Map<string, { id: string; failed: boolean }>();
-    for (const hit of entryTransactionsResponse.hits.hits) {
-      const fields = fieldsOf(hit);
+    for (const fields of esqlRowsAsFields(entryTransactionsResponse)) {
       const parentId = String(fields[PARENT_ID]?.[0] ?? '');
       const id = String(fields[TRANSACTION_ID]?.[0] ?? '');
       if (parentId && id) {

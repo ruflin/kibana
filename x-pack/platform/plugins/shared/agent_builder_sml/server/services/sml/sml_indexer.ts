@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 import type { SavedObjectsClientContract } from '@kbn/core-saved-objects-api-server';
 import type { Logger } from '@kbn/logging';
@@ -25,6 +26,7 @@ import type {
 import { INGESTION_METHOD_FIELD, smlIndexName } from './sml_storage';
 import { smlEntryId, smlEntryIdFromOriginUri, smlOriginUri } from './sml_origin';
 import { isNotFoundError } from './sml_service';
+import { runSmlEsql } from './sml_esql';
 import { SmlUnregisteredTypeError } from './sml_errors';
 
 interface SmlIndexerDeps {
@@ -471,21 +473,17 @@ class SmlIndexerImpl implements SmlIndexer {
     esClient: ElasticsearchClient;
   }): Promise<boolean> {
     try {
-      const response = await esClient.count({
-        index: smlIndexName,
-        ignore_unavailable: true,
-        allow_no_indices: true,
-        terminate_after: 1,
-        query: {
-          bool: {
-            filter: [
-              { term: { id: smlEntryIdFromOriginUri(originUri) } },
-              { term: { [INGESTION_METHOD_FIELD]: 'manual' } },
-            ],
-          },
-        },
+      // The ingestion method sits in a flattened field, so it stays a Query DSL request filter.
+      const rows = await runSmlEsql({
+        esClient,
+        query: esql.from([smlIndexName]).pipe`WHERE id == ${{
+          id: smlEntryIdFromOriginUri(originUri),
+        }}`
+          .keep('id')
+          .limit(1),
+        filter: { term: { [INGESTION_METHOD_FIELD]: 'manual' } },
       });
-      return (response.count ?? 0) > 0;
+      return rows.length > 0;
     } catch (error) {
       if (isNotFoundError(error)) {
         // index_not_found: no index yet, no manual entry.

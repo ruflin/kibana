@@ -43,13 +43,19 @@ const bucketedConfig: RelationshipIntegrationConfig = {
 };
 
 const presence = (total: number | { value: number; relation: 'eq' }) => ({
-  hits: { total, hits: [] },
+  columns: [{ name: 'total', type: 'long' }],
+  values: [[typeof total === 'number' ? total : total.value]],
 });
 
 const indexNotFoundError = () =>
   new esErrors.ResponseError({
-    statusCode: 404,
-    body: { error: { type: 'index_not_found_exception' } },
+    statusCode: 400,
+    body: {
+      error: {
+        type: 'verification_exception',
+        reason: 'Found 1 problem\nline 1:1: Unknown index [logs-workday.users-default]',
+      },
+    },
     warnings: null,
     headers: {},
     meta: {} as never,
@@ -65,7 +71,7 @@ describe('preRunReset', () => {
   beforeEach(() => {
     search = jest.fn().mockResolvedValue(presence({ value: 1, relation: 'eq' }));
     clearRelationshipIds = jest.fn().mockResolvedValue({ updated: 2, total: 2 });
-    esClient = { search } as unknown as ElasticsearchClient;
+    esClient = { esql: { query: search } } as unknown as ElasticsearchClient;
     relationshipsClient = { clearRelationshipIds } as unknown as RelationshipsClient;
     logger = loggerMock.create();
   });
@@ -158,10 +164,12 @@ describe('preRunReset', () => {
       const { query } = buildActorDiscoveryQuery(standardConfig, undefined) as {
         query: unknown;
       };
-      expect(params).toEqual(
-        expect.objectContaining({ index: 'logs-workday.users-default', query })
-      );
-      expect(opts).toBe(transportOpts);
+      expect(params).toEqual({
+        query: 'FROM logs-workday.users-default | LIMIT 1 | STATS total = COUNT(*)',
+        params: [],
+        filter: query,
+      });
+      expect(opts).toEqual(expect.objectContaining({ requestTimeout: 1234 }));
     });
   });
 

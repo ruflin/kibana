@@ -6008,12 +6008,14 @@ describe('Output Service', () => {
       soClient = getMockedSoClient();
     });
 
+    const healthColumns = [
+      { name: '@timestamp', type: 'date' },
+      { name: 'state', type: 'keyword' },
+      { name: 'message', type: 'text' },
+    ];
+
     it('should return unknown state if no hits', async () => {
-      esClientMock.search.mockResolvedValue({
-        hits: {
-          hits: [],
-        },
-      } as any);
+      esClientMock.esql.query.mockResolvedValue({ columns: healthColumns, values: [] } as any);
 
       const response = await outputService.getLatestOutputHealth(esClientMock, 'id');
 
@@ -6024,19 +6026,21 @@ describe('Output Service', () => {
       });
     });
 
+    it('should return unknown state if the health data stream does not exist', async () => {
+      esClientMock.esql.query.mockRejectedValue({
+        statusCode: 400,
+        body: { error: { type: 'verification_exception', reason: 'Unknown index [logs-x]' } },
+      });
+
+      const response = await outputService.getLatestOutputHealth(esClientMock, 'id');
+
+      expect(response).toEqual({ state: 'UNKNOWN', message: '', timestamp: '' });
+    });
+
     it('should return state from hits', async () => {
-      esClientMock.search.mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _source: {
-                state: 'DEGRADED',
-                message: 'connection error',
-                '@timestamp': '2023-11-30T14:25:31Z',
-              },
-            },
-          ],
-        },
+      esClientMock.esql.query.mockResolvedValue({
+        columns: healthColumns,
+        values: [['2023-11-30T14:25:31Z', 'DEGRADED', 'connection error']],
       } as any);
 
       const response = await outputService.getLatestOutputHealth(esClientMock, 'id');
@@ -6059,18 +6063,15 @@ describe('Output Service', () => {
           updatedAt
         )
       );
+      esClientMock.esql.query.mockResolvedValue({ columns: healthColumns, values: [] } as any);
 
       await outputService.getLatestOutputHealth(esClientMock, 'id');
 
-      expect((esClientMock.search.mock.lastCall?.[0] as any)?.query.bool.must).toEqual([
-        {
-          range: {
-            '@timestamp': {
-              gte: updatedAt,
-            },
-          },
-        },
-      ]);
+      const request = esClientMock.esql.query.mock.lastCall?.[0] as any;
+      expect(request.query).toContain('@timestamp >= TO_DATETIME(?since)');
+      expect(request.query).toContain('SORT @timestamp DESC NULLS LAST');
+      expect(request.query).toContain('LIMIT 1');
+      expect(request.params).toEqual(expect.arrayContaining([{ since: updatedAt }]));
     });
 
     it('should not apply range filter if updated_at is not available', async () => {
@@ -6079,18 +6080,24 @@ describe('Output Service', () => {
           type: 'remote_elasticsearch',
         })
       );
+      esClientMock.esql.query.mockResolvedValue({ columns: healthColumns, values: [] } as any);
 
       await outputService.getLatestOutputHealth(esClientMock, 'id');
 
-      expect((esClientMock.search.mock.lastCall?.[0] as any)?.query.bool.must).toEqual([]);
+      expect((esClientMock.esql.query.mock.lastCall?.[0] as any)?.query).not.toContain(
+        'TO_DATETIME'
+      );
     });
 
     it('should not apply range filter if output query returns error', async () => {
       soClient.get.mockResolvedValue({ error: { message: 'error' } });
+      esClientMock.esql.query.mockResolvedValue({ columns: healthColumns, values: [] } as any);
 
       await outputService.getLatestOutputHealth(esClientMock, 'id');
 
-      expect((esClientMock.search.mock.lastCall?.[0] as any)?.query.bool.must).toEqual([]);
+      expect((esClientMock.esql.query.mock.lastCall?.[0] as any)?.query).not.toContain(
+        'TO_DATETIME'
+      );
     });
   });
 

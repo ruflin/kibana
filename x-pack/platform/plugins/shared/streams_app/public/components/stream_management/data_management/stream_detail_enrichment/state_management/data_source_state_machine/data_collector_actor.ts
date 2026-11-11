@@ -20,17 +20,15 @@ import {
   stripOtelAliases,
   withUnmappedFieldsDirective,
 } from '@kbn/streams-schema';
-import { BasicPrettyPrinter, Builder, Parser } from '@elastic/esql';
+import { BasicPrettyPrinter, Builder, Parser, esql } from '@elastic/esql';
 import type { ErrorActorEvent } from 'xstate';
 import { fromObservable } from 'xstate';
 import type { errors as esErrors } from '@elastic/elasticsearch';
-import type { EsQueryConfig, Filter, Query, TimeRange } from '@kbn/es-query';
-import { buildEsQuery } from '@kbn/es-query';
-import { getEsQueryConfig } from '@kbn/data-plugin/public';
+import type { Filter, Query, TimeRange } from '@kbn/es-query';
+import type { buildEsQuery } from '@kbn/es-query';
+import type { ESQLSearchResponse } from '@kbn/es-types';
 import { getESQLResults } from '@kbn/esql-utils';
-import { Observable, catchError, filter, from, map, of, switchMap, tap, throwError } from 'rxjs';
-import { isRunningResponse } from '@kbn/data-plugin/common';
-import type { IEsSearchResponse } from '@kbn/search-types';
+import { Observable, catchError, from, map, of, switchMap, tap, throwError } from 'rxjs';
 import { pick } from 'lodash';
 import type { StreamsRepositoryClient } from '@kbn/streams-plugin/public/api';
 import type { EnrichmentDataSource } from '../../../../../../../common/url_schema';
@@ -38,6 +36,7 @@ import type { StreamsTelemetryClient } from '../../../../../../telemetry/client'
 import { getFormattedError } from '../../../../../../util/errors';
 import { esqlResultToPlainObjects } from '../../../../../../util/esql_result_to_plain_objects';
 import type { DataSourceMachineDeps } from './types';
+import { buildKqlWhereClause } from './kql_where_clause';
 import type { EnrichmentDataSourceWithUIAttributes } from '../../types';
 
 export interface SamplesFetchInput {
@@ -60,7 +59,6 @@ interface CollectKqlDataParams extends SearchParamsOptions {
   telemetryClient: StreamsTelemetryClient;
   dataSourceType: EnrichmentDataSource['type'];
   streamType: 'wired' | 'classic' | 'unknown';
-  uiSettings: DataSourceMachineDeps['uiSettings'];
 }
 
 type CollectorParams = Pick<
@@ -75,8 +73,6 @@ interface FailureStoreCollectorParams {
   streamType: 'wired' | 'classic' | 'unknown';
   timeRange?: { from: string; to: string };
 }
-
-const SEARCH_TIMEOUT = '10s';
 
 /**
  * Creates a data collector actor that fetches sample documents based on the data source type
@@ -457,22 +453,19 @@ function collectKqlData({
   telemetryClient,
   dataSourceType,
   streamType,
-  uiSettings,
   ...searchParams
 }: CollectKqlDataParams): Observable<SampleDocument[]> {
   const abortController = new AbortController();
-  const esQueryConfig = getEsQueryConfig(uiSettings);
 
-  const fetchWithSize = (size: number): Observable<SampleDocument[]> => {
-    const params = buildSamplesSearchParams(
-      { ...searchParams, size },
-      dataSourceType,
-      esQueryConfig
-    );
-
-    return data.search.search({ params }, { abortSignal: abortController.signal }).pipe(
-      filter(isValidSearchResult),
-      map(extractDocumentsFromResult),
+  const fetchWithSize = (size: number): Observable<SampleDocument[]> =>
+    from(
+      fetchSamples({
+        data,
+        signal: abortController.signal,
+        params: { ...searchParams, size },
+        dataSourceType,
+      })
+    ).pipe(
       catchError((error: unknown) => {
         if (isAsyncSearchResponseTooLargeError(error) && size > MIN_SAMPLE_SIZE) {
           return fetchWithSize(Math.max(MIN_SAMPLE_SIZE, Math.floor(size / 2)));
@@ -480,7 +473,6 @@ function collectKqlData({
         return throwError(() => error);
       })
     );
-  };
 
   return new Observable((observer) => {
     let registerFetchLatency: () => void = () => {};
@@ -509,74 +501,71 @@ function collectKqlData({
   });
 }
 
-/**
- * Validates if the search result contains hits
- */
-function isValidSearchResult(result: IEsSearchResponse): boolean {
-  return !isRunningResponse(result) && result.rawResponse.hits?.hits !== undefined;
+async function fetchSamples({
+  data,
+  signal,
+  params,
+  dataSourceType,
+}: {
+  data: DataSourceMachineDeps['data'];
+  signal: AbortSignal;
+  params: SearchParamsOptions;
+  dataSourceType: EnrichmentDataSource['type'];
+}): Promise<SampleDocument[]> {
+  const { response } = await getESQLResults({
+    esqlQuery: buildSamplesEsqlQuery(params, dataSourceType),
+    search: data.search.search,
+    signal,
+    filter: buildTimeRangeFilter(params.timeRange),
+  });
+
+  return extractDocumentsFromEsqlResponse(response);
 }
 
 /**
- * Extracts documents from search result
+ * Extracts documents from the ES|QL response: the stored `_source` plus its `_id`, the shape of a
+ * search hit that the samples consumers read.
  */
-function extractDocumentsFromResult(result: IEsSearchResponse): SampleDocument[] {
-  return result.rawResponse.hits.hits.map((doc) => ({
-    ...(doc._source as SampleDocument),
-    _id: doc._id,
+export function extractDocumentsFromEsqlResponse(response: ESQLSearchResponse): SampleDocument[] {
+  return esqlResultToPlainObjects<SampleDocument>(response).map(({ _id, _source }) => ({
+    ...(isRecord(_source) ? _source : {}),
+    _id,
   }));
 }
 
 /**
- * Builds search parameters for Elasticsearch query
+ * Builds the ES|QL query for the latest samples. The KQL query and filters are a `WHERE`; the time
+ * range stays a request `filter` (see `buildTimeRangeFilter`).
  */
-function buildSamplesSearchParams(
-  searchParams: SearchParamsOptions,
-  dataSourceType: EnrichmentDataSource['type'],
-  esQueryConfig: EsQueryConfig
-) {
-  const { filters, index, query, size = 100, timeRange } = searchParams;
-  const queryDefinition = buildEsQuery(
-    { title: index, fields: [] },
-    query ?? [],
-    filters ?? [],
-    esQueryConfig
-  );
-  addTimeRangeToQuery(queryDefinition, timeRange);
+export function buildSamplesEsqlQuery(
+  { filters, index, query, size = 100 }: SearchParamsOptions,
+  dataSourceType: EnrichmentDataSource['type']
+): string {
+  const source = dataSourceType === 'failure-store' ? `${index}::failures` : index;
+  const kqlWhereClause = buildKqlWhereClause({
+    type: 'kql-samples',
+    query,
+    filters,
+  } as EnrichmentDataSourceWithUIAttributes);
 
-  return {
-    index: dataSourceType === 'failure-store' ? `${index}::failures` : index,
-    allow_no_indices: true,
-    query: queryDefinition,
-    sort: [
-      {
-        '@timestamp': {
-          order: 'desc',
-        },
-      },
-    ],
-    size,
-    track_total_hits: false,
-    timeout: SEARCH_TIMEOUT,
-  };
+  return [
+    esql.from([source], ['_id', '_source']).toRequest().query,
+    ...(kqlWhereClause ? [`WHERE ${kqlWhereClause}`] : []),
+    'SORT @timestamp DESC',
+    `LIMIT ${size}`,
+  ].join('\n| ');
 }
 
 /**
- * Adds time range to the query definition if provided
+ * The time range as a Query DSL range, sent as the ES|QL request `filter`. `from` and `to` can be
+ * date math (`now-15m`), which `WHERE` cannot parse.
  */
-function addTimeRangeToQuery(
-  queryDefinition: ReturnType<typeof buildEsQuery>,
-  timeRange?: TimeRange
-): void {
-  if (timeRange) {
-    queryDefinition.bool.must.unshift({
-      range: {
-        '@timestamp': {
-          gte: timeRange.from,
-          lte: timeRange.to,
-        },
-      },
-    });
-  }
+export function buildTimeRangeFilter(timeRange?: TimeRange) {
+  return timeRange
+    ? {
+        bool: { filter: [{ range: { '@timestamp': { gte: timeRange.from, lte: timeRange.to } } }] },
+      }
+    : undefined;
 }
 
 /**

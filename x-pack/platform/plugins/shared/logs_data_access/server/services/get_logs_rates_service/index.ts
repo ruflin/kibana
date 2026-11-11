@@ -6,9 +6,13 @@
  */
 
 import type { ElasticsearchClient } from '@kbn/core/server';
-import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import { getLogErrorRate, getLogRatePerMinute } from '../../utils';
 import { LOG_LEVEL } from '../../es_fields';
+import { getRows, runEsqlQuery } from '../../utils/esql';
+
+// The default size of the `terms` aggregation this query replaced.
+const MAX_SERVICES = 10;
 
 export interface LogsRatesServiceParams {
   esClient: ElasticsearchClient;
@@ -16,14 +20,6 @@ export interface LogsRatesServiceParams {
   identifyingMetadata: string;
   timeFrom: number;
   timeTo: number;
-}
-
-interface LogErrorsAggregation extends estypes.AggregationsStringRareTermsBucketKeys {
-  logErrors: estypes.AggregationsTermsAggregateBase<estypes.AggregationsStringRareTermsBucketKeys>;
-}
-
-interface LogRateQueryAggregation {
-  services: estypes.AggregationsTermsAggregateBase<LogErrorsAggregation>;
 }
 
 export interface LogsRatesMetrics {
@@ -43,10 +39,13 @@ export function createGetLogsRatesService() {
     timeFrom,
     timeTo,
   }: LogsRatesServiceParams): Promise<LogsRatesServiceReturnType> => {
-    const esResponse = await esClient.search({
-      index: 'logs-*-*',
-      size: 0,
-      query: {
+    // The `terms` aggregation returned the 10 largest services, and the error count of a service
+    // was its largest `error` / `ERROR` bucket. `GREATEST` and `LIMIT 10` keep both.
+    const response = await runEsqlQuery({
+      esClient,
+      // The clauses stay a request filter: `identifyingMetadata` can be a multi-valued field, which
+      // `WHERE` does not match.
+      filter: {
         bool: {
           filter: [
             {
@@ -72,41 +71,24 @@ export function createGetLogsRatesService() {
           ],
         },
       },
-      aggs: {
-        services: {
-          terms: {
-            field: identifyingMetadata,
-          },
-          aggs: {
-            logErrors: {
-              terms: {
-                field: LOG_LEVEL,
-                include: ['error', 'ERROR'],
-              },
-            },
-          },
-        },
-      },
+      query: esql.from(['logs-*-*'])
+        .pipe`STATS log_count = COUNT(*), error_count = COUNT(*) WHERE log.level == "error", upper_error_count = COUNT(*) WHERE log.level == "ERROR" BY service = ${esql.col(
+        identifyingMetadata.split('.')
+      )}`.pipe`EVAL log_error_count = GREATEST(error_count, upper_error_count)`
+        .pipe`SORT log_count DESC, service ASC`.limit(MAX_SERVICES),
     });
-    const aggregations = esResponse.aggregations as LogRateQueryAggregation | undefined;
-    const buckets = aggregations?.services.buckets as LogErrorsAggregation[] | undefined;
 
-    return buckets
-      ? buckets.reduce<LogsRatesServiceReturnType>((acc, bucket) => {
-          const logCount = bucket.doc_count;
-          const logErrorBuckets = bucket.logErrors
-            .buckets as estypes.AggregationsStringRareTermsBucketKeys[];
+    return getRows(response).reduce<LogsRatesServiceReturnType>((acc, row) => {
+      const logCount = Number(row.log_count);
+      const logErrorCount = Number(row.log_error_count);
 
-          const logErrorCount = logErrorBuckets[0]?.doc_count;
-
-          return {
-            ...acc,
-            [bucket.key]: {
-              logRatePerMinute: getLogRatePerMinute({ logCount, timeFrom, timeTo }),
-              logErrorRate: logErrorCount ? getLogErrorRate({ logCount, logErrorCount }) : null,
-            },
-          };
-        }, {})
-      : {};
+      return {
+        ...acc,
+        [String(row.service)]: {
+          logRatePerMinute: getLogRatePerMinute({ logCount, timeFrom, timeTo }),
+          logErrorRate: logErrorCount ? getLogErrorRate({ logCount, logErrorCount }) : null,
+        },
+      };
+    }, {});
   };
 }

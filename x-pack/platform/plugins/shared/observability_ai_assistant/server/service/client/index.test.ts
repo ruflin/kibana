@@ -64,6 +64,18 @@ const waitForNextWrite = async (stream: Readable): Promise<any> => {
   return response;
 };
 
+// An ES|QL response with one row per hit, as `FROM <conversations> METADATA _id, _index, _source`.
+function esqlHits(hits: Array<{ _id: string; _index: string; _source: unknown }>) {
+  return {
+    columns: [
+      { name: '_id', type: 'keyword' },
+      { name: '_index', type: 'keyword' },
+      { name: '_source', type: '_source' },
+    ],
+    values: hits.map((hit) => [hit._id, hit._index, hit._source]),
+  };
+}
+
 function createLlmSimulator(subscriber: any) {
   return {
     next: async (msg: ChunkDelta) => {
@@ -110,6 +122,7 @@ describe('Observability AI Assistant client', () => {
 
   const internalUserEsClientMock: DeeplyMockedKeys<ElasticsearchClient> = {
     search: jest.fn(),
+    esql: { query: jest.fn() },
     index: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
@@ -176,6 +189,8 @@ describe('Observability AI Assistant client', () => {
         hits: [],
       },
     } as any);
+
+    internalUserEsClientMock.esql.query.mockResolvedValue(esqlHits([]) as any);
 
     currentUserEsClientMock.search.mockResolvedValue({
       hits: {
@@ -539,32 +554,28 @@ describe('Observability AI Assistant client', () => {
         });
       });
 
-      internalUserEsClientMock.search.mockImplementation(async () => {
-        return {
-          hits: {
-            hits: [
-              {
-                _id: 'my-es-document-id',
-                _index: '.kibana-observability-ai-assistant-conversations',
-                _source: {
-                  '@timestamp': new Date().toISOString(),
-                  conversation: {
-                    id: 'my-conversation-id',
-                    title: 'My stored conversation',
-                    last_updated: new Date().toISOString(),
-                  },
-                  labels: {},
-                  numeric_labels: {},
-                  public: false,
-                  user: {
-                    name: 'johndoe',
-                  },
-                  messages: [user('How many alerts do I have?')],
-                },
+      internalUserEsClientMock.esql.query.mockImplementation(async () => {
+        return esqlHits([
+          {
+            _id: 'my-es-document-id',
+            _index: '.kibana-observability-ai-assistant-conversations',
+            _source: {
+              '@timestamp': new Date().toISOString(),
+              conversation: {
+                id: 'my-conversation-id',
+                title: 'My stored conversation',
+                last_updated: new Date().toISOString(),
               },
-            ],
+              labels: {},
+              numeric_labels: {},
+              public: false,
+              user: {
+                name: 'johndoe',
+              },
+              messages: [user('How many alerts do I have?')],
+            },
           },
-        } as any;
+        ]) as any;
       });
 
       internalUserEsClientMock.update.mockImplementationOnce(async () => {
@@ -1684,22 +1695,20 @@ describe('Observability AI Assistant client', () => {
     beforeEach(async () => {
       client = createClient();
 
-      internalUserEsClientMock.search.mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _id: 'conversation-1',
-              _index: 'conversations',
-              _source: {
-                '@timestamp': new Date().toISOString(),
-                conversation: { id: 'conversation-1', title: 'Test' },
-                user: { name: 'johndoe' },
-                messages: [],
-              },
+      internalUserEsClientMock.esql.query.mockResolvedValue(
+        esqlHits([
+          {
+            _id: 'conversation-1',
+            _index: 'conversations',
+            _source: {
+              '@timestamp': new Date().toISOString(),
+              conversation: { id: 'conversation-1', title: 'Test' },
+              user: { name: 'johndoe' },
+              messages: [],
             },
-          ],
-        },
-      } as any);
+          },
+        ]) as any
+      );
 
       internalUserEsClientMock.delete.mockResolvedValue({} as any);
 
@@ -1747,24 +1756,22 @@ describe('Observability AI Assistant client', () => {
     beforeEach(async () => {
       client = createClient();
 
-      internalUserEsClientMock.search.mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _id: 'conversation-1',
-              _index: 'conversations',
-              _source: {
-                '@timestamp': new Date().toISOString(),
-                conversation: { id: 'conversation-1', title: 'Test Conversation' },
-                user: { name: 'johndoe' },
-                messages: [],
-                public: false,
-                archived: false,
-              },
+      internalUserEsClientMock.esql.query.mockResolvedValue(
+        esqlHits([
+          {
+            _id: 'conversation-1',
+            _index: 'conversations',
+            _source: {
+              '@timestamp': new Date().toISOString(),
+              conversation: { id: 'conversation-1', title: 'Test Conversation' },
+              user: { name: 'johndoe' },
+              messages: [],
+              public: false,
+              archived: false,
             },
-          ],
-        },
-      } as any);
+          },
+        ]) as any
+      );
 
       internalUserEsClientMock.index.mockResolvedValue({ _id: 'new-conversation-id' } as any);
 
@@ -1778,6 +1785,28 @@ describe('Observability AI Assistant client', () => {
       );
     });
   });
+  describe('when listing conversations', () => {
+    it('reads the latest 100 accessible conversations with ES|QL', async () => {
+      client = createClient();
+      internalUserEsClientMock.esql.query.mockResolvedValue({
+        columns: [{ name: '_source', type: '_source' }],
+        values: [[{ conversation: { id: 'conversation-1' } }]],
+      } as any);
+
+      const conversations = await client.find();
+
+      expect(conversations).toEqual([{ conversation: { id: 'conversation-1' } }]);
+      expect(internalUserEsClientMock.esql.query).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.stringMatching(
+            /^FROM [^ ]+ METADATA _source \| SORT @timestamp DESC NULLS LAST \| LIMIT 100 \| KEEP _source$/
+          ),
+          filter: { bool: { filter: expect.any(Array) } },
+        })
+      );
+    });
+  });
+
   describe('space-aware links', () => {
     beforeEach(() => {
       jest.clearAllMocks();

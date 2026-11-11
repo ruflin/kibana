@@ -5,48 +5,40 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 
 import { isRight, type Either } from 'fp-ts/Either';
-import type { MonitoredUserDoc } from '../../../../../../common/api/entity_analytics';
+import { esqlRows, runEsqlRead } from '../../../utils/esql_read';
 import type { Batch, BulkPrivMonUser, BulkProcessingError } from './types';
 
 export const queryExistingUsers =
   (esClient: ElasticsearchClient, index: string) =>
-  (batch: Array<Either<BulkProcessingError, BulkPrivMonUser>>) =>
-    esClient
-      .search<MonitoredUserDoc>({
-        index,
-        size: batch.length,
-        query: {
-          bool: {
-            must: [
-              {
-                terms: {
-                  'user.name': Array.from(batch)
-                    .filter(isRight)
-                    .map((e) => e.right.username),
-                },
-              },
-            ],
-          },
-        },
-      })
-      .then((response) =>
-        response.hits.hits.reduce<Record<string, string>>((users, hit) => {
-          if (!hit._source?.user?.name) {
-            throw new Error('User name is missing');
-          }
-          if (!hit._id) {
-            throw new Error('User ID is missing');
-          }
-          users[hit._source.user.name as string] = hit._id;
-          return users;
-        }, {})
-      )
-      .then(
-        (existingUsers): Batch => ({
-          existingUsers,
-          uploaded: batch,
-        })
-      );
+  async (batch: Array<Either<BulkProcessingError, BulkPrivMonUser>>): Promise<Batch> => {
+    const usernames = Array.from(batch)
+      .filter(isRight)
+      .map((e) => e.right.username);
+
+    // `IN ()` is not valid ES|QL, and a `terms` query on no values matched nothing.
+    const response =
+      usernames.length > 0
+        ? await runEsqlRead({
+            esClient,
+            query: esql.from([index], ['_id']).where`user.name IN (${{ usernames }})`
+              .pipe`KEEP user.name, _id`.limit(batch.length),
+          })
+        : undefined;
+
+    const existingUsers = esqlRows(response).reduce<Record<string, string>>((users, row) => {
+      if (!row['user.name']) {
+        throw new Error('User name is missing');
+      }
+      if (!row._id) {
+        throw new Error('User ID is missing');
+      }
+      users[row['user.name'] as string] = row._id as string;
+      return users;
+    }, {});
+
+    return { existingUsers, uploaded: batch };
+  };

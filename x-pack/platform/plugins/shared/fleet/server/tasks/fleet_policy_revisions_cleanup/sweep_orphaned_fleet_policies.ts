@@ -8,10 +8,12 @@
 import type { Logger, ElasticsearchClient } from '@kbn/core/server';
 import { isSavedObjectErrorResult } from '@kbn/core/server';
 import { chunk } from 'lodash';
+import { esql } from '@elastic/esql';
 
 import { AGENT_POLICY_INDEX, AGENTS_INDEX } from '../../../common';
 import type { AgentPolicySOAttributes } from '../../types';
 import { appContextService } from '../../services';
+import { esqlRows, runEsqlRead } from '../../services/esql_read';
 import { getAgentPolicySavedObjectType } from '../../services/agent_policy';
 import { isSpaceAwarenessEnabled } from '../../services/spaces/helpers';
 
@@ -219,34 +221,15 @@ async function filterOutPoliciesWithAgents(
   logger: Logger,
   signal?: AbortSignal
 ): Promise<string[]> {
-  interface Aggregations {
-    active_policy_ids: {
-      buckets: Array<{ key: string }>;
-    };
-  }
+  const res = await runEsqlRead({
+    esClient,
+    query: esql.from([AGENTS_INDEX]).where`active == true AND policy_id IN (${{ candidateIds }})`
+      .pipe`STATS agents = COUNT(*) BY policy_id`.limit(candidateIds.length),
+    ignoreUnknownIndex: true,
+    signal,
+  });
 
-  const res = await esClient.search<unknown, Aggregations>(
-    {
-      index: AGENTS_INDEX,
-      ignore_unavailable: true,
-      size: 0,
-      query: {
-        bool: {
-          filter: [{ term: { active: true } }, { terms: { policy_id: candidateIds } }],
-        },
-      },
-      aggs: {
-        active_policy_ids: {
-          terms: { field: 'policy_id', size: candidateIds.length },
-        },
-      },
-    },
-    { signal }
-  );
-
-  const policyIdsWithAgents = new Set(
-    res.aggregations?.active_policy_ids.buckets.map((b) => b.key) ?? []
-  );
+  const policyIdsWithAgents = new Set(esqlRows(res).map((row) => row.policy_id as string));
 
   if (policyIdsWithAgents.size > 0) {
     logger.warn(

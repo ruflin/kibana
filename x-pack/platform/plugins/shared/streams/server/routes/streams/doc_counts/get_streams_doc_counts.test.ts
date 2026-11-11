@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { errors } from '@elastic/elasticsearch';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type { StreamsClient } from '../../../lib/streams/client';
 import {
@@ -35,14 +36,18 @@ const makeEsClient = () => {
         },
       }),
     },
-    search: jest.fn().mockResolvedValue({
-      aggregations: { per_index: { buckets: { '.ds-logs-a-000002': { doc_count: 2 } } } },
-    }),
     esql: {
-      query: jest.fn().mockResolvedValue({
-        columns: [{ name: 'failed_count' }, { name: 'backing_index' }],
-        values: [[5, '.fs-logs-a-000001']],
-      }),
+      query: jest.fn(async ({ query }: { query: string }) =>
+        query.includes('::failures')
+          ? {
+              columns: [{ name: 'failed_count' }, { name: 'backing_index' }],
+              values: [[5, '.fs-logs-a-000001']],
+            }
+          : {
+              columns: [{ name: 'doc_count' }, { name: 'index_name' }],
+              values: [[2, '.ds-logs-a-000002']],
+            }
+      ),
     },
   } as unknown as ElasticsearchClient;
   return { esClient, getDataStream };
@@ -169,5 +174,66 @@ describe('getFailedDocCountsForStreams query scope', () => {
       { stream: 'logs-a', count: 5 },
       { stream: 'logs-b', count: 3 },
     ]);
+  });
+});
+
+describe('per-index ES|QL counts', () => {
+  const getRequest = (esClient: ElasticsearchClient) =>
+    (esClient.esql.query as jest.Mock).mock.calls[0][0];
+
+  it('counts degraded documents of the last backing index with an _ignored filter', async () => {
+    const { esClient } = makeEsClient();
+
+    await getDegradedDocCountsForStreams({ esClient });
+
+    const { query } = getRequest(esClient);
+    expect(query).toContain('METADATA _index, _ignored');
+    expect(query).toContain('.ds-logs-a-000002');
+    expect(query).not.toContain('.ds-logs-a-000001');
+    expect(query).toContain('WHERE _ignored IS NOT NULL');
+    expect(query).toContain('STATS doc_count = COUNT(*) BY index_name = _index');
+    expect(query).toMatch(/LIMIT 1$/);
+  });
+
+  it('counts ingested documents of every backing index in the time range with named params', async () => {
+    const { esClient } = makeEsClient();
+
+    await getIngestionDocCountsForStreams({
+      esClient,
+      streamsClient,
+      start: 0,
+      end: 1000,
+      streamName: 'logs-a',
+    });
+
+    const { query, params } = getRequest(esClient);
+    expect(query).toContain('WHERE @timestamp >= ?startIso AND @timestamp <= ?endIso');
+    expect(query).toContain('.fs-logs-a-000001');
+    expect(params).toEqual([
+      { startIso: '1970-01-01T00:00:00.000Z' },
+      { endIso: '1970-01-01T00:00:01.000Z' },
+    ]);
+  });
+
+  it('returns no ingested counts when a backing index is missing', async () => {
+    const { esClient } = makeEsClient();
+    (esClient.esql.query as jest.Mock).mockRejectedValue(
+      new errors.ResponseError({
+        statusCode: 400,
+        body: {
+          error: {
+            type: 'verification_exception',
+            reason: 'Found 1 problem\nline 1:6: Unknown index [.ds-logs-a-000001]',
+          },
+        },
+        headers: {},
+        warnings: [],
+        meta: {} as never,
+      })
+    );
+
+    await expect(
+      getIngestionDocCountsForStreams({ esClient, streamsClient, start: 0, end: 1 })
+    ).resolves.toEqual([]);
   });
 });

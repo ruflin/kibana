@@ -22,7 +22,11 @@ import {
   isNotFoundError,
   createQueryDocumentsTool,
 } from './query_documents';
-import { createMockGetScopedClients, createMockToolContext } from '../../utils/test_helpers';
+import {
+  createMockGetScopedClients,
+  createMockToolContext,
+  mockEsMethodResolvedValue,
+} from '../../utils/test_helpers';
 
 describe('createQueryDocumentsTool handler', () => {
   const mockDefinition = {
@@ -31,9 +35,7 @@ describe('createQueryDocumentsTool handler', () => {
   } as unknown as Streams.all.Definition;
 
   const emptyFieldCaps = { fields: {} } as unknown as FieldCapsResponse;
-  const emptySearchResponse = {
-    hits: { hits: [] },
-  } as unknown as SearchResponse;
+  const emptySampleResponse = { columns: [], values: [] };
 
   const setup = () => {
     const { getScopedClients, streamsClient, esClient } = createMockGetScopedClients();
@@ -47,7 +49,8 @@ describe('createQueryDocumentsTool handler', () => {
 
     streamsClient.getStream.mockResolvedValue(mockDefinition);
     esClient.fieldCaps.mockResolvedValue(emptyFieldCaps);
-    esClient.search.mockResolvedValueOnce(emptySearchResponse).mockResolvedValueOnce({
+    mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
+    esClient.search.mockResolvedValueOnce({
       hits: {
         hits: [{ _index: 'logs', _id: '1', _source: { msg: 'hello' } }],
         total: { value: 1 },
@@ -78,7 +81,8 @@ describe('createQueryDocumentsTool handler', () => {
 
     streamsClient.getStream.mockResolvedValue(mockDefinition);
     esClient.fieldCaps.mockResolvedValue(emptyFieldCaps);
-    esClient.search.mockResolvedValueOnce(emptySearchResponse).mockResolvedValueOnce({
+    mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
+    esClient.search.mockResolvedValueOnce({
       hits: { hits: [], total: { value: 0 } },
     } as unknown as SearchResponse);
 
@@ -105,7 +109,8 @@ describe('createQueryDocumentsTool handler', () => {
 
     streamsClient.getStream.mockResolvedValue(mockDefinition);
     esClient.fieldCaps.mockResolvedValue(emptyFieldCaps);
-    esClient.search.mockResolvedValueOnce(emptySearchResponse).mockResolvedValueOnce({
+    mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
+    esClient.search.mockResolvedValueOnce({
       hits: { hits: [], total: { value: 0 } },
     } as unknown as SearchResponse);
 
@@ -134,7 +139,8 @@ describe('createQueryDocumentsTool handler', () => {
 
     streamsClient.getStream.mockResolvedValue(mockDefinition);
     esClient.fieldCaps.mockResolvedValue(emptyFieldCaps);
-    esClient.search.mockResolvedValueOnce(emptySearchResponse).mockResolvedValueOnce({
+    mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
+    esClient.search.mockResolvedValueOnce({
       hits: { hits: [], total: { value: 50 } },
       aggregations: { by_level: { buckets: [] } },
     } as unknown as SearchResponse);
@@ -164,7 +170,8 @@ describe('createQueryDocumentsTool handler', () => {
 
     streamsClient.getStream.mockResolvedValue(mockDefinition);
     esClient.fieldCaps.mockResolvedValue(emptyFieldCaps);
-    esClient.search.mockResolvedValueOnce(emptySearchResponse).mockResolvedValueOnce({
+    mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
+    esClient.search.mockResolvedValueOnce({
       hits: {
         hits: [
           {
@@ -196,10 +203,12 @@ describe('createQueryDocumentsTool handler', () => {
     const fieldCapsCall = esClient.fieldCaps.mock.calls[0][0] as Record<string, unknown>;
     expect(fieldCapsCall.index).toBe('logs::failures');
 
-    const sampleSearchCall = esClient.search.mock.calls[0][0] as Record<string, unknown>;
-    expect(sampleSearchCall.index).toBe('logs::failures');
+    const sampleQuery = (esClient.esql.query.mock.calls[0][0] as { query: string }).query;
+    expect(sampleQuery).toMatch(/^FROM logs::failures METADATA _source/);
+    expect(sampleQuery).toContain('SORT @timestamp DESC NULLS LAST');
+    expect(sampleQuery).toMatch(/LIMIT 50$/);
 
-    const finalSearchCall = esClient.search.mock.calls[1][0] as Record<string, unknown>;
+    const finalSearchCall = esClient.search.mock.calls[0][0] as Record<string, unknown>;
     expect(finalSearchCall.index).toBe('logs::failures');
   });
 
@@ -231,7 +240,8 @@ describe('createQueryDocumentsTool handler', () => {
 
     streamsClient.getStream.mockResolvedValue(mockDefinition);
     esClient.fieldCaps.mockResolvedValue(emptyFieldCaps);
-    esClient.search.mockResolvedValueOnce(emptySearchResponse).mockResolvedValueOnce({
+    mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
+    esClient.search.mockResolvedValueOnce({
       hits: { hits: [], total: { value: 0 } },
     } as unknown as SearchResponse);
 
@@ -245,8 +255,8 @@ describe('createQueryDocumentsTool handler', () => {
     const fieldCapsCall = esClient.fieldCaps.mock.calls[0][0] as Record<string, unknown>;
     expect(fieldCapsCall.index).toBe('logs');
 
-    const sampleSearchCall = esClient.search.mock.calls[0][0] as Record<string, unknown>;
-    expect(sampleSearchCall.index).toBe('logs');
+    const sampleQuery = (esClient.esql.query.mock.calls[0][0] as { query: string }).query;
+    expect(sampleQuery).toMatch(/^FROM logs METADATA _source/);
   });
 
   it('explicit source "data" queries primary data index', async () => {
@@ -254,7 +264,8 @@ describe('createQueryDocumentsTool handler', () => {
 
     streamsClient.getStream.mockResolvedValue(mockDefinition);
     esClient.fieldCaps.mockResolvedValue(emptyFieldCaps);
-    esClient.search.mockResolvedValueOnce(emptySearchResponse).mockResolvedValueOnce({
+    mockEsMethodResolvedValue(esClient.esql.query, emptySampleResponse);
+    esClient.search.mockResolvedValueOnce({
       hits: { hits: [], total: { value: 0 } },
     } as unknown as SearchResponse);
 

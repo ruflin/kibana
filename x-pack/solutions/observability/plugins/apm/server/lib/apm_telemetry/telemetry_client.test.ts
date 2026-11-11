@@ -6,6 +6,7 @@
  */
 
 import { coreMock, elasticsearchServiceMock } from '@kbn/core/server/mocks';
+import { esql } from '@elastic/esql';
 import { getTelemetryClient } from './telemetry_client';
 
 describe('getTelemetryClient', () => {
@@ -30,6 +31,13 @@ describe('getTelemetryClient', () => {
       timeout: '5m',
     });
     expect(esClient.search).toHaveBeenCalledWith(expect.anything(), transportOptions);
+
+    esClient.esql.query.mockResolvedValue({ columns: [], values: [] } as any);
+    await telemetryClient.esqlRead(esql.from(['traces-apm-*']).pipe`LIMIT 1`);
+    expect(esClient.esql.query).toHaveBeenCalledWith(
+      expect.objectContaining({ query: expect.stringContaining('FROM traces-apm-*') }),
+      { signal: controller.signal }
+    );
 
     esClient.indices.stats.mockResponse({} as any);
     await telemetryClient.indicesStats({ index: 'traces-apm-*' });

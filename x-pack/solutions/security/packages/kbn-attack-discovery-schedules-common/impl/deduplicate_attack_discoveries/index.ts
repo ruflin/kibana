@@ -5,14 +5,12 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import { ALERT_INSTANCE_ID } from '@kbn/rule-data-utils';
-import type {
-  AttackDiscoveries,
-  AttackDiscoveryAlertDocument,
-  Replacements,
-} from '@kbn/elastic-assistant-common';
+import type { AttackDiscoveries, Replacements } from '@kbn/elastic-assistant-common';
 
+import { runEsqlRead } from '../esql_helpers';
 import { generateAttackDiscoveryAlertHash } from '../transforms/transform_to_alert_documents';
 
 interface DeduplicateAttackDiscoveriesParams {
@@ -69,17 +67,21 @@ export const deduplicateAttackDiscoveries = async ({
   });
   const alertUuids = alertDocs.map((doc) => doc.alertHash);
 
-  // 2. Search for existing alerts in ES
-  const searchResult = await esClient.search<AttackDiscoveryAlertDocument>({
-    index: indexPattern,
-    size: alertUuids.length,
-    query: { bool: { must: [{ terms: { [ALERT_INSTANCE_ID]: alertUuids } }] } },
-    ignore_unavailable: true,
+  // 2. Search for existing alerts in ES. A missing index has no alerts, so nothing is a duplicate.
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from(indexPattern.split(',').map((index) => index.trim())).pipe`WHERE ${esql.col(
+      ALERT_INSTANCE_ID
+    )} IN (${alertUuids.map((uuid) => esql.str(uuid))})`
+      .keep(ALERT_INSTANCE_ID)
+      .limit(alertUuids.length),
   });
 
   // 3. Collect found alert IDs
   const foundIds = new Set(
-    searchResult.hits.hits.map((hit) => hit._source && hit._source[ALERT_INSTANCE_ID])
+    (response?.values ?? []).flatMap(([instanceId]) =>
+      typeof instanceId === 'string' ? [instanceId] : []
+    )
   );
 
   // 4. Filter out duplicates

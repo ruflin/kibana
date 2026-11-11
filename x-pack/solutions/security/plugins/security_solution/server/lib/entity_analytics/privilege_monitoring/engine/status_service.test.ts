@@ -132,4 +132,22 @@ describe('Privileged User Monitoring: Engine Status Service', () => {
       await expect(statusService.scheduleNow()).rejects.toThrow('Task Manager is not available');
     });
   });
+
+  describe('getCurrentUserCount', () => {
+    it('counts the privileged users with ES|QL and keeps the count response shape', async () => {
+      clusterClientMock.asCurrentUser.esql.query.mockResolvedValue({
+        columns: [{ name: 'total', type: 'long' }],
+        values: [[42]],
+      } as never);
+
+      await expect(statusService.getCurrentUserCount()).resolves.toEqual({ count: 42 });
+      expect(clusterClientMock.asCurrentUser.esql.query).toHaveBeenCalledWith(
+        {
+          query: `FROM ${dataClient.index} | WHERE user.is_privileged == TRUE | STATS total = COUNT(*)`,
+          params: [],
+        },
+        { signal: undefined }
+      );
+    });
+  });
 });

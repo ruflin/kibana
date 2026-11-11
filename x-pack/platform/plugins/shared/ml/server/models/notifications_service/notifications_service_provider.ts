@@ -7,6 +7,7 @@
 
 import type { IScopedClusterClient } from '@kbn/core/server';
 import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { NotificationItem, NotificationSource } from '@kbn/ml-common-types/notifications';
 import type {
   MlNotificationMessageLevel,
@@ -21,9 +22,12 @@ import type {
   NotificationsCountParams,
 } from '../../routes/schemas/notifications_schema';
 import type { ServerlessInfo } from '../../types';
+import { esqlRows, runEsql } from '../../lib/esql/esql_read';
 import { DEFAULT_ML_PROJECT_ROUTING } from '../../../common/constants/cps';
 
 const MAX_NOTIFICATIONS_SIZE = 10000;
+// Upper bound on the number of distinct message levels.
+const MAX_LEVELS = 100;
 
 interface EntityIdsPerType {
   type: 'anomaly_detector' | 'data_frame_analytics' | 'inference' | 'system';
@@ -218,61 +222,32 @@ export class NotificationsService {
 
     const res = await Promise.all(
       entityIdsPerType.map(async (v) => {
-        const responseBody = await this.scopedClusterClient.asInternalUser.search({
-          size: 0,
-          index: ML_NOTIFICATION_INDEX_PATTERN,
-          query: {
-            bool: {
-              filter: [
-                ...(v.ids
-                  ? [
-                      {
-                        terms: {
-                          job_id: v.ids as string[],
-                        },
-                      },
-                    ]
-                  : []),
-                {
-                  term: {
-                    job_type: {
-                      value: v.type,
-                    },
-                  },
-                },
-                {
-                  range: {
-                    timestamp: {
-                      gt: params.lastCheckedAt,
-                    },
-                  },
-                },
-              ],
-            },
-          },
-          aggs: {
-            by_level: {
-              terms: { field: 'level' },
-            },
-          },
-          ...(this.serverless.isServerless && this.serverless.cpsEnabled
-            ? { project_routing: DEFAULT_ML_PROJECT_ROUTING }
-            : {}),
-        });
-
-        if (!responseBody.aggregations) {
+        const ids = v.ids?.filter((id): id is string => id !== null);
+        if (ids && ids.length === 0) {
+          // No entity of this type is visible in the current space.
           return this.getDefaultCountResponse();
         }
 
-        const byLevel = responseBody.aggregations
-          .by_level as estypes.AggregationsMultiBucketAggregateBase<estypes.AggregationsStringTermsBucketKeys>;
+        let query = esql.from([ML_NOTIFICATION_INDEX_PATTERN]);
+        if (ids) {
+          query = query.pipe`WHERE job_id IN (${{ ids }})`;
+        }
+        const response = await runEsql({
+          esClient: this.scopedClusterClient.asInternalUser,
+          query: query.pipe`WHERE job_type == ${{ jobType: v.type }} AND timestamp > TO_DATETIME(${{
+            lastCheckedAt: params.lastCheckedAt,
+          }})`.pipe`STATS count = COUNT(*) BY level`.limit(MAX_LEVELS),
+          emptyOnUnknownIndex: true,
+          projectRouting:
+            this.serverless.isServerless && this.serverless.cpsEnabled
+              ? DEFAULT_ML_PROJECT_ROUTING
+              : undefined,
+        });
 
-        return Array.isArray(byLevel.buckets)
-          ? byLevel.buckets.reduce((acc, curr) => {
-              acc[curr.key as MlNotificationMessageLevel] = curr.doc_count;
-              return acc;
-            }, {} as NotificationsCountResponse)
-          : ({} as NotificationsCountResponse);
+        return esqlRows(response).reduce<NotificationsCountResponse>((acc, row) => {
+          acc[row.level as MlNotificationMessageLevel] = row.count as number;
+          return acc;
+        }, {} as NotificationsCountResponse);
       })
     );
 

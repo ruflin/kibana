@@ -8,35 +8,46 @@
 import { getMonitorSummaryStatsRoute } from './get_monitor_summary_stats';
 import { HEARTBEAT_UNMAPPED_LOCATION_LABEL } from '../../../common/runtime_types/heartbeat_monitor';
 
-const aggregations = {
-  total: { value: 100 },
-  up: { doc_count: 96 },
-  down: { doc_count: 4 },
-  median_duration: { values: { '50.0': 250000 } },
+const esqlResponse = {
+  columns: [
+    { name: 'total', type: 'long' },
+    { name: 'up', type: 'long' },
+    { name: 'down', type: 'long' },
+    { name: 'median_duration', type: 'double' },
+  ],
+  values: [[100, 96, 4, 250000]],
 };
 
 const runHandler = async (locationLabel: string) => {
-  const search = jest.fn().mockResolvedValue({ body: { aggregations } });
+  const esqlFn = jest.fn().mockResolvedValue(esqlResponse);
   const route = getMonitorSummaryStatsRoute();
   const result = await route.handler({
     // @ts-expect-error partial implementation for testing
     request: { query: { monitorId: 'my-monitor', locationLabel, from: 'now-30d', to: 'now' } },
     // @ts-expect-error partial implementation for testing
-    syntheticsEsClient: { search, heartbeatIndices: 'synthetics-*' },
+    syntheticsEsClient: { esql: esqlFn, heartbeatIndices: 'synthetics-*' },
   });
-  return { result, filters: search.mock.calls[0][0].query.bool.filter };
+  return {
+    result,
+    filters: esqlFn.mock.calls[0][1].filter.bool.filter,
+    query: esqlFn.mock.calls[0][0].toRequest().query,
+  };
 };
 
 describe('getMonitorSummaryStatsRoute', () => {
   afterEach(() => jest.clearAllMocks());
 
   it('filters by observer.geo.name for a real location', async () => {
-    const { filters, result } = await runHandler('North America - US East');
+    const { filters, result, query } = await runHandler('North America - US East');
+
+    expect(query).toBe(
+      'FROM synthetics-* | STATS total = COUNT(summary.up), up = COUNT(*) WHERE monitor.status == "up", down = COUNT(*) WHERE monitor.status == "down", median_duration = PERCENTILE(monitor.duration.us, 50)'
+    );
 
     expect(filters).toContainEqual({
       term: { 'observer.geo.name': 'North America - US East' },
     });
-    // Sanity: aggregations are turned into the summary payload.
+    // Sanity: the STATS row is turned into the summary payload.
     expect(result).toEqual({
       availability: 96,
       medianDuration: 250,

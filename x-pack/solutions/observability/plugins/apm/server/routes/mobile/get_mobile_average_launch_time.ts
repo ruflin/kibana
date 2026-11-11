@@ -6,13 +6,22 @@
  */
 
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
-import { kqlQuery, rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import type { Maybe } from '@kbn/apm-types-shared';
 import { offsetPreviousPeriodCoordinates } from '../../../common/utils/offset_previous_period_coordinate';
 import { APP_LAUNCH_TIME, SERVICE_NAME } from '../../../common/es_fields/apm';
 import { environmentQuery } from '../../../common/utils/environment_query';
 import { getOffsetInMs } from '../../../common/utils/get_offset_in_ms';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import {
+  addTimeBucket,
+  esqlBucketMap,
+  getTimeBucketKeys,
+  toNumberOrNull,
+  whereTerm,
+} from '../../lib/helpers/esql_values';
 import { getBucketSize } from '../../../common/utils/get_bucket_size';
 import type { Coordinate } from '../../../typings/timeseries';
 
@@ -48,59 +57,62 @@ async function getAvgLaunchTimeTimeseries({
     offset,
   });
 
-  const { intervalString } = getBucketSize({
+  const { bucketSize } = getBucketSize({
     start: startWithOffset,
     end: endWithOffset,
     minBucketSize: 60,
   });
+  const intervalMs = bucketSize * 1000;
+  const bucketKeys = getTimeBucketKeys({
+    start: startWithOffset,
+    end: endWithOffset,
+    intervalMs,
+  });
 
-  const aggs = {
-    launchTimeAvg: {
-      avg: { field: APP_LAUNCH_TIME },
-    },
-  };
-
-  const response = await apmEventClient.search('get_mobile_launch_time', {
-    apm: {
-      events: [ProcessorEvent.metric],
-    },
-    track_total_hits: false,
-    size: 0,
-    query: {
+  const request = {
+    apm: { events: [ProcessorEvent.metric] },
+    // The launch time field is not mapped in every metrics index, so unmapped fields read as null.
+    filter: {
       bool: {
         filter: [
-          ...termQuery(SERVICE_NAME, serviceName),
           ...rangeQuery(startWithOffset, endWithOffset),
           ...environmentQuery(environment),
           ...kqlQuery(kuery),
         ],
       },
     },
-    aggs: {
-      timeseries: {
-        date_histogram: {
-          field: '@timestamp',
-          fixed_interval: intervalString,
-          min_doc_count: 0,
-          extended_bounds: { min: startWithOffset, max: endWithOffset },
-        },
-        aggs,
-      },
-      ...aggs,
-    },
-  });
+  };
+  const scoped = (index: string[]) =>
+    whereTerm(
+      esql.from(index).addSetCommand('unmapped_fields', 'nullify'),
+      SERVICE_NAME,
+      serviceName
+    );
 
-  const timeseries =
-    response?.aggregations?.timeseries.buckets.map((bucket) => {
-      return {
-        x: bucket.key,
-        y: bucket.launchTimeAvg.value,
-      };
-    }) ?? [];
+  const [timeseriesResponse, totalResponse] = await Promise.all([
+    apmEventClient.esql('get_mobile_launch_time', {
+      ...request,
+      query: (index) =>
+        addTimeBucket(scoped(index), intervalMs).pipe`STATS launchTimeAvg = AVG(${esql.col(
+          APP_LAUNCH_TIME
+        )}) BY bucket`.limit(bucketKeys.length),
+    }),
+    apmEventClient.esql('get_mobile_launch_time_total', {
+      ...request,
+      query: (index) =>
+        scoped(index).pipe`STATS launchTimeAvg = AVG(${esql.col(APP_LAUNCH_TIME)})`.limit(1),
+    }),
+  ]);
+
+  const buckets = esqlBucketMap(timeseriesResponse);
+  const timeseries = bucketKeys.map((key) => ({
+    x: key,
+    y: toNumberOrNull(buckets.get(key)?.launchTimeAvg),
+  }));
 
   return {
     timeseries,
-    value: response.aggregations?.launchTimeAvg?.value,
+    value: toNumberOrNull(esqlRows(totalResponse)[0]?.launchTimeAvg),
   };
 }
 

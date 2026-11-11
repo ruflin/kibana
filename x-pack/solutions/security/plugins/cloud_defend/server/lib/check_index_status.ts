@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import { type Logger } from '@kbn/core/server';
 import type { IndexStatus } from '../../common';
@@ -15,15 +16,11 @@ export const checkIndexStatus = async (
   logger: Logger
 ): Promise<IndexStatus> => {
   try {
-    const queryResult = await esClient.search({
-      index,
-      query: {
-        match_all: {},
-      },
-      size: 1,
+    const queryResult = await esClient.esql.query({
+      query: esql.from([index]).limit(1).print('basic'),
     });
 
-    return queryResult.hits.hits.length ? 'not-empty' : 'empty';
+    return queryResult.values.length ? 'not-empty' : 'empty';
   } catch (e) {
     logger.debug(e);
     if (e?.meta?.body?.error?.type === 'security_exception') {

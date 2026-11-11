@@ -212,8 +212,12 @@ describe('AI Assistant Service', () => {
       (AIAssistantConversationsDataClient as jest.Mock).mockImplementation(
         () => conversationsDataClient
       );
-      (clusterClient.search as unknown as jest.Mock).mockResolvedValue({
-        hits: { hits: [], total: { value: 0 } },
+      (clusterClient.esql.query as unknown as jest.Mock).mockResolvedValue({
+        columns: [
+          { name: 'total', type: 'long' },
+          { name: 'field', type: 'keyword' },
+        ],
+        values: [],
       });
     });
 
@@ -875,8 +879,12 @@ describe('AI Assistant Service', () => {
         .mockRejectedValueOnce(new EsErrors.ConnectionError('foo'))
         .mockRejectedValueOnce(new EsErrors.TimeoutError('timeout'))
         .mockResolvedValue({ acknowledged: true });
-      (clusterClient.search as unknown as jest.Mock).mockResolvedValue({
-        hits: { hits: [], total: { value: 0 } },
+      (clusterClient.esql.query as unknown as jest.Mock).mockResolvedValue({
+        columns: [
+          { name: 'total', type: 'long' },
+          { name: 'field', type: 'keyword' },
+        ],
+        values: [],
       });
 
       const assistantService = new AIAssistantService(assistantServiceOpts);
@@ -904,13 +912,23 @@ describe('AI Assistant Service', () => {
 
   describe('createDefaultAnonymizationFields', () => {
     test('should create default anonymization fields', async () => {
-      (clusterClient.search as unknown as jest.Mock).mockResolvedValue({
-        hits: { hits: [], total: { value: 0 } },
+      (clusterClient.esql.query as unknown as jest.Mock).mockResolvedValue({
+        columns: [
+          { name: 'total', type: 'long' },
+          { name: 'field', type: 'keyword' },
+        ],
+        values: [],
       });
 
       const assistantService = new AIAssistantService(assistantServiceOpts);
       await assistantService.createDefaultAnonymizationFields('test');
 
+      expect(clusterClient.esql.query).toHaveBeenCalledWith({
+        query:
+          'FROM .kibana-elastic-ai-assistant-anonymization-fields-test | WHERE field IN (?fields) | STATS total = COUNT(*) BY field | LIMIT ' +
+          getDefaultAnonymizationFields('test').length,
+        params: [{ fields: getDefaultAnonymizationFields('test').map(({ field }) => field) }],
+      });
       expect(clusterClient.bulk).toHaveBeenCalledWith(
         expect.objectContaining({
           body: expect.arrayContaining([
@@ -923,11 +941,12 @@ describe('AI Assistant Service', () => {
 
     test('should not create default anonymization fields if they already exist', async () => {
       const defaultAnonymizationFields = getDefaultAnonymizationFields('default');
-      (clusterClient.search as unknown as jest.Mock).mockResolvedValue({
-        hits: {
-          hits: [],
-          total: { value: defaultAnonymizationFields.length },
-        },
+      (clusterClient.esql.query as unknown as jest.Mock).mockResolvedValue({
+        columns: [
+          { name: 'total', type: 'long' },
+          { name: 'field', type: 'keyword' },
+        ],
+        values: defaultAnonymizationFields.map(({ field }) => [1, field]),
       });
 
       const assistantService = new AIAssistantService(assistantServiceOpts);
@@ -938,15 +957,16 @@ describe('AI Assistant Service', () => {
 
     test('should create one default anonymization field when the last default anonymization field does not exist in the index', async () => {
       const defaultAnonymizationFields = getDefaultAnonymizationFields('default');
-      // Mock the search response to return the default anonymization fields except the last one
+      // Mock the ES|QL response to return the default anonymization fields except the last one
       const storedFieldsLength = defaultAnonymizationFields.length - 1;
       const defaultFieldsExpectLast = defaultAnonymizationFields.slice(0, -1);
       const lastField = defaultAnonymizationFields[storedFieldsLength];
-      (clusterClient.search as unknown as jest.Mock).mockResolvedValue({
-        hits: {
-          hits: [...defaultFieldsExpectLast.map((field) => ({ _source: field }))],
-          total: { value: storedFieldsLength },
-        },
+      (clusterClient.esql.query as unknown as jest.Mock).mockResolvedValue({
+        columns: [
+          { name: 'total', type: 'long' },
+          { name: 'field', type: 'keyword' },
+        ],
+        values: defaultFieldsExpectLast.map(({ field }) => [1, field]),
       });
 
       const assistantService = new AIAssistantService(assistantServiceOpts);

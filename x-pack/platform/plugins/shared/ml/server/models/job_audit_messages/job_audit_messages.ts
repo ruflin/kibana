@@ -10,12 +10,14 @@ import moment from 'moment';
 import type { IScopedClusterClient } from '@kbn/core/server';
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
 import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { JobMessage } from '@kbn/ml-common-types/audit_message';
 import type { AuditMessage } from '@kbn/ml-common-types/anomaly_detection_jobs/summary_job';
 import { ML_NOTIFICATION_INDEX_PATTERN } from '../../../common/constants/index_patterns';
 import { MESSAGE_LEVEL } from '../../../common/constants/message_levels';
 import type { MLSavedObjectService } from '../../saved_objects';
 import type { MlClient } from '../../lib/ml_client';
+import { esqlRows, runEsql } from '../../lib/esql/esql_read';
 import type { ServerlessInfo } from '../../types';
 import { DEFAULT_ML_PROJECT_ROUTING } from '../../../common/constants/cps';
 
@@ -117,72 +119,41 @@ export function jobAuditMessagesProvider(
       };
     }
 
-    const query = {
-      bool: {
-        filter: [
-          {
-            bool: {
-              must_not: {
-                term: {
-                  level: 'activity',
-                },
-              },
-            },
-          },
-          anomalyDetectorTypeFilter,
-          timeFilter,
-        ],
-      },
-    };
+    // The relative time range ("now-12h") is Query DSL date math, so it stays in the request filter.
+    // A missing level or job_type matches, as the `must_not` and `exists` clauses did in the DSL.
+    let query = esql.from([ML_NOTIFICATION_INDEX_PATTERN], ['_source', '_index'])
+      .pipe`WHERE (level IS NULL OR level != "activity") AND (job_type IS NULL OR job_type == "anomaly_detector")`;
 
     // if no jobId specified, load all of the messages
     if (jobId !== undefined) {
-      query.bool.filter.push({
-        bool: {
-          should: [
-            {
-              term: {
-                job_id: '', // catch system messages
-              },
-            },
-            {
-              term: {
-                job_id: jobId, // messages for specified jobId
-              },
-            },
-          ],
-        },
-      });
+      // empty job_id catches system messages, otherwise messages for the specified jobId
+      query = query.pipe`WHERE (job_id == "" OR job_id == ${{ jobId }})`;
     }
 
-    const body = await asInternalUser.search<JobMessage>(
-      {
-        index: ML_NOTIFICATION_INDEX_PATTERN,
-        ignore_unavailable: true,
-        size: SIZE,
-        sort: [{ timestamp: { order: 'desc' } }, { job_id: { order: 'asc' } }],
-        query,
-        ...(serverless.isServerless && serverless.cpsEnabled
-          ? { project_routing: DEFAULT_ML_PROJECT_ROUTING }
-          : {}),
-      },
-      { maxRetries: 0 }
-    );
+    const response = await runEsql({
+      esClient: asInternalUser,
+      query: query.pipe`SORT timestamp DESC NULLS LAST, job_id ASC NULLS LAST`
+        .keep('_source', '_index')
+        .limit(SIZE),
+      filter: timeFilter,
+      emptyOnUnknownIndex: true,
+      projectRouting:
+        serverless.isServerless && serverless.cpsEnabled ? DEFAULT_ML_PROJECT_ROUTING : undefined,
+    });
 
     let messages: JobMessage[] = [];
     const notificationIndices: string[] = [];
 
-    if ((body.hits.total as estypes.SearchTotalHits).value > 0) {
-      let notificationIndex: string;
-      body.hits.hits.forEach((hit) => {
-        if (notificationIndex !== hit._index && isClearable(hit._index)) {
-          notificationIndices.push(hit._index);
-          notificationIndex = hit._index;
-        }
+    let notificationIndex: string;
+    esqlRows(response).forEach((row) => {
+      const hitIndex = row._index as string;
+      if (notificationIndex !== hitIndex && isClearable(hitIndex)) {
+        notificationIndices.push(hitIndex);
+        notificationIndex = hitIndex;
+      }
 
-        messages.push(hit._source!);
-      });
-    }
+      messages.push(row._source as JobMessage);
+    });
     messages = await mlSavedObjectService.filterJobsForSpace<JobMessage>(
       'anomaly-detector',
       messages,

@@ -7,6 +7,7 @@
 
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import { hashEuid } from '@kbn/entity-store/common/domain/euid';
 
 import {
@@ -23,6 +24,7 @@ import { compareSignals, computeContentHash } from './lead_matching';
 import type { LeadSignal } from './lead_matching';
 import type { CursorPayload } from './change_cursor';
 import { encodeCursor, decodeCursor } from './change_cursor';
+import { esqlRows, runEsqlRead, toCount } from '../../../utils/esql/esql_read';
 import { createLeadIndexService } from './indices/lead_index_service';
 import type { Lead as SynthesizedLead, RelatedEntity } from './types';
 
@@ -857,23 +859,17 @@ export const createLeadDataClient = ({
     let lastRun: string | null = null;
 
     try {
-      const resp = await esClient.search({
-        index: indexName,
-        size: 1,
-        sort: [{ timestamp: { order: 'desc' } }],
-        _source: ['timestamp'],
-        track_total_hits: true,
-        request_cache: true,
-        ignore_unavailable: true,
+      // A missing index is an empty response, as `ignore_unavailable` made it.
+      const resp = await runEsqlRead({
+        esClient,
+        query: esql.from([indexName]).pipe`STATS total = COUNT(*), last_run = MAX(timestamp)`,
       });
 
       indexExists = true;
-      totalLeads =
-        typeof resp.hits.total === 'number' ? resp.hits.total : resp.hits.total?.value ?? 0;
-
-      const latestHit = resp.hits.hits[0];
-      if (latestHit?._source) {
-        lastRun = (latestHit._source as Record<string, unknown>).timestamp as string;
+      const [row] = esqlRows(resp);
+      totalLeads = toCount(row?.total);
+      if (typeof row?.last_run === 'string') {
+        lastRun = row.last_run;
       }
     } catch (e) {
       if (isEsSecurityException(e)) {

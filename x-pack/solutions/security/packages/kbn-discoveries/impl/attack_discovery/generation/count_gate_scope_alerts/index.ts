@@ -5,7 +5,10 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
+import dateMath from '@kbn/datemath';
+import { runEsqlRead } from '../../esql_helpers';
 
 /**
  * The gate may widen its search beyond the run's time range when the range is empty.
@@ -16,6 +19,14 @@ export const GATE_SCOPE_MIN_LOOKBACK = 'now-7d';
 
 const DEFAULT_START = 'now-24h';
 const DEFAULT_END = 'now';
+
+const toIsoDate = (value: string, roundUp: boolean): string => {
+  const parsed = dateMath.parse(value, { roundUp });
+  if (!parsed?.isValid()) {
+    throw new Error(`Invalid date math expression: ${value}`);
+  }
+  return parsed.toISOString();
+};
 
 /**
  * Counts the open and acknowledged, non-building-block alerts the ground-truthing gate could retrieve: those in the run's time range or the last 7 days.
@@ -33,42 +44,25 @@ export const countGateScopeAlerts = async ({
   esClient: ElasticsearchClient;
   start?: string;
 }): Promise<number> => {
-  const { _shards: shards, count } = await esClient.count({
-    allow_no_indices: true,
-    ignore_unavailable: true,
-    index: alertsIndexPattern,
-    query: {
-      bool: {
-        filter: [
-          { terms: { 'kibana.alert.workflow_status': ['open', 'acknowledged'] } },
-          {
-            bool: {
-              minimum_should_match: 1,
-              should: [
-                {
-                  range: {
-                    '@timestamp': {
-                      format: 'strict_date_optional_time',
-                      gte: start ?? DEFAULT_START,
-                      lte: end ?? DEFAULT_END,
-                    },
-                  },
-                },
-                { range: { '@timestamp': { gte: GATE_SCOPE_MIN_LOOKBACK } } },
-              ],
-            },
-          },
-        ],
-        must_not: [{ exists: { field: 'kibana.alert.building_block_type' } }],
-      },
-    },
-  });
+  const rangeStart = toIsoDate(start ?? DEFAULT_START, false);
+  const rangeEnd = toIsoDate(end ?? DEFAULT_END, true);
+  const minimumStart = toIsoDate(GATE_SCOPE_MIN_LOOKBACK, false);
 
-  if ((shards?.failed ?? 0) > 0) {
-    throw new Error(
-      `Alert count was incomplete: ${shards.failed} of ${shards.total} shard(s) failed`
-    );
+  // Always `allow_partial_results: false`: a failed shard must error instead of undercounting.
+  const query = esql.from([alertsIndexPattern])
+    .pipe`WHERE kibana.alert.workflow_status IN ("open", "acknowledged")
+    AND ((@timestamp >= TO_DATETIME(${{ rangeStart }}) AND @timestamp <= TO_DATETIME(${{
+    rangeEnd,
+  }})) OR @timestamp >= TO_DATETIME(${{ minimumStart }}))
+    AND kibana.alert.building_block_type IS NULL`.pipe`STATS total = COUNT(*)`;
+
+  const response = await runEsqlRead({ allowPartialResults: false, esClient, query });
+  if (!response) return 0;
+
+  if (response.is_partial) {
+    throw new Error('Alert count was incomplete: one or more shards failed');
   }
 
-  return count;
+  const total = response.values[0]?.[0];
+  return typeof total === 'number' ? total : 0;
 };

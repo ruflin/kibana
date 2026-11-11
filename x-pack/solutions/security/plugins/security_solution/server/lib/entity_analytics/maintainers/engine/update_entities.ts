@@ -8,6 +8,7 @@
 import { createHash } from 'crypto';
 
 import type { ElasticsearchClient } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 import type { Logger } from '@kbn/logging';
 import type { EntityUpdateClient, BulkObject } from '@kbn/entity-store/server';
 import type { Entity } from '@kbn/entity-store/common/domain/definitions/entity.gen';
@@ -15,6 +16,7 @@ import { getEntitiesAlias, ENTITY_LATEST } from '@kbn/entity-store/common/domain
 
 import type { EntityRelationshipRecord } from './types';
 import { entityTypeFromEuid } from './types';
+import { esqlRows, runEsqlRead } from '../../../../utils/esql/esql_read';
 import { errMsg } from './es_errors';
 
 /**
@@ -64,8 +66,8 @@ function mergeRecords(records: ValidRecord[]): Map<string, MergedRelationships> 
 
 /**
  * Queries the entity index for a batch of candidate target EUIDs and returns
- * only those that exist as entity documents. Uses a `terms` query on
- * `entity.id` with `_source: false` — fetches nothing but the matched doc IDs.
+ * only those that exist as entity documents. Reads only
+ * `entity.id`, filtered by a `terms` query — nothing but the matched ids comes back.
  *
  * This is the target-validation step (Step 3.5) between mergeRecords and
  * bulkUpdateEntity. Without it, raw_identifiers-based maintainers would write
@@ -81,7 +83,7 @@ function mergeRecords(records: ValidRecord[]): Map<string, MergedRelationships> 
  * page can carry more unique targets than `index.max_result_window` allows in one
  * search (a Workday page of 3,500 managers routinely has 10k+ reports).
  *
- * A failed search is not logged here: it is rethrown with the failing chunk in the
+ * A failed read is not logged here: it is rethrown with the failing chunk in the
  * message (original error kept as `cause`) so the engine's stage handler logs it once.
  */
 export const matchExistingTargetIds = async (
@@ -101,28 +103,26 @@ export const matchExistingTargetIds = async (
       chunkIndex * TARGET_VALIDATION_CHUNK_SIZE,
       (chunkIndex + 1) * TARGET_VALIDATION_CHUNK_SIZE
     );
-    const result = await esClient
-      .search({
-        index,
-        size: chunk.length,
-        _source: false,
-        query: { terms: { 'entity.id': chunk } },
-        fields: ['entity.id'],
-      })
-      .catch((err: unknown) => {
-        throw new Error(
-          `Target ID validation failed on chunk ${chunkIndex + 1}/${chunkCount} ` +
-            `(${chunk.length} of ${ids.length} candidates) against "${index}": ${errMsg(err)}`,
-          { cause: err }
-        );
-      });
+    // The candidate ids go in the request `filter` rather than a `WHERE ... IN (...)` list, which
+    // would bind thousands of parameters. `LIMIT` is the chunk size, at most the 10,000 row cap.
+    // A missing index is a failure here, as it was with the search.
+    const result = await runEsqlRead({
+      esClient,
+      query: esql.from([index]).pipe`KEEP entity.id`.limit(chunk.length),
+      filter: { terms: { 'entity.id': chunk } },
+      tolerateUnknownIndex: false,
+    }).catch((err: unknown) => {
+      throw new Error(
+        `Target ID validation failed on chunk ${chunkIndex + 1}/${chunkCount} ` +
+          `(${chunk.length} of ${ids.length} candidates) against "${index}": ${errMsg(err)}`,
+        { cause: err }
+      );
+    });
 
-    for (const hit of result.hits.hits) {
-      const fieldVal = (hit.fields as Record<string, unknown> | undefined)?.['entity.id'];
-      const id = Array.isArray(fieldVal)
-        ? (fieldVal[0] as string)
-        : (fieldVal as string | undefined);
-      if (id) existing.add(id);
+    for (const row of esqlRows(result)) {
+      const fieldVal = row['entity.id'];
+      const id = Array.isArray(fieldVal) ? fieldVal[0] : fieldVal;
+      if (typeof id === 'string' && id) existing.add(id);
     }
   }
   return existing;

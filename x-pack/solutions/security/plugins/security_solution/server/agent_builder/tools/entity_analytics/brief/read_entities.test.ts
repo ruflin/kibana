@@ -5,9 +5,20 @@
  * 2.0.
  */
 
+import type { ElasticsearchClient } from '@kbn/core/server';
+import type { EntityAnalyticsScope } from '../../../../../common/entity_analytics/ai_brief/scope';
 import type { SignalCardId } from '../../../../../common/entity_analytics/home/constants';
 import type { BriefCandidate } from './types';
-import { rankCandidates, toAttachmentIdentifier, withGroupValues } from './read_entities';
+import {
+  rankCandidates,
+  readEntities,
+  toAttachmentIdentifier,
+  withGroupValues,
+} from './read_entities';
+
+jest.mock('../../../../lib/entity_analytics/entity_case_counts/fetch_group_member_ids', () => ({
+  fetchGroupMembers: jest.fn().mockResolvedValue({}),
+}));
 
 const candidate = (
   id: string,
@@ -122,5 +133,32 @@ describe('toAttachmentIdentifier', () => {
     expect(
       toAttachmentIdentifier({ ...candidate('host:solo', ['riskMovers'], 40), members: [] })
     ).not.toHaveProperty('mode');
+  });
+});
+
+describe('readEntities', () => {
+  const scope = {
+    tiles: { entitiesWithAlerts: { entityIds: ['host:b', 'host:a'] } },
+  } as unknown as EntityAnalyticsScope;
+
+  it('reads the Entity Store records of the flagged entities with ES|QL', async () => {
+    const query = jest.fn().mockResolvedValue({
+      columns: [{ name: '_source', type: '_source' }],
+      values: [[{ 'entity.id': 'host:a', 'host.name': 'a' }], [{ entity: { id: 'host:b' } }]],
+    });
+
+    const result = await readEntities({
+      scope,
+      spaceId: 'default',
+      esClient: { esql: { query } } as unknown as ElasticsearchClient,
+    });
+
+    expect(query).toHaveBeenCalledWith({
+      query:
+        'FROM entities-latest-default METADATA _source | WHERE entity.id IN (?entityIds) | SORT entity.id ASC | LIMIT 2',
+      params: [{ entityIds: ['host:b', 'host:a'] }],
+    });
+    expect(result.candidates.map(({ id }) => id).sort()).toEqual(['host:a', 'host:b']);
+    expect(result).toMatchObject({ capturedCount: 2, readCount: 2, notFoundCount: 0 });
   });
 });

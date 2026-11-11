@@ -7,10 +7,12 @@
 
 import type { ElasticsearchClient, SavedObjectsClientContract, Logger } from '@kbn/core/server';
 import pMap from 'p-map';
+import { esql } from '@elastic/esql';
 
 import { ENROLLMENT_API_KEYS_INDEX } from '../../../common/constants';
 
 import { agentPolicyService } from '../agent_policy';
+import { esqlRows, runEsqlRead } from '../esql_read';
 import { generateEnrollmentAPIKey } from '../api_keys';
 import { SO_SEARCH_LIMIT, MAX_CONCURRENT_AGENT_POLICIES_OPERATIONS_20 } from '../../constants';
 import { appContextService } from '../app_context';
@@ -28,20 +30,15 @@ async function getPolicyIdsWithEnrollmentAPIKeys(
     return policyIdsWithKeys;
   }
 
-  const res = await esClient.search<unknown, { policies: { buckets: Array<{ key: string }> } }>({
-    index: ENROLLMENT_API_KEYS_INDEX,
-    ignore_unavailable: true,
-    size: 0,
-    query: { terms: { policy_id: agentPolicyIds } },
-    aggs: {
-      policies: {
-        terms: { field: 'policy_id', size: agentPolicyIds.length, execution_hint: 'map' },
-      },
-    },
+  const res = await runEsqlRead({
+    esClient,
+    query: esql.from([ENROLLMENT_API_KEYS_INDEX]).where`policy_id IN (${{ agentPolicyIds }})`
+      .pipe`STATS BY policy_id`.limit(agentPolicyIds.length),
+    ignoreUnknownIndex: true,
   });
 
-  for (const bucket of res.aggregations?.policies?.buckets ?? []) {
-    policyIdsWithKeys.add(bucket.key);
+  for (const row of esqlRows(res)) {
+    policyIdsWithKeys.add(row.policy_id as string);
   }
 
   return policyIdsWithKeys;

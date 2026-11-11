@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { isEqual } from 'lodash';
 import { v4 as uuidv4 } from 'uuid';
 import { asyncMapWithLimit } from '@kbn/std';
@@ -1149,18 +1150,15 @@ export class ProposalsService {
     if (blankToUndefined(workflowExecutionId) === undefined) {
       return undefined;
     }
-    const response = await this.deps.storage.search({
-      track_total_hits: false,
-      size: 1,
-      query: {
-        bool: { filter: [{ term: { workflowExecutionId } }, { term: { spaceId } }] },
-      },
-      sort: [{ createdAt: { order: 'asc' } }],
+    const response = await this.deps.storage.esql({
+      pipeline: esql`WHERE workflowExecutionId == ${{ workflowExecutionId }}
+        AND spaceId == ${{ spaceId }}
+        | SORT createdAt ASC NULLS LAST
+        | LIMIT 1`,
+      metadata: ['_id', '_source'],
     });
-    const hit = response.hits.hits[0];
-    return hit?._source && hit._id !== undefined
-      ? toProposal(hit._id, hit._source as ProposalDocument)
-      : undefined;
+    const [hit] = esqlHits(response);
+    return hit ? toProposal(hit._id, hit._source) : undefined;
   }
 
   /**
@@ -1175,10 +1173,9 @@ export class ProposalsService {
     if (ids.length === 0) {
       return new Map();
     }
-    const response = await this.deps.storage.search({
-      track_total_hits: false,
-      size: 0,
-      query: {
+    const response = await this.deps.storage.esql({
+      pipeline: countByConversationPipeline(ids.length),
+      filter: {
         bool: {
           filter: [
             ...toFilterClauses(
@@ -1194,12 +1191,8 @@ export class ProposalsService {
           ],
         },
       },
-      aggs: {
-        by_conversation: { terms: { field: 'conversationId', size: ids.length } },
-      },
     });
-    const buckets = response.aggregations?.by_conversation.buckets ?? [];
-    return new Map(buckets.map(({ key, doc_count: count }) => [String(key), count]));
+    return parseCountByConversation(response);
   }
 
   /**
@@ -1211,16 +1204,11 @@ export class ProposalsService {
     spaceId: string,
     size: number
   ): Promise<Map<string, number>> {
-    const response = await this.deps.storage.search({
-      track_total_hits: false,
-      size: 0,
-      query: { bool: { filter: toFilterClauses(filters, spaceId) } },
-      aggs: {
-        by_conversation: { terms: { field: 'conversationId', size } },
-      },
+    const response = await this.deps.storage.esql({
+      pipeline: countByConversationPipeline(size),
+      filter: { bool: { filter: toFilterClauses(filters, spaceId) } },
     });
-    const buckets = response.aggregations?.by_conversation.buckets ?? [];
-    return new Map(buckets.map(({ key, doc_count: count }) => [String(key), count]));
+    return parseCountByConversation(response);
   }
 
   /** Resolves any proposal in a revision chain to its live revision using the root ID. */
@@ -1244,24 +1232,21 @@ export class ProposalsService {
 
     const { rootProposalId } = proposal;
 
-    const response = await this.deps.storage.search({
-      track_total_hits: false,
-      size: 1,
-      query: {
-        bool: {
-          filter: [{ term: { rootProposalId } }, { term: { spaceId } }],
-          must_not: [{ exists: { field: 'supersededBy' } }],
-        },
-      },
+    const response = await this.deps.storage.esql({
+      pipeline: esql`WHERE rootProposalId == ${{ rootProposalId }}
+        AND spaceId == ${{ spaceId }}
+        AND supersededBy IS NULL
+        | SORT gateReleasedAt DESC NULLS LAST
+        | LIMIT 1`,
       // A released revision wins. A revision that lost its race to the release
       // stays live until its cleanup lands, and an unsorted read could adopt it.
       // `revise()` refuses a released row, so at most one live row in a chain
       // carries the mark, and it is the revision the approver answered.
-      sort: [{ gateReleasedAt: { order: 'desc', missing: '_last', unmapped_type: 'date' } }],
+      metadata: ['_id', '_source'],
     });
 
-    const hit = response.hits.hits[0];
-    if (!hit?._source || hit._id === undefined) {
+    const [hit] = esqlHits(response);
+    if (!hit) {
       // Should be unreachable: every chain has exactly one live revision by
       // construction. Falls back to the proposal that was asked about rather
       // than throwing, so a storage inconsistency degrades to "trust the
@@ -1275,7 +1260,7 @@ export class ProposalsService {
       };
     }
 
-    const source = hit._source as ProposalDocument;
+    const source = hit._source;
     return {
       proposalId: hit._id,
       revision: source.revision,
@@ -1848,6 +1833,44 @@ const stripRanks = ({ ranks, ...proposal }: StoredProposalRecord): Proposal => p
 
 const toProposal = (id: string, document: ProposalDocument): Proposal =>
   stripRanks({ id, ...document });
+
+/** The `_id` and `_source` of each row of an ES|QL read with `METADATA _id, _source`. */
+const esqlHits = (
+  response: Awaited<ReturnType<ProposalsStorageClient['esql']>>
+): Array<{ _id: string; _source: ProposalDocument }> => {
+  const idIdx = response.columns.findIndex((column) => column.name === '_id');
+  const sourceIdx = response.columns.findIndex((column) => column.name === '_source');
+  if (idIdx === -1 || sourceIdx === -1) return [];
+  return response.values.flatMap((row) => {
+    const id = row[idIdx];
+    const source = row[sourceIdx];
+    return typeof id === 'string' && source !== null && typeof source === 'object'
+      ? [{ _id: id, _source: source as ProposalDocument }]
+      : [];
+  });
+};
+
+/** Highest count first, then by id so the cut at `limit` is stable. Documents without a conversation are not counted. */
+const countByConversationPipeline = (limit: number) =>
+  esql`WHERE conversationId IS NOT NULL
+    | STATS count = COUNT(*) BY conversationId
+    | SORT count DESC, conversationId ASC
+    | LIMIT ${{ limit }}`;
+
+const parseCountByConversation = (
+  response: Awaited<ReturnType<ProposalsStorageClient['esql']>>
+): Map<string, number> => {
+  const countIdx = response.columns.findIndex((column) => column.name === 'count');
+  const conversationIdx = response.columns.findIndex((column) => column.name === 'conversationId');
+  if (countIdx === -1 || conversationIdx === -1) return new Map();
+  return new Map(
+    response.values.flatMap((row) =>
+      typeof row[conversationIdx] === 'string' && typeof row[countIdx] === 'number'
+        ? [[row[conversationIdx] as string, row[countIdx] as number] as const]
+        : []
+    )
+  );
+};
 
 /** Still waiting on its gate: undecided, or approved with the action running. */
 const isUnsettled = ({ status, supersededBy }: Proposal): boolean =>

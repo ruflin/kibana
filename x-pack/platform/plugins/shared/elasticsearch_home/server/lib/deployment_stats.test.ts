@@ -193,6 +193,15 @@ describe('fetchIndexStats', () => {
       count,
       _shards: { total: 2, successful: 2 - failedShards, skipped: 0, failed: failedShards },
     });
+    mockNewIndexCount(count);
+  };
+
+  // the newest index is counted with ES|QL, on its own
+  const mockNewIndexCount = (count: number) => {
+    client.asCurrentUser.esql.query.mockResolvedValue({
+      columns: [{ name: 'total', type: 'long' }],
+      values: [[count]],
+    } as never);
   };
 
   const mockCatIndices = (indices: Array<{ index: string; 'creation.date': string }>) => {
@@ -755,6 +764,10 @@ describe('fetchNewIndex', () => {
       count,
       _shards: { total: 1, successful: 1, skipped: 0, failed: 0 },
     });
+    client.asCurrentUser.esql.query.mockResolvedValue({
+      columns: [{ name: 'total', type: 'long' }],
+      values: [[count]],
+    } as never);
   };
 
   const now = Date.now();
@@ -798,7 +811,7 @@ describe('fetchNewIndex', () => {
     const result = await fetchNewIndex(client, logger);
 
     expect(result).toBeNull();
-    expect(client.asCurrentUser.count).not.toHaveBeenCalled();
+    expect(client.asCurrentUser.esql.query).not.toHaveBeenCalled();
   });
 
   it('skips an index reported without a creation date', async () => {
@@ -816,7 +829,9 @@ describe('fetchNewIndex', () => {
     const result = await fetchNewIndex(client, logger);
 
     expect(result!.indexName).toBe('newest-index');
-    expect(client.asCurrentUser.count).toHaveBeenCalledWith({ index: 'newest-index' });
+    expect(client.asCurrentUser.esql.query).toHaveBeenCalledWith({
+      query: 'FROM newest-index | STATS total = COUNT(*)',
+    });
   });
 
   it('returns null and logs when the index listing fails', async () => {
@@ -842,7 +857,7 @@ describe('fetchNewIndex', () => {
 
   it('returns null and logs when the document count fails', async () => {
     mockCatIndices([created('my-index', 1)]);
-    client.asCurrentUser.count.mockRejectedValue(new Error('boom'));
+    client.asCurrentUser.esql.query.mockRejectedValue(new Error('boom'));
 
     const result = await fetchNewIndex(client, logger);
 

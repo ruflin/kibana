@@ -5,10 +5,10 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { rangeQuery } from '@kbn/observability-plugin/server';
 import { accessKnownApmEventFields } from '@kbn/apm-data-access-plugin/server/utils';
 import type { TransactionDetailRedirectInfo } from '@kbn/apm-types';
-import { maybe } from '../../../../common/utils/maybe';
 import { ApmDocumentType } from '../../../../common/document_type';
 import {
   AT_TIMESTAMP,
@@ -22,6 +22,7 @@ import {
 import { RollupInterval } from '../../../../common/rollup';
 import { asMutableArray } from '../../../../common/utils/as_mutable_array';
 import type { APMEventClient } from '../../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlRowAsFields } from '../../../lib/helpers/esql_values';
 import { environmentQuery } from '../../../../common/utils/environment_query';
 
 export async function getTransactionByName({
@@ -49,7 +50,9 @@ export async function getTransactionByName({
     SERVICE_NAME,
   ] as const);
 
-  const resp = await apmEventClient.search('get_transaction', {
+  const [firstField, ...otherFields] = requiredFields;
+
+  const resp = await apmEventClient.esql('get_transaction', {
     apm: {
       sources: [
         {
@@ -58,23 +61,20 @@ export async function getTransactionByName({
         },
       ],
     },
-    track_total_hits: false,
-    size: 1,
-    terminate_after: 1,
-    query: {
+    // Any matching transaction will do, so the query has no sort.
+    query: (index) =>
+      esql.from(index).pipe`WHERE ${esql.col(TRANSACTION_NAME)} == ${{ transactionName }}`
+        .pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ serviceName }}`
+        .keep(firstField, ...otherFields)
+        .limit(1),
+    filter: {
       bool: {
-        filter: asMutableArray([
-          { term: { [TRANSACTION_NAME]: transactionName } },
-          { term: { [SERVICE_NAME]: serviceName } },
-          ...rangeQuery(start, end),
-          ...(environment ? environmentQuery(environment) : []),
-        ]),
+        filter: [...rangeQuery(start, end), ...(environment ? environmentQuery(environment) : [])],
       },
     },
-    fields: requiredFields,
   });
 
-  const fields = maybe(resp.hits.hits[0])?.fields;
+  const fields = esqlRowAsFields(resp);
 
   return fields && accessKnownApmEventFields(fields).requireFields(requiredFields).unflatten();
 }

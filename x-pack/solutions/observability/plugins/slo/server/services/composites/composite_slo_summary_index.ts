@@ -5,10 +5,12 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type { CompositeSLOSummaryDocument } from '@kbn/slo-schema';
 import { compositeSloSummaryDocumentSchema } from '@kbn/slo-schema';
 import { COMPOSITE_SUMMARY_INDEX_NAME } from '../../../common/constants';
+import { runEsqlRows } from '../utils/esql_read';
 
 export type PersistedCompositeSummary = Pick<CompositeSLOSummaryDocument, 'summary' | 'members'>;
 
@@ -65,23 +67,20 @@ export async function fetchCompositeSloSummariesFromIndex(
 
   const docIds = compositeIds.map((id) => buildCompositeSloSummaryDocId(spaceId, id));
 
-  const response = await esClient.search({
-    index: COMPOSITE_SUMMARY_INDEX_NAME,
-    size: compositeIds.length,
-    query: {
-      bool: {
-        filter: [{ ids: { values: docIds } }, { term: { spaceId } }],
-      },
-    },
+  const rows = await runEsqlRows({
+    esClient,
+    query: esql.from([COMPOSITE_SUMMARY_INDEX_NAME], ['_id', '_source']).pipe`WHERE _id IN (${{
+      docIds,
+    }}) AND spaceId == ${{ spaceId }}`.limit(compositeIds.length),
   });
 
   const docIdToCompositeId = new Map(docIds.map((docId, i) => [docId, compositeIds[i]]));
 
-  for (const hit of response.hits.hits) {
-    if (!hit._source || !hit._id) continue;
-    const compositeId = docIdToCompositeId.get(hit._id);
+  for (const row of rows) {
+    if (!row._source || typeof row._id !== 'string') continue;
+    const compositeId = docIdToCompositeId.get(row._id);
     if (!compositeId) continue;
-    const persisted = mapCompositeSummaryIndexSource(hit._source);
+    const persisted = mapCompositeSummaryIndexSource(row._source);
     if (persisted) {
       result.set(compositeId, persisted);
     }

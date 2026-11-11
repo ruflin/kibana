@@ -40,7 +40,7 @@ describe('syncIntegrationsOnRemote', () => {
       indices: {
         get: getIndicesMock,
       },
-      search: searchMock,
+      esql: { query: searchMock },
     };
     outputServiceMock.list.mockResolvedValue({
       items: [
@@ -78,6 +78,12 @@ describe('syncIntegrationsOnRemote', () => {
     ).rejects.toThrow(
       'Not supported to sync multiple indices with prefix fleet-synced-integrations-ccr-*'
     );
+  });
+
+  // The ES|QL response for the documents of a search response: one `_source` column.
+  const toEsqlResponse = (searchResponse: { hits: { hits: Array<{ _source: unknown }> } }) => ({
+    columns: [{ name: '_source', type: '_source' }],
+    values: searchResponse.hits.hits.map((hit) => [hit._source]),
   });
 
   function getSyncedIntegrationsCCRDoc(syncEnabled: boolean): {
@@ -162,7 +168,7 @@ describe('syncIntegrationsOnRemote', () => {
     getIndicesMock.mockResolvedValue({
       'fleet-synced-integrations-ccr-remote1': {},
     });
-    searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(false));
+    searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(false)));
 
     await syncIntegrationsOnRemote(
       esClientMock,
@@ -179,7 +185,7 @@ describe('syncIntegrationsOnRemote', () => {
     getIndicesMock.mockResolvedValue({
       'fleet-synced-integrations-ccr-remote1': {},
     });
-    searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(true));
+    searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(true)));
     packageClientMock.getInstallation.mockImplementation((packageName: string) =>
       packageName === 'nginx'
         ? {
@@ -207,7 +213,7 @@ describe('syncIntegrationsOnRemote', () => {
     getIndicesMock.mockResolvedValue({
       'fleet-synced-integrations-ccr-remote1': {},
     });
-    searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(true));
+    searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(true)));
     packageClientMock.getInstallation.mockImplementation((packageName: string) =>
       packageName === 'nginx'
         ? {
@@ -252,7 +258,7 @@ describe('syncIntegrationsOnRemote', () => {
       install_status: 'installed',
       rolled_back: true,
     });
-    searchMock.mockResolvedValue(mockedSyncDoc);
+    searchMock.mockResolvedValue(toEsqlResponse(mockedSyncDoc));
     packageClientMock.getInstallation.mockImplementation((packageName: string) =>
       packageName === 'endpoint'
         ? {
@@ -282,7 +288,7 @@ describe('syncIntegrationsOnRemote', () => {
     getIndicesMock.mockResolvedValue({
       'fleet-synced-integrations-ccr-remote1': {},
     });
-    searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(true));
+    searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(true)));
     packageClientMock.getInstallation.mockImplementation((packageName: string) =>
       packageName === 'nginx'
         ? {
@@ -319,7 +325,7 @@ describe('syncIntegrationsOnRemote', () => {
     getIndicesMock.mockResolvedValue({
       'fleet-synced-integrations-ccr-remote1': {},
     });
-    searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(true));
+    searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(true)));
     packageClientMock.getInstallation.mockImplementation((packageName: string) =>
       packageName === 'nginx'
         ? undefined
@@ -353,7 +359,7 @@ describe('syncIntegrationsOnRemote', () => {
     getIndicesMock.mockResolvedValue({
       'fleet-synced-integrations-ccr-remote1': {},
     });
-    searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(true));
+    searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(true)));
     packageClientMock.getInstallation.mockImplementation((packageName: string) =>
       packageName === 'custom-pkg'
         ? undefined
@@ -394,7 +400,7 @@ describe('syncIntegrationsOnRemote', () => {
     getIndicesMock.mockResolvedValue({
       'fleet-synced-integrations-ccr-remote1': {},
     });
-    searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(true));
+    searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(true)));
     packageClientMock.getInstallation.mockImplementation((packageName: string) =>
       packageName === 'nginx'
         ? {
@@ -422,7 +428,7 @@ describe('syncIntegrationsOnRemote', () => {
     getIndicesMock.mockResolvedValue({
       'fleet-synced-integrations-ccr-remote1': {},
     });
-    searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(true));
+    searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(true)));
     packageClientMock.getInstallation.mockImplementation(() => ({
       install_status: 'installed',
       version: '2.2.0',
@@ -447,7 +453,7 @@ describe('syncIntegrationsOnRemote', () => {
       getIndicesMock.mockResolvedValue({
         'fleet-synced-integrations-ccr-remote1': {},
       });
-      searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(true));
+      searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(true)));
       packageClientMock.getInstallation.mockImplementation((packageName: string) =>
         packageName === 'nginx'
           ? {
@@ -495,7 +501,7 @@ describe('syncIntegrationsOnRemote', () => {
       getIndicesMock.mockResolvedValue({
         'fleet-synced-integrations-ccr-remote1': {},
       });
-      searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(true));
+      searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(true)));
       packageClientMock.getInstallation.mockImplementation((packageName: string) =>
         packageName === 'nginx'
           ? {
@@ -540,7 +546,7 @@ describe('syncIntegrationsOnRemote', () => {
       getIndicesMock.mockResolvedValue({
         'fleet-synced-integrations-ccr-remote1': {},
       });
-      searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(true));
+      searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(true)));
       packageClientMock.getInstallation.mockImplementation((packageName: string) =>
         packageName === 'nginx'
           ? {
@@ -576,7 +582,7 @@ describe('syncIntegrationsOnRemote', () => {
       getIndicesMock.mockResolvedValue({
         'fleet-synced-integrations-ccr-remote1': {},
       });
-      searchMock.mockResolvedValue(getSyncedIntegrationsCCRDoc(true));
+      searchMock.mockResolvedValue(toEsqlResponse(getSyncedIntegrationsCCRDoc(true)));
       packageClientMock.getInstallation.mockImplementation((packageName: string) =>
         packageName === 'custom'
           ? {

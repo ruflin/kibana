@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { Example } from 'langsmith';
 import { Client } from 'langsmith';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
@@ -95,22 +96,18 @@ export const getEvaluationResults = async ({
   logger: Logger;
 }): Promise<Array<{ id: string; status: EvaluationStatus }>> => {
   try {
-    const resp = await esClientInternalUser.search<{
-      evaluation_id: string;
-      status: EvaluationStatus;
-    }>({
-      index: EVALUATION_RESULTS_INDEX,
-      size: 100,
-      _source: ['evaluation_id', 'status'],
-      query: { match_all: {} },
+    const resp = await esClientInternalUser.esql.query({
+      query: esql
+        .from([EVALUATION_RESULTS_INDEX])
+        .keep('evaluation_id', 'status')
+        .limit(100)
+        .print('basic'),
     });
 
-    return (
-      resp.hits.hits.map((hit) => ({
-        id: hit._source?.evaluation_id ?? '',
-        status: hit._source?.status ?? EvaluationStatus.UNKNOWN,
-      })) || []
-    );
+    return resp.values.map(([evaluationId, status]) => ({
+      id: typeof evaluationId === 'string' ? evaluationId : '',
+      status: typeof status === 'string' ? (status as EvaluationStatus) : EvaluationStatus.UNKNOWN,
+    }));
   } catch (e) {
     logger.error(`Error fetching evaluation results: ${e.message}`);
     return [];

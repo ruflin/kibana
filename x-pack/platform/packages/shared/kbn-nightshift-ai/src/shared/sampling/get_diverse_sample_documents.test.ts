@@ -128,7 +128,7 @@ describe('getDiverseSampleDocuments', () => {
     const fetchQuery = esql.mock.calls[2][1].query;
     expect(fetchQuery).toContain('FROM logs-a, logs-b METADATA _id, _source');
     expect(fetchQuery).toContain(
-      'WHERE (MATCH_PHRASE(message, "error one") OR MATCH_PHRASE(message, "warn two")) ' +
+      '(MATCH_PHRASE(message, "error one") OR MATCH_PHRASE(message, "warn two")) ' +
         'AND (message::KEYWORD IN ("error one", "warn two"))'
     );
     expect(fetchQuery).toContain('LIMIT 20');
@@ -157,9 +157,11 @@ describe('getDiverseSampleDocuments', () => {
     });
 
     expect(esql.mock.calls[2][1].query).toContain('MATCH_PHRASE(message,');
-    const fetchFilter = esql.mock.calls[2][1].filter;
-    expect(fetchFilter.bool.filter).toBeDefined();
-    expect(fetchFilter.bool.should).toBeUndefined();
+    expect(esql.mock.calls[2][1].query).toContain('@timestamp >= "1970-01-01T00:00:00.100Z"');
+    expect(esql.mock.calls[2][1].query).toContain('@timestamp <= "1970-01-01T00:00:00.200Z"');
+    expect(esql.mock.calls[2][1].filter).toBeUndefined();
+    expect(esql.mock.calls[0][1].filter).toBeUndefined();
+    expect(esql.mock.calls[0][1].query).toContain('@timestamp >= "1970-01-01T00:00:00.100Z"');
   });
 
   it('runs the schema probe on the plain client so drop_null_columns cannot prune the LIMIT 0 columns', async () => {
@@ -302,7 +304,7 @@ describe('getDiverseSampleDocuments', () => {
       'CATEGORIZE(body.text, {"output_format": "tokens"})'
     );
     expect(esql.mock.calls[2][1].query).toContain(
-      'WHERE MATCH_PHRASE(body.text, "body value") AND (body.text::KEYWORD IN ("body value"))'
+      'MATCH_PHRASE(body.text, "body value") AND (body.text::KEYWORD IN ("body value"))'
     );
     expect(result.hits).toEqual([
       { _index: '', _id: 'doc-1', _source: { body: { text: 'body value' } } },
@@ -368,11 +370,11 @@ describe('getDiverseSampleDocuments', () => {
     });
 
     expect(esql.mock.calls[2][1].query).toContain(
-      'WHERE (MATCH_PHRASE(message, "error one") OR MATCH_PHRASE(message, "warn two")) ' +
+      '(MATCH_PHRASE(message, "error one") OR MATCH_PHRASE(message, "warn two")) ' +
         'AND (message::KEYWORD IN ("error one", "warn two"))'
     );
     expect(esql.mock.calls[3][1].query).toContain(
-      'WHERE MATCH_PHRASE(message, "warn two") AND (message::KEYWORD IN ("warn two"))'
+      'MATCH_PHRASE(message, "warn two") AND (message::KEYWORD IN ("warn two"))'
     );
     expect(result.hits).toEqual([{ _index: '', _id: 'doc-1', _source: { message: 'error one' } }]);
     expect(logger.debug).toHaveBeenCalledWith(

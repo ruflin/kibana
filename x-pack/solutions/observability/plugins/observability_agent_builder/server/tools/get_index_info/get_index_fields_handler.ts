@@ -7,11 +7,13 @@
 
 import type { IScopedClusterClient, Logger } from '@kbn/core/server';
 import type { ModelProvider } from '@kbn/agent-builder-server';
+import { esql } from '@elastic/esql';
 import { compact, groupBy, mapValues, uniq } from 'lodash';
 import { selectRelevantFields } from './select_relevant_fields';
 import { getFieldType } from './get_field_type';
 import { timeRangeFilter, kqlFilter as toKqlFilter } from '../../utils/dsl_filters';
 import { parseDatemath } from '../../utils/time';
+import { esqlRows, runEsqlRead, toEsqlSources } from '../../utils/esql_read';
 
 export interface IndexFieldsResult {
   fieldsByType: Record<string, string[]>;
@@ -50,10 +52,12 @@ async function getFieldNamesWithData(
   kqlFilter: string | undefined,
   logger: Logger
 ): Promise<string[]> {
-  const response = await esClient.asCurrentUser.search({
-    index,
-    size: SAMPLE_SIZE,
-    query: {
+  const response = await runEsqlRead({
+    esClient: esClient.asCurrentUser,
+    query: esql.from(toEsqlSources(index), ['_source']).pipe`KEEP _source`.pipe`LIMIT ${{
+      limit: SAMPLE_SIZE,
+    }}`,
+    filter: {
       bool: {
         filter: [
           ...timeRangeFilter('@timestamp', {
@@ -64,17 +68,14 @@ async function getFieldNamesWithData(
         ],
       },
     },
-    _source: true,
-    ignore_unavailable: true,
-    allow_no_indices: true,
   });
 
-  const docs = response.hits.hits;
+  const docs = esqlRows(response);
   logger.debug(`Sampled ${docs.length} documents from ${index}`);
 
   // Extract field paths from documents
   const fieldPaths = docs
-    .map((hit) => hit._source)
+    .map((row) => row._source)
     .filter(
       (source): source is Record<string, unknown> => source != null && typeof source === 'object'
     )

@@ -20,14 +20,9 @@ describe('data_source_utils', () => {
   describe('previewStoreSource / formatStorePreviewMessage', () => {
     it('returns total from the entity store search', async () => {
       const esClient = elasticsearchServiceMock.createElasticsearchClient();
-      esClient.search.mockResolvedValueOnce({
-        hits: {
-          total: { value: 47, relation: 'eq' },
-          hits: [
-            { _source: { entity: { id: 'host:web-01' } } },
-            { _source: { entity: { id: 'host:web-02' } } },
-          ],
-        },
+      esClient.esql.query.mockResolvedValueOnce({
+        columns: [{ name: 'total', type: 'long' }],
+        values: [[47]],
       } as never);
 
       const result = await previewStoreSource({
@@ -37,6 +32,10 @@ describe('data_source_utils', () => {
       });
 
       expect(result).toEqual({ total: 47 });
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query: 'FROM entities-latest-default | STATS total = COUNT(*)',
+        filter: expect.objectContaining({ bool: expect.anything() }),
+      });
       expect(formatStorePreviewMessage(result.total)).toContain('47 entities');
     });
 

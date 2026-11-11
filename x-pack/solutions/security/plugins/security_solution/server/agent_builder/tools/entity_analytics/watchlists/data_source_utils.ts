@@ -6,16 +6,16 @@
  */
 
 import type { estypes } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import { getEntitiesAlias, ENTITY_LATEST } from '@kbn/entity-store/server';
 import { fromKueryExpression, toElasticsearchQuery } from '@kbn/es-query';
+import { esqlRows, runEsql } from '../../../../lib/esql/esql_read';
 import type {
   DateRange,
   MonitoringEntitySource,
 } from '../../../../../common/api/entity_analytics/watchlists/data_source/common.gen';
 import { RuleBasedSourceType } from '../../../../lib/entity_analytics/watchlists/entity_sources/infra';
-
-const STORE_PREVIEW_SAMPLE_SIZE = 5;
 
 const getTotalHits = (total: estypes.SearchHitsMetadata['total']): number =>
   typeof total === 'number' ? total : total?.value ?? 0;
@@ -33,16 +33,17 @@ export const previewStoreSource = async ({
   namespace: string;
   queryRule: string;
 }) => {
-  const response = await esClient.search<{ entity?: { id?: string } }>({
-    index: getEntitiesAlias(ENTITY_LATEST, namespace),
-    size: STORE_PREVIEW_SAMPLE_SIZE,
-    track_total_hits: true,
-    query: toElasticsearchQuery(fromKueryExpression(queryRule)),
-    _source: ['entity.id'],
+  // The KQL rule stays the request filter, as Query DSL, so it matches exactly what the sync job
+  // matches.
+  const response = await runEsql({
+    esClient,
+    query: esql.from([getEntitiesAlias(ENTITY_LATEST, namespace)]).pipe`STATS total = COUNT(*)`,
+    filter: toElasticsearchQuery(fromKueryExpression(queryRule)),
   });
+  const total = esqlRows(response)[0]?.total;
 
   return {
-    total: getTotalHits(response.hits.total),
+    total: typeof total === 'number' ? total : 0,
   };
 };
 

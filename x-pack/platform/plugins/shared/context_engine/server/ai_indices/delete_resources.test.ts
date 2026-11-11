@@ -38,14 +38,21 @@ describe('deleteBackingStoreResource', () => {
       indices: { deleteDataStream, delete: deleteIndex },
     },
     asInternalUser: {
-      search: registrySearch,
+      esql: { query: registrySearch },
     },
   } as unknown as IScopedClusterClient;
   const logger = { warn } as unknown as Logger;
 
-  const emptySearchResponse = {
-    hits: { hits: [] },
-  };
+  /** An ES|QL registry read with one row per entry, as `METADATA _id, _source`. */
+  const registryResponse = (rows: Array<{ _id: string; _source?: Record<string, unknown> }>) => ({
+    columns: [
+      { name: '_id', type: 'keyword' },
+      { name: '_source', type: '_source' },
+    ],
+    values: rows.map(({ _id, _source }) => [_id, _source ?? null]),
+  });
+
+  const emptySearchResponse = registryResponse([]);
 
   const deleteBackingStore = (dest: AiIndexDest, spaceId = 'default') =>
     deleteBackingStoreResource({
@@ -160,11 +167,9 @@ describe('deleteBackingStoreResource', () => {
   );
 
   it('skips dest delete when another AI index still uses the dest', async () => {
-    registrySearch.mockResolvedValue({
-      hits: {
-        hits: [{ _id: 'auto-gen-other', _source: { id: 'other_space_index' } }],
-      },
-    });
+    registrySearch.mockResolvedValue(
+      registryResponse([{ _id: 'auto-gen-other', _source: { id: 'other_space_index' } }])
+    );
 
     await expect(
       deleteBackingStore({ type: 'data_stream', value: 'ai-index-ds-customer_support' })
@@ -175,14 +180,10 @@ describe('deleteBackingStoreResource', () => {
     );
 
     expect(registrySearch).toHaveBeenCalledWith({
-      index: aiIndicesIndexName,
-      size: MAX_AI_INDICES,
-      track_total_hits: false,
-      query: {
-        bool: {
-          filter: [{ term: { 'dest.value': 'ai-index-ds-customer_support' } }],
-          must_not: [createAiIndexIdentityDslFilter('my-ai-index', 'default')],
-        },
+      query: `FROM ${aiIndicesIndexName} METADATA _id, _source | WHERE dest.value == ?dest | KEEP _id, _source | LIMIT ?limit`,
+      params: [{ dest: 'ai-index-ds-customer_support' }, { limit: MAX_AI_INDICES }],
+      filter: {
+        bool: { must_not: [createAiIndexIdentityDslFilter('my-ai-index', 'default')] },
       },
     });
     expect(deleteDataStream).not.toHaveBeenCalled();
@@ -191,11 +192,7 @@ describe('deleteBackingStoreResource', () => {
   });
 
   it('falls back to _id for pre-upgrade documents that have no id field', async () => {
-    registrySearch.mockResolvedValue({
-      hits: {
-        hits: [{ _id: 'legacy-other-index' }],
-      },
-    });
+    registrySearch.mockResolvedValue(registryResponse([{ _id: 'legacy-other-index' }]));
 
     await expect(
       deleteBackingStore({ type: 'data_stream', value: 'ai-index-ds-customer_support' })
@@ -204,11 +201,11 @@ describe('deleteBackingStoreResource', () => {
   });
 
   it('keeps the backing store when the same logical id in another space uses it', async () => {
-    registrySearch.mockResolvedValue({
-      hits: {
-        hits: [{ _id: 'auto-gen-other', _source: { id: 'my-ai-index', space: 'marketing' } }],
-      },
-    });
+    registrySearch.mockResolvedValue(
+      registryResponse([
+        { _id: 'auto-gen-other', _source: { id: 'my-ai-index', space: 'marketing' } },
+      ])
+    );
 
     await expect(
       deleteBackingStore({ type: 'data_stream', value: 'ai-index-ds-customer_support' })
@@ -218,11 +215,7 @@ describe('deleteBackingStoreResource', () => {
   });
 
   it('treats a pre-upgrade default-space entry with the same id as another user of the dest', async () => {
-    registrySearch.mockResolvedValue({
-      hits: {
-        hits: [{ _id: 'my-ai-index' }],
-      },
-    });
+    registrySearch.mockResolvedValue(registryResponse([{ _id: 'my-ai-index' }]));
 
     await expect(
       deleteBackingStore(
@@ -241,11 +234,8 @@ describe('deleteBackingStoreResource', () => {
 
     expect(registrySearch).toHaveBeenCalledWith(
       expect.objectContaining({
-        query: {
-          bool: {
-            filter: [{ term: { 'dest.value': 'ai-index-ds-customer_support' } }],
-            must_not: [createAiIndexIdentityDslFilter('my-ai-index', 'marketing')],
-          },
+        filter: {
+          bool: { must_not: [createAiIndexIdentityDslFilter('my-ai-index', 'marketing')] },
         },
       })
     );

@@ -7,7 +7,9 @@
 
 import { ProfilingSchema } from '@kbn/profiling-utils';
 import type { DownsampledEventsIndex } from './downsampling';
-import { getSampledTraceEventsIndex } from './downsampling';
+import { loggerMock } from '@kbn/logging-mocks';
+import type { ProfilingESClient } from '@kbn/profiling-data-access-plugin/server';
+import { findDownsampledIndex, getSampledTraceEventsIndex } from './downsampling';
 
 describe('Using down-sampled indexes', () => {
   const targetSampleSize = 20000;
@@ -95,5 +97,40 @@ describe('Using down-sampled indexes', () => {
         )
       ).toEqual(t.expected);
     }
+  });
+});
+
+describe('findDownsampledIndex', () => {
+  const run = async (esqlImpl: jest.Mock) => {
+    const client = { esql: esqlImpl } as unknown as ProfilingESClient;
+    const filter = { bool: { filter: [{ range: { '@timestamp': { gte: '1' } } }] } };
+    const index = await findDownsampledIndex({
+      logger: loggerMock.create(),
+      client,
+      schema: ProfilingSchema.ECS,
+      filter,
+      sampleSize: 20000,
+    });
+    return { index, filter };
+  };
+
+  it('counts the events of the 5^6 index with ES|QL and picks the index from the count', async () => {
+    const esqlFn = jest
+      .fn()
+      .mockResolvedValue({ columns: [{ name: 'total', type: 'long' }], values: [[20000 * 5]] });
+
+    const { index, filter } = await run(esqlFn);
+
+    expect(esqlFn).toHaveBeenCalledWith('find_downsampled_index', expect.anything(), filter);
+    expect(esqlFn.mock.calls[0][1].toRequest().query).toBe(
+      'FROM profiling-events-5pow06 | STATS total = COUNT(*)'
+    );
+    expect(index).toEqual({ name: 'profiling-events-5pow07', sampleRate: 1 / 5 ** 7 });
+  });
+
+  it('falls back to the full events index when the count fails', async () => {
+    const { index } = await run(jest.fn().mockRejectedValue(new Error('boom')));
+
+    expect(index).toEqual({ name: 'profiling-events-all', sampleRate: 1 });
   });
 });

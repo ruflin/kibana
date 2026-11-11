@@ -6,8 +6,8 @@
  */
 
 import type { Logger, ElasticsearchClient } from '@kbn/core/server';
-import type { AggregationBucket, AggregationOnlyResponse, EntityStoreStats } from '../type';
-import { ENTITY_INDEX, getAggsQuery } from '../helper';
+import type { AggregationOnlyResponse, EntityStoreStats } from '../type';
+import { ENTITY_INDEX, getFieldTermsStats } from '../helper';
 
 /**
  * Parses aggregation buckets into a simplified list of entity stats.
@@ -37,16 +37,7 @@ export const getEntityStoreStats = async (
       return [];
     }
 
-    const entityStoreStats = await esClient.search<
-      unknown,
-      {
-        field_terms: {
-          buckets: AggregationBucket[];
-        };
-      }
-    >(getAggsQuery('entity.EngineMetadata.Type', 5));
-
-    const buckets = entityStoreStats.aggregations?.field_terms?.buckets ?? [];
+    const buckets = await getFieldTermsStats(esClient, 'entity.EngineMetadata.Type', 5);
     return parseEntityStoreAggs({ buckets });
   } catch (e) {
     logger.error(`Failed to get entity store stats: ${e instanceof Error ? e.message : String(e)}`);

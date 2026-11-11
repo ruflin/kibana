@@ -86,22 +86,17 @@ describe('createAttackDiscoveryAlertsRoute', () => {
     ).mockResolvedValue({ result: true });
 
     (
-      context.core.elasticsearch.client.asCurrentUser.search as unknown as jest.Mock
+      context.core.elasticsearch.client.asCurrentUser.esql.query as unknown as jest.Mock
     ).mockResolvedValue({
-      hits: {
-        hits: [
-          {
-            _id: 'doc-1',
-            _index: '.internal.alerts-security.attack.discovery.alerts-default-000001',
-            fields: { [ALERT_INSTANCE_ID]: ['instance-1'] },
-          },
-          {
-            _id: 'doc-2',
-            _index: '.internal.alerts-security.attack.discovery.alerts-default-000001',
-            fields: { [ALERT_INSTANCE_ID]: ['instance-2'] },
-          },
-        ],
-      },
+      columns: [
+        { name: '_id', type: 'keyword' },
+        { name: '_index', type: 'keyword' },
+        { name: ALERT_INSTANCE_ID, type: 'keyword' },
+      ],
+      values: [
+        ['doc-1', '.internal.alerts-security.attack.discovery.alerts-default-000001', 'instance-1'],
+        ['doc-2', '.internal.alerts-security.attack.discovery.alerts-default-000001', 'instance-2'],
+      ],
     });
     (
       context.core.elasticsearch.client.asCurrentUser.bulk as unknown as jest.Mock

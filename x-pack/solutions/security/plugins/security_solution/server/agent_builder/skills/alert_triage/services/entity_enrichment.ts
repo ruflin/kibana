@@ -5,8 +5,11 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
+import type { EsqlQueryResponse } from '@elastic/elasticsearch/lib/api/types';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type { Logger } from '@kbn/logging';
+import { esqlRows, runEsql } from '../../../../lib/esql/esql_read';
 import { getRiskScoreLatestIndex } from '../../../../../common/entity_analytics/risk_engine/indices';
 import { getAssetCriticalityIndex } from '../../../../../common/entity_analytics/asset_criticality/indices';
 
@@ -36,6 +39,16 @@ interface EnrichEntitiesParams {
 
 type HitFields = Record<string, unknown[]>;
 
+/** Each row of an ES|QL response as the `fields` API shapes a hit: every value is an array. */
+const toHitFields = (response: EsqlQueryResponse | undefined): HitFields[] =>
+  esqlRows(response).map((row) =>
+    Object.fromEntries(
+      Object.entries(row)
+        .filter(([, value]) => value != null)
+        .map(([key, value]) => [key, Array.isArray(value) ? value : [value]])
+    )
+  );
+
 const firstString = (fields: HitFields, key: string): string | undefined => {
   const value = fields[key]?.[0];
   return typeof value === 'string' ? value : undefined;
@@ -58,29 +71,32 @@ const fetchRiskScores = async (
   { esClient, spaceId, hostNames, userNames }: Omit<EnrichEntitiesParams, 'logger'>,
   map: EntityEnrichmentMap
 ): Promise<void> => {
-  const should: Array<Record<string, unknown>> = [];
-  if (hostNames.length > 0) should.push({ terms: { 'host.name': hostNames } });
-  if (userNames.length > 0) should.push({ terms: { 'user.name': userNames } });
-  if (should.length === 0) return;
+  if (hostNames.length === 0 && userNames.length === 0) return;
 
-  const result = await esClient.search({
-    index: getRiskScoreLatestIndex(spaceId),
-    size: hostNames.length + userNames.length,
-    query: { bool: { should, minimum_should_match: 1 } },
-    _source: false,
-    fields: [
-      'host.name',
-      'host.risk.calculated_level',
-      'host.risk.calculated_score_norm',
-      'user.name',
-      'user.risk.calculated_level',
-      'user.risk.calculated_score_norm',
-    ],
-    ignore_unavailable: true,
+  const source = esql.from([getRiskScoreLatestIndex(spaceId)]);
+  const filtered =
+    hostNames.length > 0 && userNames.length > 0
+      ? source.pipe`WHERE host.name IN (${{ hostNames }}) OR user.name IN (${{ userNames }})`
+      : hostNames.length > 0
+      ? source.pipe`WHERE host.name IN (${{ hostNames }})`
+      : source.pipe`WHERE user.name IN (${{ userNames }})`;
+
+  const result = await runEsql({
+    esClient,
+    query: filtered
+      .keep(
+        'host.name',
+        'host.risk.calculated_level',
+        'host.risk.calculated_score_norm',
+        'user.name',
+        'user.risk.calculated_level',
+        'user.risk.calculated_score_norm'
+      )
+      .limit(hostNames.length + userNames.length),
+    ignoreUnknownIndex: true,
   });
 
-  for (const hit of result.hits.hits) {
-    const fields = (hit.fields ?? {}) as HitFields;
+  for (const fields of toHitFields(result)) {
     const hostName = firstString(fields, 'host.name');
     if (hostName) {
       upsert(map, entityKey('host', hostName), {
@@ -106,30 +122,27 @@ const fetchCriticalities = async (
   { esClient, spaceId, hostNames, userNames }: Omit<EnrichEntitiesParams, 'logger'>,
   map: EntityEnrichmentMap
 ): Promise<void> => {
-  const should: Array<Record<string, unknown>> = [];
-  if (hostNames.length > 0) {
-    should.push({
-      bool: { filter: [{ term: { id_field: 'host.name' } }, { terms: { id_value: hostNames } }] },
-    });
-  }
-  if (userNames.length > 0) {
-    should.push({
-      bool: { filter: [{ term: { id_field: 'user.name' } }, { terms: { id_value: userNames } }] },
-    });
-  }
-  if (should.length === 0) return;
+  if (hostNames.length === 0 && userNames.length === 0) return;
 
-  const result = await esClient.search({
-    index: getAssetCriticalityIndex(spaceId),
-    size: hostNames.length + userNames.length,
-    query: { bool: { should, minimum_should_match: 1 } },
-    _source: false,
-    fields: ['id_field', 'id_value', 'criticality_level'],
-    ignore_unavailable: true,
+  const source = esql.from([getAssetCriticalityIndex(spaceId)]);
+  const filtered =
+    hostNames.length > 0 && userNames.length > 0
+      ? source.pipe`WHERE (id_field == "host.name" AND id_value IN (${{
+          hostNames,
+        }})) OR (id_field == "user.name" AND id_value IN (${{ userNames }}))`
+      : hostNames.length > 0
+      ? source.pipe`WHERE id_field == "host.name" AND id_value IN (${{ hostNames }})`
+      : source.pipe`WHERE id_field == "user.name" AND id_value IN (${{ userNames }})`;
+
+  const result = await runEsql({
+    esClient,
+    query: filtered
+      .keep('id_field', 'id_value', 'criticality_level')
+      .limit(hostNames.length + userNames.length),
+    ignoreUnknownIndex: true,
   });
 
-  for (const hit of result.hits.hits) {
-    const fields = (hit.fields ?? {}) as HitFields;
+  for (const fields of toHitFields(result)) {
     const idField = firstString(fields, 'id_field');
     const idValue = firstString(fields, 'id_value');
     const criticality = firstString(fields, 'criticality_level');

@@ -1290,6 +1290,39 @@ describe('PackageInstaller', () => {
     });
   });
 
+  describe('getSecurityLabsStatus', () => {
+    const countResponse = (total: number) =>
+      ({ columns: [{ name: 'total', type: 'long' }], values: [[total]] } as never);
+
+    beforeEach(() => {
+      fetchSecurityLabsVersionsMock.mockResolvedValue([]);
+      esClient.indices.exists.mockResolvedValue(true);
+    });
+
+    it('counts the documents of the Security Labs index with ES|QL', async () => {
+      esClient.esql.query.mockResolvedValue(countResponse(12));
+
+      const status = await packageInstaller.getSecurityLabsStatus({
+        inferenceId: defaultInferenceEndpoints.ELSER,
+      });
+
+      expect(status).toEqual(expect.objectContaining({ status: 'installed' }));
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query: `FROM ${getSecurityLabsIndexName(
+          defaultInferenceEndpoints.ELSER
+        )} | STATS total = COUNT(*)`,
+      });
+    });
+
+    it('reports an empty Security Labs index as uninstalled', async () => {
+      esClient.esql.query.mockResolvedValue(countResponse(0));
+
+      await expect(
+        packageInstaller.getSecurityLabsStatus({ inferenceId: defaultInferenceEndpoints.ELSER })
+      ).resolves.toEqual({ status: 'uninstalled' });
+    });
+  });
+
   describe('installSecurityLabs', () => {
     const VERSION_OLD = '2025.12.01';
     const VERSION_NEW = '2025.12.12';

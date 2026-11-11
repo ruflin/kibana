@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import type { SearchTotalHits } from '@elastic/elasticsearch/lib/api/types';
+import { esql } from '@elastic/esql';
 import { z } from '@kbn/zod/v4';
 import type { estypes } from '@elastic/elasticsearch';
 import type {
@@ -22,6 +22,7 @@ import {
   collectResolvedIndexNames,
   type StreamSummary,
 } from '../../../../../common';
+import { getFirstNumber, runEsqlQuery } from '../../../../lib/streams/helpers/esql';
 import { createServerRoute } from '../../../create_server_route';
 import { getDataStreamLifecycle, getFailureStore } from '../../../../lib/streams/stream_crud';
 
@@ -167,11 +168,11 @@ export const streamDetailRoute = createServerRoute({
     const streamEntity = await streamsClient.getStream(params.path.name);
 
     // check doc count
-    const docCountResponse = await scopedClusterClient.asCurrentUser.search({
-      index: streamEntity.name,
-      track_total_hits: true,
-      ignore_unavailable: true,
-      query: {
+    // The range stays a request `filter`: start and end may be date math, which `WHERE` cannot parse.
+    const docCountResponse = await runEsqlQuery({
+      esClient: scopedClusterClient.asCurrentUser,
+      query: esql.from([streamEntity.name]).pipe`STATS count = COUNT(*)`,
+      filter: {
         range: {
           '@timestamp': {
             gte: params.query.start,
@@ -179,10 +180,10 @@ export const streamDetailRoute = createServerRoute({
           },
         },
       },
-      size: 0,
+      ignoreMissingIndex: true,
     });
 
-    const count = (docCountResponse.hits.total as SearchTotalHits).value;
+    const count = getFirstNumber(docCountResponse, 'count');
 
     return {
       details: {

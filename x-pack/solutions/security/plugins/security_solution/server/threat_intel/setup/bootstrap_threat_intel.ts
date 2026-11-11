@@ -7,12 +7,14 @@
 
 import { errors } from '@elastic/elasticsearch';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 import { REQUIRED_REPORT_SEMANTIC_FIELDS, getSemanticTextInferenceId } from '@kbn/alertzero-common';
 import {
   THREAT_REPORTS_INDEX,
   THREAT_INTEL_SOURCES_INDEX,
   DIAMOND_SUMMARY_EMBEDDING_INFERENCE_ID,
 } from '../../../common/threat_intel';
+import { esqlRows, runEsqlRead } from '../../utils/esql/esql_read';
 import { installIndexTemplates } from './index_templates';
 import { seedDefaultSources, type SeedDefaultSourcesResult } from './seed_default_sources';
 
@@ -192,11 +194,12 @@ const seedThreatIntelCatalog = async ({
   // unready for the lifetime of the process, over a log line. The real setup work is
   // what `withElasticsearchRetry` guards.
   try {
-    const catalogCount = await esClient.count(
-      { index: THREAT_INTEL_SOURCES_INDEX },
-      { ignore: [404] }
-    );
-    if (catalogCount.count === 0 && seed.created === 0) {
+    // A missing index has no response, as `ignore: [404]` left no count.
+    const catalogCount = await runEsqlRead({
+      esClient,
+      query: esql.from([THREAT_INTEL_SOURCES_INDEX]).pipe`STATS total = COUNT(*)`,
+    });
+    if (esqlRows(catalogCount)[0]?.total === 0 && seed.created === 0) {
       log.error(
         'Threat intelligence source reconciliation completed but `.kibana-threat-intel-sources` is still empty'
       );

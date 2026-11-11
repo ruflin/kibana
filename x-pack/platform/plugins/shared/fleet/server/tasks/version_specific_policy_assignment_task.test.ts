@@ -141,13 +141,15 @@ describe('VersionSpecificPolicyAssignmentTask', () => {
   let mockCore: CoreSetup;
   let mockTaskManagerSetup: jest.Mocked<TaskManagerSetupContract>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockContract = createAppContextStartContractMock();
     mockContract.experimentalFeatures = {
       ...mockContract.experimentalFeatures,
       enableVersionSpecificPolicies: true,
     };
     appContextService.start(mockContract);
+    esqlState.variants = [];
+    esqlState.sentinelRevisions = [{}];
     mockCore = coreSetupMock();
     mockTaskManagerSetup = tmSetupMock();
     mockTask = new VersionSpecificPolicyAssignmentTask({
@@ -158,6 +160,7 @@ describe('VersionSpecificPolicyAssignmentTask', () => {
         taskInterval: '1m',
       },
     });
+    await installEsqlMock();
   });
 
   afterEach(() => {
@@ -221,26 +224,58 @@ describe('VersionSpecificPolicyAssignmentTask', () => {
     return esClient;
   };
 
-  // Configure the .fleet-policies terms aggregation the orphan sweep reads in its first pass.
+  // What the ES|QL reads of `.fleet-policies` return: the orphan sweep reads the last write time per
+  // policy id in its first pass, and the sentinel documents are checked with the latest revision per
+  // policy id. Every other ES|QL read returns no rows.
+  const esqlState: {
+    variants: Array<{ policyId: string; lastWrittenMs: number }>;
+    sentinelRevisions: Array<Record<string, number>>;
+  } = { variants: [], sentinelRevisions: [{}] };
+
+  const installEsqlMock = async () => {
+    const [coreStart] = await mockCore.getStartServices();
+    const esClient = coreStart.elasticsearch.client.asInternalUser as any;
+    esClient.esql.query.mockImplementation(async (request: { query: string }) => {
+      if (request.query.includes('STATS last_written')) {
+        return {
+          columns: [
+            { name: 'last_written', type: 'date' },
+            { name: 'policy_id', type: 'keyword' },
+          ],
+          values: esqlState.variants.map(({ policyId, lastWrittenMs }) => [
+            new Date(lastWrittenMs).toISOString(),
+            policyId,
+          ]),
+        };
+      }
+      if (request.query.includes('STATS max_revision')) {
+        const revisions =
+          esqlState.sentinelRevisions.length > 1
+            ? esqlState.sentinelRevisions.shift()!
+            : esqlState.sentinelRevisions[0];
+        return {
+          columns: [
+            { name: 'max_revision', type: 'integer' },
+            { name: 'policy_id', type: 'keyword' },
+          ],
+          values: Object.entries(revisions).map(([policyId, revision]) => [revision, policyId]),
+        };
+      }
+      return { columns: [], values: [] };
+    });
+    return esClient;
+  };
+
+  // Configure the .fleet-policies last write time per policy id the orphan sweep reads in its first pass.
   // lastWrittenMs defaults to epoch (0) so mocked variants are always outside the 1-hour GRACE
   // window and eligible for deletion. Pass lastWrittenMs: Date.now() to simulate a fresh write.
   const mockVariantPoliciesInIndex = async (
     variantPolicyIds: string[],
     { lastWrittenMs = 0 }: { lastWrittenMs?: number } = {}
   ) => {
-    const [coreStart] = await mockCore.getStartServices();
-    const esClient = coreStart.elasticsearch.client.asInternalUser as any;
-    esClient.search.mockResolvedValue({
-      aggregations: {
-        variant_policies: {
-          buckets: variantPolicyIds.map((key) => ({
-            key,
-            last_written: { value: lastWrittenMs },
-          })),
-          sum_other_doc_count: 0,
-        },
-      },
-    });
+    const esClient = await installEsqlMock();
+    esqlState.variants = variantPolicyIds.map((policyId) => ({ policyId, lastWrittenMs }));
+    esClient.search.mockResolvedValue({ aggregations: {} });
   };
 
   describe('Task lifecycle', () => {
@@ -1483,30 +1518,20 @@ describe('VersionSpecificPolicyAssignmentTask', () => {
       expect(mockedReassignAgents).not.toHaveBeenCalled();
     });
 
-    it('queries .fleet-policies with the correct aggregation shape including last_written sub-agg', async () => {
+    it('queries .fleet-policies for the last write time of every policy id', async () => {
       const [coreStart] = await mockCore.getStartServices();
       const esClient = coreStart.elasticsearch.client.asInternalUser as any;
       await mockVariantPoliciesInIndex([]);
 
       await runTask();
 
-      expect(esClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: AGENT_POLICY_INDEX,
-          size: 0,
-          aggs: expect.objectContaining({
-            variant_policies: expect.objectContaining({
-              terms: expect.objectContaining({ field: 'policy_id' }),
-              // last_written sub-agg is used to enforce the GRACE window atomically inside the
-              // deleteByQuery — any racing deploy stamps a fresh @timestamp that the range filter
-              // excludes without a TOCTOU window.
-              aggs: expect.objectContaining({
-                last_written: expect.objectContaining({ max: { field: '@timestamp' } }),
-              }),
-            }),
-          }),
-        })
-      );
+      // The last write time is used to enforce the GRACE window atomically inside the
+      // deleteByQuery — any racing deploy stamps a fresh @timestamp that the range filter
+      // excludes without a TOCTOU window.
+      expect(esClient.esql.query).toHaveBeenCalledWith({
+        query: `FROM ${AGENT_POLICY_INDEX} | STATS last_written = MAX(@timestamp) BY policy_id | LIMIT 10000`,
+        params: [],
+      });
     });
 
     it('deletes variant docs even when the orphaned parent currently has no assigned agents', async () => {
@@ -1632,22 +1657,14 @@ describe('VersionSpecificPolicyAssignmentTask', () => {
       return fetch;
     };
 
-    // `.fleet-policies` terms aggregation read to check which `#sentinel` documents are up to date
+    // `.fleet-policies` latest revision per policy id, read to check which `#sentinel` documents are
+    // up to date. Pass more than one revisions object to return them one per read.
     const mockSentinelPoliciesInIndex = async (
-      revisionsBySentinelPolicyId: Record<string, number>
+      ...revisionsBySentinelPolicyId: Array<Record<string, number>>
     ) => {
-      const [coreStart] = await mockCore.getStartServices();
-      const esClient = coreStart.elasticsearch.client.asInternalUser as any;
-      esClient.search.mockResolvedValue({
-        aggregations: {
-          policies: {
-            buckets: Object.entries(revisionsBySentinelPolicyId).map(([key, revision]) => ({
-              key,
-              max_revision: { value: revision },
-            })),
-          },
-        },
-      });
+      const esClient = await installEsqlMock();
+      esqlState.sentinelRevisions = revisionsBySentinelPolicyId;
+      esClient.search.mockResolvedValue({ aggregations: {} });
       return esClient;
     };
 
@@ -1724,14 +1741,7 @@ describe('VersionSpecificPolicyAssignmentTask', () => {
       });
 
       it('deploys the #sentinel policy first when it is missing', async () => {
-        const esClient = await mockSentinelPoliciesInIndex({});
-        esClient.search
-          .mockResolvedValueOnce({ aggregations: { policies: { buckets: [] } } })
-          .mockResolvedValueOnce({
-            aggregations: {
-              policies: { buckets: [{ key: 'policy-1#sentinel', max_revision: { value: 2 } }] },
-            },
-          });
+        await mockSentinelPoliciesInIndex({}, { 'policy-1#sentinel': 2 });
 
         await runTask();
 
@@ -1750,18 +1760,7 @@ describe('VersionSpecificPolicyAssignmentTask', () => {
       });
 
       it('deploys the #sentinel policy first when it is behind the policy revision', async () => {
-        const esClient = await mockSentinelPoliciesInIndex({ 'policy-1#sentinel': 1 });
-        esClient.search
-          .mockResolvedValueOnce({
-            aggregations: {
-              policies: { buckets: [{ key: 'policy-1#sentinel', max_revision: { value: 1 } }] },
-            },
-          })
-          .mockResolvedValueOnce({
-            aggregations: {
-              policies: { buckets: [{ key: 'policy-1#sentinel', max_revision: { value: 2 } }] },
-            },
-          });
+        await mockSentinelPoliciesInIndex({ 'policy-1#sentinel': 1 }, { 'policy-1#sentinel': 2 });
 
         await runTask();
 
@@ -1894,34 +1893,14 @@ describe('VersionSpecificPolicyAssignmentTask', () => {
         mockAgentPolicyService.deployPolicies = jest.fn().mockResolvedValue(undefined);
       });
 
-      // The sweep reads a `variant_policies` aggregation, and the sentinel documents are checked
-      // with a `policies` aggregation, both on `.fleet-policies`.
+      // The sweep reads the last write time per policy id, and the sentinel documents are checked
+      // with the latest revision per policy id, both on `.fleet-policies`.
       const mockSweepAndSentinelDocs = async (
         policyIds: string[],
         sentinelRevisionsAfterDeploy: Array<Record<string, number>>
       ) => {
         await mockVariantPoliciesInIndex(policyIds);
-        const [coreStart] = await mockCore.getStartServices();
-        const esClient = coreStart.elasticsearch.client.asInternalUser as any;
-        const sweepResponse = await esClient.search();
-        const sentinelResponses = [...sentinelRevisionsAfterDeploy];
-        esClient.search.mockImplementation(async (request: any) => {
-          if (!request.aggs?.policies) {
-            return sweepResponse;
-          }
-          const revisions =
-            sentinelResponses.length > 1 ? sentinelResponses.shift()! : sentinelResponses[0];
-          return {
-            aggregations: {
-              policies: {
-                buckets: Object.entries(revisions).map(([key, revision]) => ({
-                  key,
-                  max_revision: { value: revision },
-                })),
-              },
-            },
-          };
-        });
+        esqlState.sentinelRevisions = [...sentinelRevisionsAfterDeploy];
       };
 
       it('keeps the #sentinel policy of a parent without version conditions', async () => {

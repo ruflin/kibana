@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql, type ComposerQuery } from '@elastic/esql';
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
 import { ProcessorEvent } from '@kbn/observability-plugin/common';
 import { rangeQuery } from '@kbn/observability-plugin/server';
@@ -21,6 +22,8 @@ import {
 import { environmentQuery } from '../../../common/utils/environment_query';
 import type { Environment } from '../../../common/environment_rt';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
+import { esqlRowAsFields } from '../../lib/helpers/esql_values';
+import { esqlRows } from '../../lib/helpers/esql_read';
 import { CONNECTION_JOIN_TIME_BUFFER_MS } from './connection_constants';
 
 /**
@@ -47,9 +50,6 @@ const GRPC_CODE_NAMES: Record<number, string> = {
 };
 
 export type Fields = Record<string, unknown[] | undefined>;
-
-export const fieldsOf = (hit: { fields?: unknown }): Fields =>
-  (hit.fields as Fields | undefined) ?? {};
 
 export interface TopErrorDoc {
   message: string;
@@ -98,50 +98,53 @@ export function pickTopError({
   return { topError: null, topErrorGroupId: null };
 }
 
-/** The most frequent error group matching `filter`, with the message of one of its documents. */
+/**
+ * The most frequent error group matching `where`/`filter`, with the message of one of its
+ * documents. Two requests: the top group, then a sample document of that group.
+ */
 async function getTopError({
   apmEventClient,
   operationName,
+  where,
   filter,
 }: {
   apmEventClient: APMEventClient;
   operationName: string;
+  where: (query: ComposerQuery) => ComposerQuery;
   filter: QueryDslQueryContainer[];
 }): Promise<TopErrorDoc | null> {
-  const response = await apmEventClient.search(operationName, {
+  const topGroupResponse = await apmEventClient.esql(operationName, {
     apm: { events: [ProcessorEvent.error] },
-    track_total_hits: false,
-    size: 0,
-    query: { bool: { filter } },
-    aggs: {
-      top_group: {
-        terms: { field: ERROR_GROUP_ID, size: 1 },
-        aggs: {
-          sample: {
-            top_hits: {
-              size: 1,
-              // `fields` returns flat keys, a `_source` filter returns nested objects.
-              _source: false,
-              fields: [ERROR_LOG_MESSAGE, ERROR_EXC_MESSAGE, ERROR_EXC_TYPE],
-            },
-          },
-        },
-      },
-    },
+    query: (index) =>
+      where(esql.from(index).addSetCommand('unmapped_fields', 'nullify'))
+        .pipe`STATS doc_count = COUNT(*) BY ${esql.col(ERROR_GROUP_ID)}`
+        .pipe`SORT doc_count DESC, ${esql.col(ERROR_GROUP_ID)} ASC`.limit(1),
+    filter: { bool: { filter } },
   });
 
-  const topGroup = response.aggregations?.top_group.buckets[0];
-  const sample = topGroup?.sample.hits.hits[0];
-  if (!topGroup || !sample) {
+  const groupId = esqlRows(topGroupResponse)[0]?.[ERROR_GROUP_ID];
+  if (groupId === undefined || groupId === null) {
     return null;
   }
 
-  const fields = fieldsOf(sample);
+  const sampleResponse = await apmEventClient.esql(`${operationName}_sample`, {
+    apm: { events: [ProcessorEvent.error] },
+    // The message fields are not mapped in every error index, so unmapped fields read as null.
+    query: (index) =>
+      where(esql.from(index).addSetCommand('unmapped_fields', 'nullify')).pipe`WHERE ${esql.col(
+        ERROR_GROUP_ID
+      )} == ${{ groupId }}`
+        .keep(ERROR_LOG_MESSAGE, ERROR_EXC_MESSAGE, ERROR_EXC_TYPE)
+        .limit(1),
+    filter: { bool: { filter } },
+  });
+
+  const fields = esqlRowAsFields(sampleResponse) ?? {};
   const message = [ERROR_LOG_MESSAGE, ERROR_EXC_MESSAGE, ERROR_EXC_TYPE]
     .map((field) => fields[field]?.[0])
     .find((value): value is string => typeof value === 'string' && value !== '');
 
-  return message ? { message, groupId: String(topGroup.key) } : null;
+  return message ? { message, groupId: String(groupId) } : null;
 }
 
 /**
@@ -167,14 +170,11 @@ export function getTopErrorOfSpans({
   return getTopError({
     apmEventClient,
     operationName: 'get_connection_failed_calls_top_error_of_spans',
+    where: (query) =>
+      query.pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ serviceName }}`.pipe`WHERE ${esql.col(
+        PARENT_ID
+      )} IN (${{ parentIds: spanIds }}) OR ${esql.col(SPAN_ID)} IN (${{ spanIds }})`,
     filter: [
-      { term: { [SERVICE_NAME]: serviceName } },
-      {
-        bool: {
-          should: [{ terms: { [PARENT_ID]: spanIds } }, { terms: { [SPAN_ID]: spanIds } }],
-          minimum_should_match: 1,
-        },
-      },
       ...rangeQuery(start, end + CONNECTION_JOIN_TIME_BUFFER_MS),
       ...environmentQuery(environment),
     ],
@@ -198,10 +198,10 @@ export function getTopErrorOfTransactions({
   return getTopError({
     apmEventClient,
     operationName: 'get_connection_failed_calls_top_error_of_transactions',
-    filter: [
-      { term: { [SERVICE_NAME]: serviceName } },
-      { terms: { [TRANSACTION_ID]: transactionIds } },
-      ...rangeQuery(start, end + CONNECTION_JOIN_TIME_BUFFER_MS),
-    ],
+    where: (query) =>
+      query.pipe`WHERE ${esql.col(SERVICE_NAME)} == ${{ serviceName }}`.pipe`WHERE ${esql.col(
+        TRANSACTION_ID
+      )} IN (${{ transactionIds }})`,
+    filter: [...rangeQuery(start, end + CONNECTION_JOIN_TIME_BUFFER_MS)],
   });
 }

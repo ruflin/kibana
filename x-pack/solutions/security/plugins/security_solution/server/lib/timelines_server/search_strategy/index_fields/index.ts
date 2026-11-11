@@ -6,7 +6,8 @@
  */
 
 import { from } from 'rxjs';
-import { isEmpty, get } from 'lodash';
+import { isEmpty } from 'lodash';
+import { esql } from '@elastic/esql';
 import deepmerge from 'deepmerge';
 import type { ElasticsearchClient, StartServicesAccessor } from '@kbn/core/server';
 import type { ISearchStrategy, SearchStrategyDependencies } from '@kbn/data-plugin/server';
@@ -23,6 +24,7 @@ import type {
   IndexFieldsStrategyResponse,
 } from '@kbn/timelines-plugin/common/search_strategy';
 import type { StartPlugins } from '../../../../plugin_contract';
+import { esqlRows, runEsqlRead, toCount } from '../../../../utils/esql/esql_read';
 import { parseOptions } from './parse_options';
 
 const apmIndexPattern = 'apm-*-transaction*';
@@ -58,12 +60,12 @@ export const findExistingIndices = async (
     indices
       .map(async (index) => {
         if ([apmIndexPattern, apmDataStreamsPattern].includes(index)) {
-          const searchResponse = await esClient.search({
-            index,
-            query: { match_all: {} },
-            size: 0,
+          // A pattern that matches no index is an error in ES|QL, where the search found no hits.
+          const response = await runEsqlRead({
+            esClient,
+            query: esql.from([index]).pipe`LIMIT 1`.pipe`STATS total = COUNT(*)`,
           });
-          return get(searchResponse, 'hits.total.value', 0) > 0;
+          return toCount(esqlRows(response)[0]?.total) > 0;
         }
         const searchResponse = await esClient.fieldCaps({
           index,

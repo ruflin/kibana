@@ -27,7 +27,6 @@ const createMlMock = () => ({
 const createEsClientMock = (mlMock = createMlMock()) => ({
   asInternalUser: {
     ml: mlMock,
-    search: jest.fn().mockResolvedValue({ hits: { hits: [] } }),
     esql: {
       query: jest.fn().mockResolvedValue({ columns: [], values: [] }),
     },
@@ -158,15 +157,41 @@ describe('adGetJobInfoTool', () => {
         context
       );
 
-      expect(esClient.asInternalUser.search).toHaveBeenCalledWith(
+      expect(esClient.asInternalUser.esql.query).toHaveBeenCalledWith(
         expect.objectContaining({
-          index: '.ml-notifications-*',
-          query: { term: { job_id: 'my-job' } },
+          query:
+            'FROM .ml-notifications-* METADATA _id, _index, _source | WHERE job_id == ?jobId | SORT timestamp DESC NULLS LAST | KEEP _id, _index, _source | LIMIT 50',
+          params: [{ jobId: 'my-job' }],
         })
       );
       expect((result as { results: Array<{ type: string }> }).results[0].type).toBe(
         ToolResultType.other
       );
+    });
+
+    it('operation=get_job_messages returns the messages as hits', async () => {
+      const esClient = createEsClientMock();
+      esClient.asInternalUser.esql.query.mockResolvedValue({
+        columns: [
+          { name: '_id', type: 'keyword' },
+          { name: '_index', type: 'keyword' },
+          { name: '_source', type: '_source' },
+        ],
+        values: [['abc', '.ml-notifications-000002', { job_id: 'my-job', message: 'hello' }]],
+      });
+
+      const result = await adGetJobInfoTool.handler(
+        { operation: 'get_job_messages', job_id: 'my-job' },
+        createContext(esClient)
+      );
+
+      expect((result as { results: Array<{ data: unknown }> }).results[0].data).toEqual([
+        {
+          _index: '.ml-notifications-000002',
+          _id: 'abc',
+          _source: { job_id: 'my-job', message: 'hello' },
+        },
+      ]);
     });
 
     it('operation=get_calendar_events returns error when job_id is missing', async () => {

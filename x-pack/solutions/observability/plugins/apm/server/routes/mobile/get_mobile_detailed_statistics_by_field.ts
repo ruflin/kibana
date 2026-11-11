@@ -5,7 +5,8 @@
  * 2.0.
  */
 
-import { kqlQuery, rangeQuery, termQuery } from '@kbn/observability-plugin/server';
+import { esql } from '@elastic/esql';
+import { kqlQuery, rangeQuery } from '@kbn/observability-plugin/server';
 import { keyBy } from 'lodash';
 import type { Coordinate } from '@kbn/apm-types';
 import { getBucketSize } from '../../../common/utils/get_bucket_size';
@@ -13,8 +14,13 @@ import { getOffsetInMs } from '../../../common/utils/get_offset_in_ms';
 import type { APMEventClient } from '../../lib/helpers/create_es_client/create_apm_event_client';
 import { environmentQuery } from '../../../common/utils/environment_query';
 import { SERVICE_NAME, TRANSACTION_DURATION } from '../../../common/es_fields/apm';
-import { getLatencyValue } from '../../lib/helpers/latency_aggregation_type';
-import { LatencyAggregationType } from '../../../common/latency_aggregation_types';
+import { esqlRows } from '../../lib/helpers/esql_read';
+import {
+  addTimeBucket,
+  getTimeBucketKeys,
+  toNumberOrNull,
+  whereTerm,
+} from '../../lib/helpers/esql_values';
 import { offsetPreviousPeriodCoordinates } from '../../../common/utils/offset_previous_period_coordinate';
 import { ApmDocumentType } from '../../../common/document_type';
 import { RollupInterval } from '../../../common/rollup';
@@ -59,13 +65,23 @@ async function getMobileDetailedStatisticsByField({
     offset,
   });
 
-  const { intervalString } = getBucketSize({
+  if (fieldValues.length === 0) {
+    return [];
+  }
+
+  const { bucketSize } = getBucketSize({
     start: startWithOffset,
     end: endWithOffset,
     minBucketSize: 60,
   });
+  const intervalMs = bucketSize * 1000;
+  const bucketKeys = getTimeBucketKeys({
+    start: startWithOffset,
+    end: endWithOffset,
+    intervalMs,
+  });
 
-  const response = await apmEventClient.search(`get_mobile_detailed_statistics_by_field`, {
+  const response = await apmEventClient.esql(`get_mobile_detailed_statistics_by_field`, {
     apm: {
       sources: [
         {
@@ -74,71 +90,67 @@ async function getMobileDetailedStatisticsByField({
         },
       ],
     },
-    track_total_hits: false,
-    size: 0,
-    query: {
+    // The field is not mapped in every index, so unmapped fields read as null.
+    query: (index) =>
+      addTimeBucket(
+        whereTerm(
+          esql.from(index).addSetCommand('unmapped_fields', 'nullify'),
+          SERVICE_NAME,
+          serviceName
+        ).pipe`WHERE ${esql.col(field)} IN (${{ fieldValues }})`,
+        intervalMs
+      ).pipe`STATS
+          doc_count = COUNT(*),
+          latency = AVG(${esql.col(TRANSACTION_DURATION)})
+        BY ${esql.col(field)}, bucket`.limit(fieldValues.length * bucketKeys.length),
+    filter: {
       bool: {
         filter: [
-          ...termQuery(SERVICE_NAME, serviceName),
           ...rangeQuery(startWithOffset, endWithOffset),
           ...environmentQuery(environment),
           ...kqlQuery(kuery),
         ],
       },
     },
-    aggs: {
-      detailed_statistics: {
-        terms: {
-          field,
-          include: fieldValues,
-          size: fieldValues.length,
-        },
-        aggs: {
-          timeseries: {
-            date_histogram: {
-              field: '@timestamp',
-              fixed_interval: intervalString,
-              min_doc_count: 0,
-              extended_bounds: {
-                min: startWithOffset,
-                max: endWithOffset,
-              },
-            },
-            aggs: {
-              latency: {
-                avg: {
-                  field: TRANSACTION_DURATION,
-                },
-              },
-            },
-          },
-        },
-      },
-    },
   });
 
-  const buckets = response.aggregations?.detailed_statistics.buckets ?? [];
-
-  return buckets.map((bucket) => {
-    const fieldName = bucket.key as string;
-    const latency = bucket.timeseries.buckets.map((timeseriesBucket) => ({
-      x: timeseriesBucket.key,
-      y: getLatencyValue({
-        latencyAggregationType: LatencyAggregationType.avg,
-        aggregation: timeseriesBucket.latency,
-      }),
-    }));
-    const throughput = bucket.timeseries.buckets.map((timeseriesBucket) => ({
-      x: timeseriesBucket.key,
-      y: timeseriesBucket.doc_count,
-    }));
-
-    return {
+  // Group the rows by field value, most documents first like a `terms` aggregation, and give
+  // every group all the buckets of the range.
+  const rowsByFieldValue = new Map<string, Map<number, Record<string, unknown>>>();
+  const docCountByFieldValue = new Map<string, number>();
+  for (const row of esqlRows(response)) {
+    const fieldName = String(row[field]);
+    const buckets = rowsByFieldValue.get(fieldName) ?? new Map<number, Record<string, unknown>>();
+    buckets.set(Number(row.bucket), row);
+    rowsByFieldValue.set(fieldName, buckets);
+    docCountByFieldValue.set(
       fieldName,
-      latency,
-      throughput,
-    };
-  });
+      (docCountByFieldValue.get(fieldName) ?? 0) + Number(row.doc_count)
+    );
+  }
+
+  return [...rowsByFieldValue.entries()]
+    .sort(
+      ([nameA], [nameB]) =>
+        (docCountByFieldValue.get(nameB) ?? 0) - (docCountByFieldValue.get(nameA) ?? 0) ||
+        nameA.localeCompare(nameB)
+    )
+    .map(([fieldName, buckets]) => {
+      const latency = bucketKeys.map((key) => ({
+        x: key,
+        y: toNumberOrNull(buckets.get(key)?.latency),
+      }));
+      const throughput = bucketKeys.map((key) => ({
+        x: key,
+        y: Number(buckets.get(key)?.doc_count ?? 0),
+      }));
+
+      return {
+        fieldName,
+        latency,
+        throughput,
+      };
+    });
 }
 
 export async function getMobileDetailedStatisticsByFieldPeriods({

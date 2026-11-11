@@ -18,3 +18,10 @@ export const getEsErrorReason = (error: esErrors.ResponseError): string => {
   const reason = (error.body as { error?: { reason?: unknown } } | undefined)?.error?.reason;
   return typeof reason === 'string' ? reason : error.message;
 };
+
+// ES|QL reports a missing concrete index as `verification_exception` / `Unknown index`, not 404.
+export const isEsqlUnknownIndexError = (error: unknown): boolean =>
+  isEsResponseErrorWithStatus(error, 400) &&
+  (error.body as { error?: { type?: string } } | undefined)?.error?.type ===
+    'verification_exception' &&
+  getEsErrorReason(error).includes('Unknown index');

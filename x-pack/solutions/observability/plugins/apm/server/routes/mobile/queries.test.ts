@@ -8,8 +8,8 @@
 import { MobileErrorType } from '@kbn/apm-types';
 import { getDeviceOSApp } from './get_device_os_app';
 import { getNCT } from './get_nct';
-import type { SearchParamsMock } from '../../utils/test_helpers';
-import { inspectSearchParams } from '../../utils/test_helpers';
+import type { EsqlParamsMock } from '../../utils/esql_test_helpers';
+import { inspectEsqlParams, toEsqlRequest } from '../../utils/esql_test_helpers';
 import { ENVIRONMENT_ALL } from '../../../common/environment_filter_values';
 import { ApmDocumentType } from '../../../common/document_type';
 
@@ -24,11 +24,15 @@ const baseParams = {
 };
 
 const crashTerm = { term: { 'error.type': 'crash' } };
-const transactionTypeTerm = { term: { 'transaction.type': 'mobile' } };
 const notCrash = { bool: { must_not: [crashTerm] } };
 
+/** The document type of the first source an `esql` call read. */
+const documentTypeOf = (mock: EsqlParamsMock) =>
+  (toEsqlRequest(mock.params).apm as { sources: Array<{ documentType: string }> }).sources[0]
+    .documentType;
+
 describe('mobile filters queries', () => {
-  let mock: SearchParamsMock;
+  let mock: EsqlParamsMock;
 
   afterEach(() => {
     mock.teardown();
@@ -36,17 +40,19 @@ describe('mobile filters queries', () => {
 
   describe('getDeviceOSApp', () => {
     it('queries transaction events when no error type is given', async () => {
-      mock = await inspectSearchParams(({ mockApmEventClient }) =>
+      mock = await inspectEsqlParams(({ mockApmEventClient }) =>
         getDeviceOSApp({ ...baseParams, apmEventClient: mockApmEventClient })
       );
 
-      expect(mock.params.apm.sources[0].documentType).toBe(ApmDocumentType.TransactionEvent);
-      expect(mock.params.query.bool.filter).toContainEqual(transactionTypeTerm);
-      expect(mock.params).toMatchSnapshot();
+      expect(documentTypeOf(mock)).toBe(ApmDocumentType.TransactionEvent);
+      expect(toEsqlRequest(mock.params).query).toContain(
+        'WHERE `transaction.type` == ?transaction_type_value'
+      );
+      expect(toEsqlRequest(mock.params)).toMatchSnapshot();
     });
 
     it('queries crash documents when the error type is crash', async () => {
-      mock = await inspectSearchParams(({ mockApmEventClient }) =>
+      mock = await inspectEsqlParams(({ mockApmEventClient }) =>
         getDeviceOSApp({
           ...baseParams,
           errorType: MobileErrorType.Crash,
@@ -54,14 +60,14 @@ describe('mobile filters queries', () => {
         })
       );
 
-      expect(mock.params.apm.sources[0].documentType).toBe(ApmDocumentType.ErrorEvent);
-      expect(mock.params.query.bool.filter).toContainEqual(crashTerm);
-      expect(mock.params.query.bool.filter).not.toContainEqual(transactionTypeTerm);
-      expect(mock.params).toMatchSnapshot();
+      expect(documentTypeOf(mock)).toBe(ApmDocumentType.ErrorEvent);
+      expect(toEsqlRequest(mock.params).filter?.bool?.filter).toContainEqual(crashTerm);
+      expect(toEsqlRequest(mock.params).query).not.toContain('transaction.type');
+      expect(toEsqlRequest(mock.params)).toMatchSnapshot();
     });
 
     it('excludes crash documents when the error type is error', async () => {
-      mock = await inspectSearchParams(({ mockApmEventClient }) =>
+      mock = await inspectEsqlParams(({ mockApmEventClient }) =>
         getDeviceOSApp({
           ...baseParams,
           errorType: MobileErrorType.Error,
@@ -70,26 +76,26 @@ describe('mobile filters queries', () => {
       );
 
       // Same document type as the crash case, so the must_not is what distinguishes them.
-      expect(mock.params.apm.sources[0].documentType).toBe(ApmDocumentType.ErrorEvent);
-      expect(mock.params.query.bool.filter).toContainEqual(notCrash);
-      expect(mock.params.query.bool.filter).not.toContainEqual(crashTerm);
-      expect(mock.params.query.bool.filter).not.toContainEqual(transactionTypeTerm);
-      expect(mock.params).toMatchSnapshot();
+      expect(documentTypeOf(mock)).toBe(ApmDocumentType.ErrorEvent);
+      expect(toEsqlRequest(mock.params).filter?.bool?.filter).toContainEqual(notCrash);
+      expect(toEsqlRequest(mock.params).filter?.bool?.filter).not.toContainEqual(crashTerm);
+      expect(toEsqlRequest(mock.params).query).not.toContain('transaction.type');
+      expect(toEsqlRequest(mock.params)).toMatchSnapshot();
     });
   });
 
   describe('getNCT', () => {
     it('queries span events when no error type is given', async () => {
-      mock = await inspectSearchParams(({ mockApmEventClient }) =>
+      mock = await inspectEsqlParams(({ mockApmEventClient }) =>
         getNCT({ ...baseParams, apmEventClient: mockApmEventClient })
       );
 
-      expect(mock.params.apm.sources[0].documentType).toBe(ApmDocumentType.SpanEvent);
-      expect(mock.params).toMatchSnapshot();
+      expect(documentTypeOf(mock)).toBe(ApmDocumentType.SpanEvent);
+      expect(toEsqlRequest(mock.params)).toMatchSnapshot();
     });
 
     it('queries crash documents when the error type is crash', async () => {
-      mock = await inspectSearchParams(({ mockApmEventClient }) =>
+      mock = await inspectEsqlParams(({ mockApmEventClient }) =>
         getNCT({
           ...baseParams,
           errorType: MobileErrorType.Crash,
@@ -97,13 +103,13 @@ describe('mobile filters queries', () => {
         })
       );
 
-      expect(mock.params.apm.sources[0].documentType).toBe(ApmDocumentType.ErrorEvent);
-      expect(mock.params.query.bool.filter).toContainEqual(crashTerm);
-      expect(mock.params).toMatchSnapshot();
+      expect(documentTypeOf(mock)).toBe(ApmDocumentType.ErrorEvent);
+      expect(toEsqlRequest(mock.params).filter?.bool?.filter).toContainEqual(crashTerm);
+      expect(toEsqlRequest(mock.params)).toMatchSnapshot();
     });
 
     it('excludes crash documents when the error type is error', async () => {
-      mock = await inspectSearchParams(({ mockApmEventClient }) =>
+      mock = await inspectEsqlParams(({ mockApmEventClient }) =>
         getNCT({
           ...baseParams,
           errorType: MobileErrorType.Error,
@@ -111,10 +117,10 @@ describe('mobile filters queries', () => {
         })
       );
 
-      expect(mock.params.apm.sources[0].documentType).toBe(ApmDocumentType.ErrorEvent);
-      expect(mock.params.query.bool.filter).toContainEqual(notCrash);
-      expect(mock.params.query.bool.filter).not.toContainEqual(crashTerm);
-      expect(mock.params).toMatchSnapshot();
+      expect(documentTypeOf(mock)).toBe(ApmDocumentType.ErrorEvent);
+      expect(toEsqlRequest(mock.params).filter?.bool?.filter).toContainEqual(notCrash);
+      expect(toEsqlRequest(mock.params).filter?.bool?.filter).not.toContainEqual(crashTerm);
+      expect(toEsqlRequest(mock.params)).toMatchSnapshot();
     });
   });
 });

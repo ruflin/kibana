@@ -5,11 +5,13 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import { orderBy, truncate } from 'lodash';
 import { unflattenObject } from '@kbn/object-utils';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import type { AssetCriticalityLevel, Entity, EntityRiskLevels } from '@kbn/entity-store/common';
 import { ENTITY_LATEST, getEntitiesAlias } from '@kbn/entity-store/common';
+import { esqlRows, runEsql } from '../../../../lib/esql/esql_read';
 import type { SignalCardId } from '../../../../../common/entity_analytics/home/constants';
 import { SIGNAL_CARD_IDS } from '../../../../../common/entity_analytics/home/constants';
 import type { EntityAnalyticsScope } from '../../../../../common/entity_analytics/ai_brief/scope';
@@ -51,15 +53,17 @@ export const readEntities = async ({
 
   // Every record is read: at most 200 ids per tile, about 1 KB each. The page's search isn't applied,
   // because the tiles don't apply it either.
-  const response = await esClient.search<Entity>({
-    index: getEntitiesAlias(ENTITY_LATEST, spaceId),
-    size: entityIds.length,
-    ignore_unavailable: true,
-    query: { bool: { filter: [{ terms: { 'entity.id': entityIds } }] } },
-    sort: [{ 'entity.id': 'asc' }],
+  const response = await runEsql({
+    esClient,
+    query: esql.from([getEntitiesAlias(ENTITY_LATEST, spaceId)], ['_source'])
+      .pipe`WHERE entity.id IN (${{ entityIds }})`.pipe`SORT entity.id ASC`.limit(entityIds.length),
+    ignoreUnknownIndex: true,
   });
+  const sources = esqlRows(response).map(({ _source: source }) =>
+    source !== null && typeof source === 'object' ? (source as Record<string, unknown>) : undefined
+  );
 
-  const candidates = response.hits.hits.flatMap(({ _source: source }): BriefCandidate[] => {
+  const candidates = sources.flatMap((source): BriefCandidate[] => {
     // The Entity Store can hold fields as dotted keys, such as `entity.id`.
     const record = source && (unflattenObject(source) as Entity);
     const id = record?.entity?.id;
@@ -91,9 +95,9 @@ export const readEntities = async ({
       };
     }),
     capturedCount: entityIds.length,
-    readCount: response.hits.hits.length,
+    readCount: sources.length,
     isTruncated: candidates.length > MAX_BRIEF_CANDIDATES,
-    notFoundCount: entityIds.length - response.hits.hits.length,
+    notFoundCount: entityIds.length - sources.length,
   };
 };
 

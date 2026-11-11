@@ -6,6 +6,7 @@
  */
 
 import { chunk, groupBy } from 'lodash';
+import { esql } from '@elastic/esql';
 import type { estypes } from '@elastic/elasticsearch';
 import type { SortResults } from '@elastic/elasticsearch/lib/api/types';
 import type { SavedObjectsClientContract, ElasticsearchClient } from '@kbn/core/server';
@@ -21,6 +22,7 @@ import type { AgentStatus, FleetServerAgent } from '../../../common/types';
 import {
   AGENTLESS_UNENROLLED_REASON,
   ALL_SPACES_ID,
+  ES_SEARCH_LIMIT,
   SO_SEARCH_LIMIT,
 } from '../../../common/constants';
 import { getSortConfig } from '../../../common';
@@ -30,6 +32,7 @@ import {
   buildPolicyBaseIdsWithFallbackEsFilter,
 } from '../../../common/services/version_specific_policies_utils';
 import { AGENTS_INDEX } from '../../constants';
+import { esqlRows, runEsqlRead, wherePolicyBaseIdsWithFallback } from '../esql_read';
 import {
   FleetError,
   isESClientError,
@@ -842,37 +845,34 @@ export async function getAgentVersionsForAgentPolicyIds(
   }
 
   try {
-    const {
-      hits: { hits },
-    } = await retryTransientEsErrors(() =>
-      esClient.search<
-        FleetServerAgent,
-        Record<'agent_versions', { buckets: Array<{ key: string; doc_count: number }> }>
-      >({
-        query: {
-          bool: {
-            filter: [buildPolicyBaseIdsWithFallbackEsFilter(agentPolicyIds)],
-          },
-        },
-        index: AGENTS_INDEX,
-        ignore_unavailable: true,
+    const response = await retryTransientEsErrors(() =>
+      runEsqlRead({
+        esClient,
+        query: wherePolicyBaseIdsWithFallback(esql.from([AGENTS_INDEX]), agentPolicyIds)
+          .pipe`KEEP policy_base_id, policy_id, local_metadata.elastic.agent.version`.limit(
+          ES_SEARCH_LIMIT
+        ),
+        ignoreUnknownIndex: true,
       })
     );
+    const hits = esqlRows(response).map((row) => ({
+      policy_base_id: row.policy_base_id as string | null,
+      policy_id: row.policy_id as string | null,
+      version: row['local_metadata.elastic.agent.version'] as string | null,
+    }));
 
     const groupedHits = groupBy(
       hits,
       (hit) =>
-        hit._source?.policy_base_id ??
-        (hit._source?.policy_id
-          ? removeVersionSuffixFromPolicyId(hit._source.policy_id)
-          : undefined)
+        hit.policy_base_id ??
+        (hit.policy_id ? removeVersionSuffixFromPolicyId(hit.policy_id) : undefined)
     );
 
     for (const [policyId, policyHits] of Object.entries(groupedHits)) {
       const versionCounts: Record<string, number> = {};
 
       for (const hit of policyHits) {
-        const agentVersion = hit._source?.local_metadata?.elastic?.agent?.version;
+        const agentVersion = hit.version;
 
         if (!agentVersion) {
           continue;
@@ -1071,20 +1071,15 @@ export async function filterAgentIdsByNamespace(
     return agentIds;
   }
   const namespaceKueryNode = _joinFilters(namespaceFilters);
-  const result = await retryTransientEsErrors(() =>
-    esClient.search({
-      index: AGENTS_INDEX,
-      query: {
-        bool: {
-          filter: [
-            { terms: { _id: agentIds } },
-            ...(namespaceKueryNode ? [toElasticsearchQuery(namespaceKueryNode)] : []),
-          ],
-        },
-      },
-      _source: false,
-      size: agentIds.length,
+  const response = await retryTransientEsErrors(() =>
+    runEsqlRead({
+      esClient,
+      query: esql.from([AGENTS_INDEX], ['_id']).where`_id IN (${{ agentIds }})`
+        .keep('_id')
+        .limit(agentIds.length),
+      // `namespaces` is multi-valued, so the namespace clause stays a Query DSL filter.
+      filter: namespaceKueryNode ? toElasticsearchQuery(namespaceKueryNode) : undefined,
     })
   );
-  return result.hits.hits.map((hit) => hit._id!);
+  return esqlRows(response).map((row) => row._id as string);
 }

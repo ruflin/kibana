@@ -5,7 +5,6 @@
  * 2.0.
  */
 
-import type { estypes } from '@elastic/elasticsearch';
 import type { SavedObjectsFindResponse } from '@kbn/core/server';
 import { elasticsearchServiceMock, savedObjectsClientMock } from '@kbn/core/server/mocks';
 import { loggerMock } from '@kbn/logging-mocks';
@@ -19,17 +18,22 @@ const spacesFindResponse = (ids: string[]) =>
     page: 1,
   } as unknown as SavedObjectsFindResponse);
 
-const indexedSpacesResponse = (ids: string[]) =>
-  ({
-    aggregations: {
-      space_ids: { buckets: ids.map((id) => ({ key: { space_id: id }, doc_count: 1 })) },
-    },
-  } as unknown as estypes.SearchResponse);
+const indexedSpacesResponse = (ids: Array<string | null>) => ({
+  columns: [{ name: 'space_id', type: 'keyword' }],
+  values: ids.map((id) => [id]),
+});
+
+const unknownIndexError = () =>
+  Object.assign(new Error('verification_exception'), {
+    statusCode: 400,
+    body: { error: { type: 'verification_exception', reason: 'Unknown index [.cases]' } },
+  });
 
 describe('sweepDeletedSpaces', () => {
   const setup = ({ indexed, existing }: { indexed: string[]; existing: string[] }) => {
     const esClient = elasticsearchServiceMock.createElasticsearchClient();
-    esClient.search.mockResolvedValue(indexedSpacesResponse(indexed));
+    // The same spaces in every analytics index; the sweep unions them.
+    esClient.esql.query.mockResolvedValue(indexedSpacesResponse(indexed) as never);
     esClient.deleteByQuery.mockResolvedValue({ deleted: 3 });
 
     const savedObjectsClient = savedObjectsClientMock.create();
@@ -75,5 +79,54 @@ describe('sweepDeletedSpaces', () => {
     await sweep();
 
     expect(esClient.deleteByQuery).not.toHaveBeenCalled();
+  });
+
+  it('reads the distinct space ids of each analytics index, paging by keyset on the last id', async () => {
+    const { esClient, sweep } = setup({ indexed: [], existing: ['default'] });
+    const fullPage = Array.from({ length: 1000 }, (_, i) => `space-${String(i).padStart(4, '0')}`);
+    esClient.esql.query
+      .mockResolvedValueOnce(indexedSpacesResponse(fullPage) as never)
+      .mockResolvedValueOnce(indexedSpacesResponse(['space-zzzz']) as never)
+      .mockResolvedValue(indexedSpacesResponse([]) as never);
+
+    await sweep();
+
+    expect(esClient.esql.query).toHaveBeenCalledTimes(4);
+    expect(esClient.esql.query.mock.calls[0][0]).toEqual({
+      query:
+        'FROM .cases | WHERE space_id IS NOT NULL | STATS BY space_id | SORT space_id ASC | LIMIT 1000',
+    });
+    expect(esClient.esql.query.mock.calls[1][0]).toEqual({
+      query:
+        'FROM .cases | WHERE space_id IS NOT NULL AND space_id > ?after | STATS BY space_id | SORT space_id ASC | LIMIT 1000',
+      params: [{ after: 'space-0999' }],
+    });
+    expect(esClient.esql.query.mock.calls[2][0]).toMatchObject({
+      query: expect.stringMatching(/^FROM \.cases-activity \|/),
+    });
+    expect(esClient.deleteByQuery.mock.calls[0][0]).toMatchObject({
+      query: { terms: { space_id: expect.arrayContaining(['space-0000', 'space-zzzz']) } },
+    });
+  });
+
+  it('skips an analytics index that does not exist yet and sweeps the others', async () => {
+    const { esClient, sweep } = setup({ indexed: [], existing: ['default'] });
+    esClient.esql.query
+      .mockRejectedValueOnce(unknownIndexError())
+      .mockResolvedValueOnce(indexedSpacesResponse(['deleted-space']) as never)
+      .mockResolvedValue(indexedSpacesResponse([]) as never);
+
+    await sweep();
+
+    expect(esClient.deleteByQuery.mock.calls[0][0]).toMatchObject({
+      query: { terms: { space_id: ['deleted-space'] } },
+    });
+  });
+
+  it('propagates other Elasticsearch errors', async () => {
+    const { esClient, sweep } = setup({ indexed: [], existing: ['default'] });
+    esClient.esql.query.mockRejectedValue(new Error('boom'));
+
+    await expect(sweep()).rejects.toThrow('boom');
   });
 });

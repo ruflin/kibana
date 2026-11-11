@@ -6,8 +6,9 @@
  */
 
 import type { QueryDslQueryContainer } from '@elastic/elasticsearch/lib/api/types';
+import type { ComposerQuery } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
-import type { ESSearchRequest, InferSearchResponseOf } from '@kbn/es-types';
+import type { ESQLSearchResponse, ESSearchRequest, InferSearchResponseOf } from '@kbn/es-types';
 import type {
   AggregationField,
   BaseFlameGraph,
@@ -22,6 +23,16 @@ export interface ProfilingESClient {
     operationName: string,
     searchRequest: TSearchRequest
   ): Promise<InferSearchResponseOf<TDocument, TSearchRequest>>;
+  /**
+   * Runs a composed ES|QL query. The Query DSL `filter` carries the clauses that are not a plain
+   * `WHERE` (KQL, date ranges with a format). An index pattern that matches nothing yields an
+   * empty response, as the lenient DSL searches did.
+   */
+  esql(
+    operationName: string,
+    query: ComposerQuery,
+    filter?: QueryDslQueryContainer
+  ): Promise<ESQLSearchResponse>;
   profilingStacktraces(params: {
     query: QueryDslQueryContainer;
     sampleSize: number;

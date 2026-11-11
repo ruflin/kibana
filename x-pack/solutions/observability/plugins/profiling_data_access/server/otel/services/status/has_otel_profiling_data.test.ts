@@ -11,45 +11,47 @@ import { hasOtelProfilingData } from './has_otel_profiling_data';
 
 describe('hasOtelProfilingData', () => {
   function createClient() {
-    const search = jest.fn();
-    const client = { search } as unknown as ProfilingESClient;
-    return { client, search };
+    const esqlFn = jest.fn();
+    const client = { esql: esqlFn } as unknown as ProfilingESClient;
+    return { client, esqlFn };
   }
 
-  it('searches the OTel profiling events data streams leniently', async () => {
-    const { client, search } = createClient();
-    search.mockResolvedValue({ hits: { total: { value: 0 } } });
+  const foundResponse = {
+    columns: [{ name: '@timestamp', type: 'date' }],
+    values: [['2026-01-01']],
+  };
+  const emptyResponse = { columns: [], values: [] };
+
+  it('queries one document of the OTel profiling events data streams', async () => {
+    const { client, esqlFn } = createClient();
+    esqlFn.mockResolvedValue(emptyResponse);
 
     await hasOtelProfilingData({ client });
 
-    expect(search).toHaveBeenCalledWith('has_any_otel_profiling_data', {
-      index: PROFILING_EVENTS_INDEX_BY_SCHEMA[ProfilingSchema.OTEL],
-      size: 0,
-      track_total_hits: 1,
-      terminate_after: 1,
-      ignore_unavailable: true,
-      allow_no_indices: true,
-    });
+    expect(esqlFn).toHaveBeenCalledWith('has_any_otel_profiling_data', expect.anything());
+    expect(esqlFn.mock.calls[0][1].toRequest().query).toBe(
+      `FROM ${PROFILING_EVENTS_INDEX_BY_SCHEMA[ProfilingSchema.OTEL]} | LIMIT 1`
+    );
   });
 
-  it('returns true when there are hits', async () => {
-    const { client, search } = createClient();
-    search.mockResolvedValue({ hits: { total: { value: 1 } } });
+  it('returns true when there is a row', async () => {
+    const { client, esqlFn } = createClient();
+    esqlFn.mockResolvedValue(foundResponse);
 
     await expect(hasOtelProfilingData({ client })).resolves.toBe(true);
   });
 
-  it('returns false when there are no hits', async () => {
-    const { client, search } = createClient();
-    search.mockResolvedValue({ hits: { total: { value: 0 } } });
+  it('returns false when there is no row', async () => {
+    const { client, esqlFn } = createClient();
+    esqlFn.mockResolvedValue(emptyResponse);
 
     await expect(hasOtelProfilingData({ client })).resolves.toBe(false);
   });
 
-  it('rethrows search errors', async () => {
-    const { client, search } = createClient();
+  it('rethrows query errors', async () => {
+    const { client, esqlFn } = createClient();
     const error = new Error('security_exception');
-    search.mockRejectedValue(error);
+    esqlFn.mockRejectedValue(error);
 
     await expect(hasOtelProfilingData({ client })).rejects.toBe(error);
   });

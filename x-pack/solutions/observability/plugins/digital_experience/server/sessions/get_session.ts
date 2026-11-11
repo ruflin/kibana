@@ -5,13 +5,8 @@
  * 2.0.
  */
 
-import {
-  EVENT_OUTCOME,
-  EXCEPTION_MESSAGE,
-  EXCEPTION_TYPE,
-  OTEL_EVENT_NAME,
-  URL_FULL,
-} from '@kbn/apm-types';
+import { EVENT_OUTCOME, EXCEPTION_MESSAGE, EXCEPTION_TYPE, URL_FULL } from '@kbn/apm-types';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 import { CORE_WEB_VITALS, type CoreWebVital } from '../../common/core_web_vitals';
 import {
@@ -21,7 +16,6 @@ import {
   EVENT_NAVIGATION,
   EVENT_USER_ACTION_CLICK,
   EVENT_WEB_VITAL,
-  OTEL_SPAN_NAME,
   WEB_VITAL_NAME,
   WEB_VITAL_VALUE,
 } from '../../common/otel_data';
@@ -36,6 +30,7 @@ import {
   type SessionTimelineEvent,
   type SessionTimelineEventKind,
 } from '../../common/sessions';
+import { esqlRows, runEsqlRead } from '../lib/esql_read';
 import { toSessionSummary, type SessionDocument } from './list_sessions';
 import { SOURCE_SERVICE_NAME_FIELD, SOURCE_SESSION_ID_FIELD } from './source_fields';
 
@@ -43,17 +38,6 @@ import { SOURCE_SERVICE_NAME_FIELD, SOURCE_SESSION_ID_FIELD } from './source_fie
 export const SESSION_TIMELINE_SIZE = 1000;
 /** Widens the raw event window so events just before the summary start are not cut off. */
 const TIMELINE_SLACK_MS = 60_000;
-
-const TIMELINE_SOURCE = [
-  '@timestamp',
-  OTEL_SPAN_NAME,
-  OTEL_EVENT_NAME,
-  'duration',
-  'trace_id',
-  'span_id',
-  'attributes',
-  'resource.attributes',
-];
 
 export interface OtelSource {
   '@timestamp'?: string;
@@ -256,34 +240,30 @@ export const getSession = async (
   client: ElasticsearchClient,
   { serviceName, sessionId }: { serviceName: string; sessionId: string }
 ): Promise<SessionDetailResponse | null> => {
-  const summaryResponse = await client.search<SessionDocument>({
-    index: SESSIONS_INDEX_PATTERN,
-    ignore_unavailable: true,
-    allow_no_indices: true,
-    size: 1,
-    sort: [{ end_time: 'desc' }],
-    query: {
-      bool: {
-        filter: [{ term: { 'service.name': serviceName } }, { term: { 'session.id': sessionId } }],
-      },
-    },
+  // A missing sessions index has no session, as the DSL search with `ignore_unavailable` had.
+  const summaryResponse = await runEsqlRead({
+    esClient: client,
+    query: esql.from([SESSIONS_INDEX_PATTERN], ['_source']).pipe`WHERE service.name == ${{
+      serviceName,
+    }} AND session.id == ${{ sessionId }}`.pipe`SORT end_time DESC NULLS LAST`
+      .pipe`KEEP _source`.limit(1),
   });
-  const doc = summaryResponse.hits.hits[0]?._source;
+  const doc = esqlRows(summaryResponse)[0]?._source as SessionDocument | undefined;
   if (!doc) {
     return null;
   }
   const session: SessionSummary = toSessionSummary(doc);
   const startMs = Date.parse(session.startTime);
 
-  const eventsResponse = await client.search<OtelSource>({
-    index: [...SESSIONS_SOURCE_INDICES],
-    ignore_unavailable: true,
-    allow_no_indices: true,
-    size: SESSION_TIMELINE_SIZE,
-    track_total_hits: SESSION_TIMELINE_SIZE + 1,
-    sort: [{ '@timestamp': 'asc' }],
-    _source: TIMELINE_SOURCE,
-    query: {
+  // The raw events are OTel documents whose session id and service name are attributes, so those
+  // terms (and the date range) stay in the Query DSL filter. One more row than the timeline size
+  // shows whether the timeline is truncated. `_source` is the whole document, which the DSL search
+  // narrowed to the timestamp, names, duration, ids and attributes; the extra fields are ignored.
+  const eventsResponse = await runEsqlRead({
+    esClient: client,
+    query: esql.from([...SESSIONS_SOURCE_INDICES], ['_source']).pipe`SORT @timestamp ASC NULLS LAST`
+      .pipe`KEEP _source`.limit(SESSION_TIMELINE_SIZE + 1),
+    filter: {
       bool: {
         filter: [
           { term: { [SOURCE_SESSION_ID_FIELD]: sessionId } },
@@ -304,11 +284,11 @@ export const getSession = async (
     },
   });
 
-  const sources = eventsResponse.hits.hits.flatMap((hit) => (hit._source ? [hit._source] : []));
-  const total =
-    typeof eventsResponse.hits.total === 'number'
-      ? eventsResponse.hits.total
-      : eventsResponse.hits.total?.value ?? sources.length;
+  const allSources = esqlRows(eventsResponse).flatMap(({ _source }) =>
+    _source !== null && typeof _source === 'object' ? [_source as OtelSource] : []
+  );
+  const sources = allSources.slice(0, SESSION_TIMELINE_SIZE);
+  const total = allSources.length;
 
   return {
     session,

@@ -1,29 +1,7 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[
-  `mobile filters queries getDeviceOSApp excludes crash documents when the error type is error 1`
-] = `
+exports[`mobile filters queries getDeviceOSApp excludes crash documents when the error type is error 1`] = `
 Object {
-  "aggs": Object {
-    "appVersions": Object {
-      "terms": Object {
-        "field": "service.version",
-        "size": 10,
-      },
-    },
-    "devices": Object {
-      "terms": Object {
-        "field": "device.model.identifier",
-        "size": 10,
-      },
-    },
-    "osVersions": Object {
-      "terms": Object {
-        "field": "host.os.version",
-        "size": 10,
-      },
-    },
-  },
   "apm": Object {
     "sources": Array [
       Object {
@@ -32,14 +10,9 @@ Object {
       },
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
-        Object {
-          "term": Object {
-            "service.name": "serviceName",
-          },
-        },
         Object {
           "bool": Object {
             "must_not": Array [
@@ -63,35 +36,17 @@ Object {
       ],
     },
   },
-  "size": 0,
-  "track_total_hits": false,
+  "params": Array [
+    Object {
+      "service_name_value": "serviceName",
+    },
+  ],
+  "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`service.name\` == ?service_name_value | WHERE \`device.model.identifier\` IS NOT NULL | STATS doc_count = COUNT(*) BY \`device.model.identifier\` | SORT doc_count DESC, \`device.model.identifier\` ASC | LIMIT 10000",
 }
 `;
 
-exports[
-  `mobile filters queries getDeviceOSApp queries crash documents when the error type is crash 1`
-] = `
+exports[`mobile filters queries getDeviceOSApp queries crash documents when the error type is crash 1`] = `
 Object {
-  "aggs": Object {
-    "appVersions": Object {
-      "terms": Object {
-        "field": "service.version",
-        "size": 10,
-      },
-    },
-    "devices": Object {
-      "terms": Object {
-        "field": "device.model.identifier",
-        "size": 10,
-      },
-    },
-    "osVersions": Object {
-      "terms": Object {
-        "field": "host.os.version",
-        "size": 10,
-      },
-    },
-  },
   "apm": Object {
     "sources": Array [
       Object {
@@ -100,14 +55,9 @@ Object {
       },
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
-        Object {
-          "term": Object {
-            "service.name": "serviceName",
-          },
-        },
         Object {
           "term": Object {
             "error.type": "crash",
@@ -125,35 +75,17 @@ Object {
       ],
     },
   },
-  "size": 0,
-  "track_total_hits": false,
+  "params": Array [
+    Object {
+      "service_name_value": "serviceName",
+    },
+  ],
+  "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`service.name\` == ?service_name_value | WHERE \`device.model.identifier\` IS NOT NULL | STATS doc_count = COUNT(*) BY \`device.model.identifier\` | SORT doc_count DESC, \`device.model.identifier\` ASC | LIMIT 10000",
 }
 `;
 
-exports[
-  `mobile filters queries getDeviceOSApp queries transaction events when no error type is given 1`
-] = `
+exports[`mobile filters queries getDeviceOSApp queries transaction events when no error type is given 1`] = `
 Object {
-  "aggs": Object {
-    "appVersions": Object {
-      "terms": Object {
-        "field": "service.version",
-        "size": 10,
-      },
-    },
-    "devices": Object {
-      "terms": Object {
-        "field": "device.model.identifier",
-        "size": 10,
-      },
-    },
-    "osVersions": Object {
-      "terms": Object {
-        "field": "host.os.version",
-        "size": 10,
-      },
-    },
-  },
   "apm": Object {
     "sources": Array [
       Object {
@@ -162,19 +94,9 @@ Object {
       },
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
-        Object {
-          "term": Object {
-            "service.name": "serviceName",
-          },
-        },
-        Object {
-          "term": Object {
-            "transaction.type": "mobile",
-          },
-        },
         Object {
           "range": Object {
             "@timestamp": Object {
@@ -187,21 +109,20 @@ Object {
       ],
     },
   },
-  "size": 0,
-  "track_total_hits": false,
+  "params": Array [
+    Object {
+      "service_name_value": "serviceName",
+    },
+    Object {
+      "transaction_type_value": "mobile",
+    },
+  ],
+  "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`service.name\` == ?service_name_value | WHERE \`transaction.type\` == ?transaction_type_value | WHERE \`device.model.identifier\` IS NOT NULL | STATS doc_count = COUNT(*) BY \`device.model.identifier\` | SORT doc_count DESC, \`device.model.identifier\` ASC | LIMIT 10000",
 }
 `;
 
 exports[`mobile filters queries getNCT excludes crash documents when the error type is error 1`] = `
 Object {
-  "aggs": Object {
-    "netConnectionTypes": Object {
-      "terms": Object {
-        "field": "network.connection.type",
-        "size": 10,
-      },
-    },
-  },
   "apm": Object {
     "sources": Array [
       Object {
@@ -210,14 +131,9 @@ Object {
       },
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
-        Object {
-          "term": Object {
-            "service.name": "serviceName",
-          },
-        },
         Object {
           "bool": Object {
             "must_not": Array [
@@ -241,21 +157,17 @@ Object {
       ],
     },
   },
-  "size": 0,
-  "track_total_hits": false,
+  "params": Array [
+    Object {
+      "service_name_value": "serviceName",
+    },
+  ],
+  "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`service.name\` == ?service_name_value | WHERE \`network.connection.type\` IS NOT NULL | STATS doc_count = COUNT(*) BY \`network.connection.type\` | SORT doc_count DESC, \`network.connection.type\` ASC | LIMIT 10000",
 }
 `;
 
 exports[`mobile filters queries getNCT queries crash documents when the error type is crash 1`] = `
 Object {
-  "aggs": Object {
-    "netConnectionTypes": Object {
-      "terms": Object {
-        "field": "network.connection.type",
-        "size": 10,
-      },
-    },
-  },
   "apm": Object {
     "sources": Array [
       Object {
@@ -264,14 +176,9 @@ Object {
       },
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
-        Object {
-          "term": Object {
-            "service.name": "serviceName",
-          },
-        },
         Object {
           "term": Object {
             "error.type": "crash",
@@ -289,21 +196,17 @@ Object {
       ],
     },
   },
-  "size": 0,
-  "track_total_hits": false,
+  "params": Array [
+    Object {
+      "service_name_value": "serviceName",
+    },
+  ],
+  "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`service.name\` == ?service_name_value | WHERE \`network.connection.type\` IS NOT NULL | STATS doc_count = COUNT(*) BY \`network.connection.type\` | SORT doc_count DESC, \`network.connection.type\` ASC | LIMIT 10000",
 }
 `;
 
 exports[`mobile filters queries getNCT queries span events when no error type is given 1`] = `
 Object {
-  "aggs": Object {
-    "netConnectionTypes": Object {
-      "terms": Object {
-        "field": "network.connection.type",
-        "size": 10,
-      },
-    },
-  },
   "apm": Object {
     "sources": Array [
       Object {
@@ -312,14 +215,9 @@ Object {
       },
     ],
   },
-  "query": Object {
+  "filter": Object {
     "bool": Object {
       "filter": Array [
-        Object {
-          "term": Object {
-            "service.name": "serviceName",
-          },
-        },
         Object {
           "range": Object {
             "@timestamp": Object {
@@ -332,7 +230,11 @@ Object {
       ],
     },
   },
-  "size": 0,
-  "track_total_hits": false,
+  "params": Array [
+    Object {
+      "service_name_value": "serviceName",
+    },
+  ],
+  "query": "SET unmapped_fields = \\"nullify\\"; FROM myIndex | WHERE \`service.name\` == ?service_name_value | WHERE \`network.connection.type\` IS NOT NULL | STATS doc_count = COUNT(*) BY \`network.connection.type\` | SORT doc_count DESC, \`network.connection.type\` ASC | LIMIT 10000",
 }
 `;

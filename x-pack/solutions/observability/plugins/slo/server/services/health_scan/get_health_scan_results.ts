@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { IScopedClusterClient } from '@kbn/core/server';
 import type { SortResults } from '@elastic/elasticsearch/lib/api/types';
 import type { GetHealthScanResultsResponse, HealthScanResultResponse } from '@kbn/slo-schema';
@@ -12,6 +13,7 @@ import type { TaskManagerStartContract } from '@kbn/task-manager-plugin/server';
 import { HEALTH_DATA_STREAM_NAME } from '../../../common/constants';
 import { IllegalArgumentError } from '../../errors';
 import type { HealthDocument } from '../tasks/health_scan_task/types';
+import { runEsqlRows } from '../utils/esql_read';
 import { decodeSearchAfter, encodeSearchAfter } from '../utils/search_after';
 
 interface Dependencies {
@@ -37,7 +39,7 @@ export async function getHealthScanResults(
     throw new IllegalArgumentError('Size must be between 1 and 100');
   }
 
-  const [scanTask, { total, results, nextSearchAfter }, summaryAgg] = await Promise.all([
+  const [scanTask, { total, results, nextSearchAfter }, summary] = await Promise.all([
     getScanTask(taskManager, scanId),
     getScanResults(scopedClusterClient, {
       size,
@@ -55,9 +57,9 @@ export async function getHealthScanResults(
     results,
     scan: {
       scanId,
-      latestTimestamp: summaryAgg?.latest_timestamp.value_as_string ?? new Date().toISOString(),
-      total: summaryAgg?.processed.value ?? 0,
-      problematic: summaryAgg?.problematic.doc_count ?? 0,
+      latestTimestamp: summary.latestTimestamp ?? new Date().toISOString(),
+      total: summary.processed,
+      problematic: summary.problematic,
       status: isScanScheduledSoon
         ? 'pending'
         : scanTask?.state.isDone === false
@@ -128,36 +130,17 @@ async function getScanSummary(
   scanId: string,
   spaceIds: string[]
 ) {
-  interface SummaryAgg {
-    latest_timestamp: { value: number; value_as_string: string };
-    processed: { value: number };
-    problematic: { doc_count: number };
-  }
-
-  const summary = await scopedClusterClient.asInternalUser.search<unknown, SummaryAgg>({
-    index: HEALTH_DATA_STREAM_NAME,
-    size: 0,
-    query: { bool: { filter: [{ term: { scanId } }, { terms: { spaceId: spaceIds } }] } },
-    aggs: {
-      latest_timestamp: {
-        max: {
-          field: '@timestamp',
-        },
-      },
-      processed: {
-        value_count: {
-          field: 'scanId',
-        },
-      },
-      problematic: {
-        filter: {
-          term: {
-            'health.isProblematic': true,
-          },
-        },
-      },
-    },
+  const [row] = await runEsqlRows({
+    esClient: scopedClusterClient.asInternalUser,
+    query: esql.from([HEALTH_DATA_STREAM_NAME]).pipe`WHERE scanId == ${{
+      scanId,
+    }} AND spaceId IN (${{ spaceIds }})`
+      .pipe`STATS latestTimestamp = MAX(@timestamp), processed = COUNT(scanId), problematic = COUNT(*) WHERE health.isProblematic == true`,
   });
 
-  return summary.aggregations;
+  return {
+    latestTimestamp: typeof row?.latestTimestamp === 'string' ? row.latestTimestamp : undefined,
+    processed: Number(row?.processed ?? 0),
+    problematic: Number(row?.problematic ?? 0),
+  };
 }
