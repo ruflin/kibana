@@ -5,10 +5,11 @@
  * 2.0.
  */
 
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 
 import { AGENTS_INDEX } from '../../../common';
-import { buildPolicyBaseIdsWithFallbackEsFilter } from '../../../common/services/version_specific_policies_utils';
+import { esqlRows, runEsqlRead, wherePolicyBaseIdsWithFallback } from '../esql_read';
 
 /**
  * Given a list of Agent Policy IDs, an array will be returned with
@@ -24,18 +25,14 @@ export const getAgentIdsForAgentPolicies = async (
     return [];
   }
 
-  const res = await esClient.search({
-    index: AGENTS_INDEX,
-    ignore_unavailable: true,
-    size: 100, // TODO: check if reasonable value
-    _source: false,
-    query: {
-      bool: {
-        // Agents on `<id>#sentinel` or a version specific policy count for the base policy
-        filter: [buildPolicyBaseIdsWithFallbackEsFilter(agentPolicyIds)],
-      },
-    },
+  // Agents on `<id>#sentinel` or a version specific policy count for the base policy
+  const response = await runEsqlRead({
+    esClient,
+    query: wherePolicyBaseIdsWithFallback(esql.from([AGENTS_INDEX], ['_id']), agentPolicyIds)
+      .keep('_id')
+      .limit(100), // TODO: check if reasonable value
+    ignoreUnknownIndex: true,
   });
 
-  return res.hits.hits.map((hit) => hit._id!);
+  return esqlRows(response).map((row) => row._id as string);
 };

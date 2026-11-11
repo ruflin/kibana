@@ -8,6 +8,7 @@ import apm from 'elastic-apm-node';
 import { withActiveSpan } from '@kbn/tracing-utils';
 import { groupBy, isEqual, keyBy, omit, pick, uniq } from 'lodash';
 import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
+import { esql } from '@elastic/esql';
 import pMap from 'p-map';
 import { lt, minVersion, gt, rcompare, coerce } from 'semver';
 import type {
@@ -78,6 +79,7 @@ import {
   AGENTLESS_AGENT_POLICY_INACTIVITY_TIMEOUT,
   AGENTLESS_UNENROLLED_REASON,
   AGENT_POLICY_INDEX,
+  AGENT_POLICY_VERSION_SEPARATOR,
   agentPolicyStatuses,
   FLEET_ELASTIC_AGENT_PACKAGE,
   UUID_V5_NAMESPACE,
@@ -156,6 +158,7 @@ import { bulkInstallPackages, getPackageInfo } from './epm/packages';
 import { runWithCache } from './epm/packages/cache';
 import { ensureInstalledPackage } from './epm/packages/install';
 import { unenrollForAgentPolicyId } from './agents';
+import { esqlRows, runEsqlRead } from './esql_read';
 import { getAgentCountForAgentPolicies } from './agent_policies/agent_policy_agent_count';
 import {
   buildCurrentRevisionFilter,
@@ -1686,15 +1689,17 @@ class AgentPolicyService {
 
     // Prevent deleting policy when assigned agents are inactive. active:true covers
     // online, offline, and inactive agents; active:false is unenrolled.
-    const { count: total } = await esClient.count({
-      index: AGENTS_INDEX,
-      ignore_unavailable: true,
-      query: {
-        bool: {
-          filter: [{ term: { active: 'true' } }, buildPolicyIdOrVariantsEsFilter(id)],
-        },
-      },
+    // The policy id itself or any of its `<id>#<version>` variants, as `buildPolicyIdOrVariantsEsFilter`.
+    const countResponse = await runEsqlRead({
+      esClient,
+      query: esql.from([AGENTS_INDEX]).where`active == TRUE AND (policy_id == ${{
+        policyId: id,
+      }} OR STARTS_WITH(policy_id, ${{
+        variantPrefix: `${id}${AGENT_POLICY_VERSION_SEPARATOR}`,
+      }}))`.pipe`STATS total = COUNT(*)`,
+      ignoreUnknownIndex: true,
     });
+    const total = (esqlRows(countResponse)[0]?.total as number | undefined) ?? 0;
 
     if (total > 0 && !agentPolicy?.supports_agentless) {
       throw new FleetError(
@@ -2236,25 +2241,16 @@ class AgentPolicyService {
       return latestRevisionByPolicyId;
     }
 
-    const res = await esClient.search<
-      unknown,
-      { policies: { buckets: Array<{ key: string; latest_revision: { value: number | null } }> } }
-    >({
-      index: AGENT_POLICY_INDEX,
-      ignore_unavailable: true,
-      size: 0,
-      query: { terms: { policy_id: agentPolicyIds } },
-      aggs: {
-        policies: {
-          terms: { field: 'policy_id', size: agentPolicyIds.length, execution_hint: 'map' },
-          aggs: { latest_revision: { max: { field: 'revision_idx' } } },
-        },
-      },
+    const res = await runEsqlRead({
+      esClient,
+      query: esql.from([AGENT_POLICY_INDEX]).where`policy_id IN (${{ agentPolicyIds }})`
+        .pipe`STATS latest_revision = MAX(revision_idx) BY policy_id`.limit(agentPolicyIds.length),
+      ignoreUnknownIndex: true,
     });
 
-    for (const bucket of res.aggregations?.policies?.buckets ?? []) {
-      if (bucket.latest_revision.value !== null) {
-        latestRevisionByPolicyId.set(bucket.key, bucket.latest_revision.value);
+    for (const row of esqlRows(res)) {
+      if (row.latest_revision !== null && row.latest_revision !== undefined) {
+        latestRevisionByPolicyId.set(row.policy_id as string, row.latest_revision as number);
       }
     }
 

@@ -6,7 +6,7 @@
  */
 import type { estypes } from '@elastic/elasticsearch';
 
-import { AGENT_ACTIONS_INDEX, AGENT_ACTIONS_RESULTS_INDEX } from '../../../common';
+import { AGENT_ACTIONS_INDEX } from '../../../common';
 
 import {
   AgentlessAgentRestrictionError,
@@ -270,16 +270,14 @@ describe('unenroll', () => {
           } as any;
         }
 
-        if (request?.index === AGENT_ACTIONS_RESULTS_INDEX) {
-          return {
-            hits: {
-              hits: [],
-            },
-          };
-        }
-
         return { hits: { hits: [agentInRegularDoc, agentInRegularDoc2] } };
       });
+
+      // no action results yet
+      esClient.esql.query.mockResolvedValue({
+        columns: [{ name: 'agent_id', type: 'keyword' }],
+        values: [],
+      } as any);
 
       const idsToUnenroll = [agentInRegularDoc._id, agentInRegularDoc2._id];
       await unenrollAgents(soClient, esClient, {
@@ -313,18 +311,14 @@ describe('unenroll', () => {
           } as any;
         }
 
-        if (request?.index === AGENT_ACTIONS_RESULTS_INDEX) {
-          return {
-            hits: {
-              hits: [
-                { _source: { action_id: 'other-action1', agent_id: 'agent-in-regular-policy' } },
-              ],
-            },
-          };
-        }
-
         return { hits: { hits: [agentInRegularDoc, agentInRegularDoc2] } };
       });
+
+      // the unenroll action already has a result for one of the agents
+      esClient.esql.query.mockResolvedValue({
+        columns: [{ name: 'agent_id', type: 'keyword' }],
+        values: [['agent-in-regular-policy']],
+      } as any);
 
       const idsToUnenroll = [agentInRegularDoc._id, agentInRegularDoc2._id];
       await unenrollAgents(soClient, esClient, {
@@ -334,6 +328,9 @@ describe('unenroll', () => {
 
       // agent and force unenroll results updated, no other action results
       expect(esClient.bulk.mock.calls.length).toEqual(2);
+      expect((esClient.esql.query.mock.calls[0][0] as any).query).toBe(
+        'FROM .fleet-actions-results | WHERE action_id == ?actionId AND (agent_id IN (?commonAgents)) | KEEP agent_id | LIMIT 1'
+      );
     });
 
     it('cannot unenroll from a hosted agent policy with revoke=true', async () => {

@@ -12,7 +12,10 @@ import pMap from 'p-map';
 
 import { merge, partition, uniq } from 'lodash';
 
+import { esql } from '@elastic/esql';
+
 import { appContextService } from '../app_context';
+import { esqlRows, runEsqlRead } from '../esql_read';
 import { agentPolicyService } from '../agent_policy';
 import type {
   Agent,
@@ -457,14 +460,14 @@ export async function cancelAgentAction(
     // can disable unenroll_timeout on those policies after all batches are done.
     const policyIds: string[] = [];
     if (action.type === 'UNENROLL') {
-      const agentsRes = await esClient.search<{ policy_id?: string }>({
-        index: '.fleet-agents',
-        query: { terms: { _id: action.agents! } },
-        _source: ['policy_id'],
-        size: action.agents!.length,
+      const agentsRes = await runEsqlRead({
+        esClient,
+        query: esql.from(['.fleet-agents'], ['_id']).where`_id IN (${{ agentIds: action.agents! }})`
+          .keep('policy_id')
+          .limit(action.agents!.length),
       });
-      for (const hit of agentsRes.hits.hits) {
-        if (hit._source?.policy_id) policyIds.push(hit._source.policy_id);
+      for (const row of esqlRows(agentsRes)) {
+        if (row.policy_id) policyIds.push(row.policy_id as string);
       }
     }
     cancelledActions.push({
@@ -595,24 +598,21 @@ async function getAgentActionsByIds(
     return [];
   }
 
-  const res = await esClient.search<FleetServerAgentAction>({
-    index: AGENT_ACTIONS_INDEX,
-    query: {
-      bool: {
-        filter: [
-          {
-            terms: {
-              action_id: actionIds,
-            },
-          },
-        ],
-      },
-    },
-    _source: ['agents', 'total'],
-    size: SO_SEARCH_LIMIT,
+  // `total` is not mapped in `.fleet-actions` (dynamic: false), so it is only readable from `_source`.
+  const res = await runEsqlRead({
+    esClient,
+    query: esql.from([AGENT_ACTIONS_INDEX], ['_id', '_source']).where`action_id IN (${{
+      actionIds,
+    }})`
+      .keep('_id', '_source')
+      .limit(SO_SEARCH_LIMIT),
   });
+  const hits = esqlRows(res).map((row) => ({
+    _id: row._id as string,
+    _source: (row._source ?? {}) as Pick<FleetServerAgentAction, 'action_id' | 'agents' | 'total'>,
+  }));
 
-  if (res.hits.hits.length === 0) {
+  if (hits.length === 0) {
     appContextService.getLogger().debug(`No agent action found for ids ${actionIds}`);
     return [];
   }
@@ -620,16 +620,16 @@ async function getAgentActionsByIds(
   const result: FleetServerAgentAction[] = [];
   let total = 0;
 
-  for (const hit of res.hits.hits) {
+  for (const hit of hits) {
     auditLoggingService.writeCustomAuditLog({
-      message: `User retrieved Fleet action [id=${hit._source?.action_id}]`,
+      message: `User retrieved Fleet action [id=${hit._source.action_id}]`,
     });
 
     result.push({
-      ...hit._source,
+      agents: hit._source.agents,
       id: hit._id,
-    });
-    total = hit._source?.total ?? 0;
+    } as FleetServerAgentAction);
+    total = hit._source.total ?? 0;
   }
 
   const agentIds: string[] = [];
@@ -703,21 +703,20 @@ async function getAgentIdsFromResults(
   actionIds: string[]
 ): Promise<string[]> {
   try {
-    const results = await esClient.search({
-      index: AGENT_ACTIONS_RESULTS_INDEX,
-      ignore_unavailable: true,
-      query: {
-        bool: {
-          filter: [{ terms: { action_id: actionIds } }, { exists: { field: 'error' } }],
-        },
-      },
-      _source: ['agent_id'],
-      size: SO_SEARCH_LIMIT,
+    const results = await runEsqlRead({
+      esClient,
+      query: esql.from([AGENT_ACTIONS_RESULTS_INDEX], []).where`action_id IN (${{
+        actionIds,
+      }}) AND error IS NOT NULL`
+        .keep('agent_id')
+        .limit(SO_SEARCH_LIMIT),
+      // .fleet-actions-results does not yet exist on a fresh install
+      ignoreUnknownIndex: true,
     });
 
     const resultAgentIds = new Set<string>();
-    for (const hit of results.hits.hits) {
-      resultAgentIds.add((hit._source as any)?.agent_id);
+    for (const row of esqlRows(results)) {
+      resultAgentIds.add(row.agent_id as string);
     }
     return Array.from(resultAgentIds);
   } catch (err) {

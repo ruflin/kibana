@@ -5,8 +5,11 @@
  * 2.0.
  */
 import { type ElasticsearchClient } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 
 import { AGENT_POLICY_INDEX } from '../../../common';
+
+import { esqlRows, runEsqlRead } from '../../services/esql_read';
 
 import type { Context, PoliciesRevisionSummaries } from './types';
 
@@ -14,58 +17,30 @@ export const getPoliciesToClean = async (esClient: ElasticsearchClient, context:
   const {
     config: { maxRevisions },
   } = context;
-  const results = await queryMaxRevisionsAndCounts(esClient, context);
-  return (
-    results.aggregations?.latest_revisions_by_policy_id.buckets.reduce<PoliciesRevisionSummaries>(
-      (acc, bucket) => {
-        if (bucket.doc_count > maxRevisions) {
-          acc[bucket.key] = {
-            maxRevision: bucket.latest_revision.value,
-            count: bucket.doc_count,
-          };
-        }
-        return acc;
-      },
-      {}
-    ) ?? {}
-  );
+  const rows = await queryMaxRevisionsAndCounts(esClient, context);
+  return rows.reduce<PoliciesRevisionSummaries>((acc, row) => {
+    if (row.docCount > maxRevisions) {
+      acc[row.policyId] = {
+        maxRevision: row.latestRevision,
+        count: row.docCount,
+      };
+    }
+    return acc;
+  }, {});
 };
 
 const queryMaxRevisionsAndCounts = async (esClient: ElasticsearchClient, context: Context) => {
-  interface Aggregations {
-    latest_revisions_by_policy_id: {
-      buckets: Array<{
-        key: string;
-        doc_count: number;
-        latest_revision: {
-          value: number;
-        };
-      }>;
-    };
-  }
-
-  return await esClient.search<{}, Aggregations>(
-    {
-      index: AGENT_POLICY_INDEX,
-      ignore_unavailable: true,
-      size: 0,
-      aggs: {
-        latest_revisions_by_policy_id: {
-          terms: {
-            field: 'policy_id',
-            order: { _count: 'desc' },
-            size: context.config.maxPolicies,
-          },
-          aggs: {
-            latest_revision: {
-              max: {
-                field: 'revision_idx',
-              },
-            },
-          },
-        },
-      },
-    },
-    { signal: context.signal }
-  );
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([AGENT_POLICY_INDEX])
+      .pipe`STATS doc_count = COUNT(*), latest_revision = MAX(revision_idx) BY policy_id`
+      .pipe`SORT doc_count DESC, policy_id ASC`.limit(context.config.maxPolicies),
+    ignoreUnknownIndex: true,
+    signal: context.signal,
+  });
+  return esqlRows(response).map((row) => ({
+    policyId: row.policy_id as string,
+    docCount: row.doc_count as number,
+    latestRevision: row.latest_revision as number,
+  }));
 };

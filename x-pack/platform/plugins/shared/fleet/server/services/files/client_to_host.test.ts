@@ -23,11 +23,6 @@ import type { DeeplyMockedKeys } from '@kbn/utility-types-jest';
 
 import type { File } from '@kbn/files-plugin/common';
 
-import {
-  FILE_STORAGE_TO_HOST_DATA_INDEX_PATTERN,
-  FILE_STORAGE_TO_HOST_METADATA_INDEX_PATTERN,
-} from '../../../common/constants';
-
 import { getFileDataIndexName, getFileMetadataIndexName } from '../../../common';
 
 import type { HapiReadableStream } from '../..';
@@ -100,28 +95,31 @@ describe('FleetToHostFilesClient', () => {
       },
     };
 
-    esClientMock.search.mockImplementation(async (searchRequest = {}) => {
+    esClientMock.esql.query.mockImplementation((async (request: { query: string }) => {
       // File metadata
-      if (
-        (searchRequest.index as string).startsWith(
-          FILE_STORAGE_TO_HOST_METADATA_INDEX_PATTERN.replace('*', '')
-        )
-      ) {
-        return fleetFilesIndexSearchResponse;
+      if (request.query.startsWith('FROM .fleet-fileds-tohost-meta-foo ')) {
+        const [hit] = fleetFilesIndexSearchResponse.hits.hits;
+        return {
+          columns: [
+            { name: '_id', type: 'keyword' },
+            { name: '_index', type: 'keyword' },
+            { name: '_source', type: '_source' },
+          ],
+          values: hit ? [[hit._id, hit._index, hit._source]] : [],
+        };
       }
 
-      if (
-        (searchRequest.index as string).startsWith(
-          FILE_STORAGE_TO_HOST_DATA_INDEX_PATTERN.replace('*', '')
-        )
-      ) {
-        return fleetFileDataIndexSearchResponse;
+      if (request.query.startsWith('FROM .fleet-fileds-tohost-data-foo ')) {
+        return {
+          columns: [{ name: 'bid', type: 'keyword' }],
+          values: fleetFileDataIndexSearchResponse.hits.hits.map(() => ['123']),
+        };
       }
 
       throw new Error(
-        `esClientMock.search(): no mock implemented for route: ${JSON.stringify(searchRequest)}`
+        `esClientMock.esql.query(): no mock implemented for route: ${JSON.stringify(request)}`
       );
-    });
+    }) as any);
   });
 
   it('should create internal ES File client with expected arguments', () => {

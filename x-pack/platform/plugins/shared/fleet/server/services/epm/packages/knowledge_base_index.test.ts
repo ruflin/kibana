@@ -177,43 +177,36 @@ describe('knowledge_base_index', () => {
 
   describe('getPackageKnowledgeBaseFromIndex', () => {
     const mockSearchResponse = {
-      hits: {
-        hits: [
+      columns: [{ name: '_source', type: '_source' }],
+      values: [
+        [
           {
-            _source: {
-              filename: 'test1.md',
-              content: 'Test content 1',
-              package_name: 'test-package',
-              version: '1.0.0',
-            },
-          },
-          {
-            _source: {
-              filename: 'test2.md',
-              content: 'Test content 2',
-              package_name: 'test-package',
-              version: '1.0.0',
-            },
+            filename: 'test1.md',
+            content: 'Test content 1',
+            package_name: 'test-package',
+            version: '1.0.0',
           },
         ],
-      },
+        [
+          {
+            filename: 'test2.md',
+            content: 'Test content 2',
+            package_name: 'test-package',
+            version: '1.0.0',
+          },
+        ],
+      ],
     };
 
     it('should retrieve knowledge base content by package name only', async () => {
-      (mockEsClient.search as jest.Mock).mockResolvedValue(mockSearchResponse as any);
+      (mockEsClient.esql.query as jest.Mock).mockResolvedValue(mockSearchResponse as any);
 
       const result = await getPackageKnowledgeBaseFromIndex(mockEsClient, 'test-package');
 
-      expect(mockEsClient.search).toHaveBeenCalledWith(
-        {
-          index: INTEGRATION_KNOWLEDGE_INDEX,
-          query: {
-            match: { package_name: 'test-package' },
-          },
-          size: 1000,
-        },
-        undefined
-      );
+      expect(mockEsClient.esql.query).toHaveBeenCalledWith({
+        query: `FROM ${INTEGRATION_KNOWLEDGE_INDEX} METADATA _source | WHERE package_name == ?pkgName | KEEP _source | LIMIT 1000`,
+        params: [{ pkgName: 'test-package' }],
+      });
 
       expect(result).toEqual([
         {
@@ -234,9 +227,25 @@ describe('knowledge_base_index', () => {
     });
 
     it('should return empty array when index not found', async () => {
-      const notFoundError = new Error('Index not found');
-      (notFoundError as any).statusCode = 404;
-      (mockEsClient.search as jest.Mock).mockRejectedValue(notFoundError);
+      const notFoundError = Object.assign(new Error('Unknown index'), {
+        statusCode: 400,
+        body: {
+          error: {
+            type: 'verification_exception',
+            reason: 'Unknown index [.integration_knowledge]',
+          },
+        },
+      });
+      (mockEsClient.esql.query as jest.Mock).mockRejectedValue(notFoundError);
+
+      const result = await getPackageKnowledgeBaseFromIndex(mockEsClient, 'test-package');
+
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array on a 404 response', async () => {
+      const notFoundError = Object.assign(new Error('Index not found'), { statusCode: 404 });
+      (mockEsClient.esql.query as jest.Mock).mockRejectedValue(notFoundError);
 
       const result = await getPackageKnowledgeBaseFromIndex(mockEsClient, 'test-package');
 
@@ -246,7 +255,7 @@ describe('knowledge_base_index', () => {
     it('should throw error for non-404 errors', async () => {
       const serverError = new Error('Server error');
       (serverError as any).statusCode = 500;
-      (mockEsClient.search as jest.Mock).mockRejectedValue(serverError);
+      (mockEsClient.esql.query as jest.Mock).mockRejectedValue(serverError);
 
       await expect(getPackageKnowledgeBaseFromIndex(mockEsClient, 'test-package')).rejects.toThrow(
         'Server error'

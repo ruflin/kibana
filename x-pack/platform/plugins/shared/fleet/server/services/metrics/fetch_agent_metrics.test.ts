@@ -38,57 +38,37 @@ describe('fetchAgentMetrics', () => {
   });
 
   it('should fetch agent metrics', async () => {
-    esClient.search.mockResolvedValue({
-      took: 5,
-      timed_out: false,
-      _shards: {
-        total: 1,
-        successful: 1,
-        skipped: 0,
-        failed: 0,
-      },
-      hits: {
-        total: {
-          value: 0,
-          relation: 'eq',
-        },
-        hits: [],
-      },
-      aggregations: {
-        versions: {
-          buckets: [
-            {
-              key: '8.12.0',
-              doc_count: 1,
-            },
+    esClient.esql.query.mockImplementation((async (request: { query: string }) => {
+      if (request.query.includes('BY agent.version')) {
+        return {
+          columns: [
+            { name: 'doc_count', type: 'long' },
+            { name: 'agent.version', type: 'keyword' },
           ],
-        },
-        upgrade_details: {
-          buckets: [
-            {
-              key: 'UPG_REQUESTED',
-              doc_count: 1,
-            },
+          values: [[1, '8.12.0']],
+        };
+      }
+      if (request.query.includes('BY upgrade_details.state')) {
+        return {
+          columns: [
+            { name: 'doc_count', type: 'long' },
+            { name: 'upgrade_details.state', type: 'keyword' },
           ],
-        },
-        unhealthy_reason: {
-          buckets: [
-            {
-              key: 'input',
-              doc_count: 2,
-            },
-            {
-              key: 'output',
-              doc_count: 1,
-            },
-            {
-              key: 'other',
-              doc_count: 3,
-            },
-          ],
-        },
-      },
-    });
+          values: [[1, 'UPG_REQUESTED']],
+        };
+      }
+      return {
+        columns: [
+          { name: 'doc_count', type: 'long' },
+          { name: 'unhealthy_reason', type: 'keyword' },
+        ],
+        values: [
+          [2, 'input'],
+          [1, 'output'],
+          [3, 'other'],
+        ],
+      };
+    }) as any);
 
     const result = await fetchAgentMetrics(mockCore, signal);
 
@@ -117,5 +97,17 @@ describe('fetchAgentMetrics', () => {
         other: 3,
       },
     });
+  });
+
+  it('should count the active agents per version, the upgrade states and the unhealthy reasons with ES|QL', async () => {
+    esClient.esql.query.mockResolvedValue({ columns: [], values: [] } as any);
+
+    await fetchAgentMetrics(mockCore, signal);
+
+    expect(esClient.esql.query.mock.calls.map(([request]) => (request as any).query)).toEqual([
+      'FROM .fleet-agents | WHERE active == TRUE AND agent.version IS NOT NULL | STATS doc_count = COUNT(*) BY agent.version | SORT doc_count DESC, agent.version ASC | LIMIT 10',
+      'FROM .fleet-agents | WHERE active == TRUE AND upgrade_details.state IS NOT NULL | STATS doc_count = COUNT(*) BY upgrade_details.state | SORT doc_count DESC, upgrade_details.state ASC | LIMIT 10',
+      'FROM .fleet-agents | WHERE unhealthy_reason IS NOT NULL | STATS doc_count = COUNT(*) BY unhealthy_reason | SORT doc_count DESC, unhealthy_reason ASC | LIMIT 10',
+    ]);
   });
 });

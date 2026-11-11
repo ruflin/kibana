@@ -5,6 +5,7 @@
  * 2.0.
  */
 import { isEqual, omit } from 'lodash';
+import { esql } from '@elastic/esql';
 
 import type {
   ElasticsearchClient,
@@ -20,6 +21,7 @@ import type {
 } from '@elastic/elasticsearch/lib/api/types';
 
 import { appContextService } from '../../services';
+import { esqlSources, runEsqlRead } from '../../services/esql_read';
 import { getPackageSavedObjects } from '../../services/epm/packages/get';
 
 import { IndexNotFoundError } from '../../errors';
@@ -87,23 +89,20 @@ export const fetchAndCompareSyncedIntegrations = async (
 ): Promise<GetRemoteSyncedIntegrationsStatusResponse> => {
   try {
     // find integrations on ccr index
-    const searchRes = await esClient.search<SyncIntegrationsData>({
-      index,
-      sort: [
-        {
-          'integrations.updated_at': {
-            order: 'desc',
-          },
-        },
-      ],
+    // `integrations.updated_at` is multi-valued: a descending sort uses the latest value, as the DSL did.
+    const searchRes = await runEsqlRead({
+      esClient,
+      query: esql.from([index], ['_source']).pipe`SORT integrations.updated_at DESC NULLS LAST`
+        .keep('_source')
+        .limit(1),
     });
-    if (searchRes.hits.hits[0]?._source === undefined) {
+    const [ccrIndex] = esqlSources<SyncIntegrationsData>(searchRes);
+    if (ccrIndex === undefined) {
       return {
         integrations: [],
         error: `No integrations found on ${index}`,
       };
     }
-    const ccrIndex = searchRes.hits.hits[0]?._source;
     const {
       integrations: ccrIntegrations,
       custom_assets: ccrCustomAssets,

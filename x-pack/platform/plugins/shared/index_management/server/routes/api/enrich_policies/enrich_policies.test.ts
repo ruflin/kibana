@@ -306,7 +306,7 @@ describe('Enrich policies API', () => {
 
   describe('Get matching indices - POST /api/index_management/enrich_policies/get_matching_indices', () => {
     const getAliasMock = router.getMockESApiFn('indices.getAlias');
-    const searchMock = router.getMockESApiFn('search');
+    const esqlQueryMock = router.getMockESApiFn('esql.query');
 
     it('Return matching indices using alias api', async () => {
       const mockRequest: RequestMock = {
@@ -330,7 +330,7 @@ describe('Enrich policies API', () => {
         },
       });
 
-      expect(searchMock).not.toHaveBeenCalled();
+      expect(esqlQueryMock).not.toHaveBeenCalled();
       expect(getAliasMock).toHaveBeenCalledWith(
         { index: '*test*', expand_wildcards: 'open' },
         { ignore: [404], meta: true }
@@ -351,9 +351,11 @@ describe('Enrich policies API', () => {
         statusCode: 404,
       });
 
-      searchMock.mockResolvedValue({
-        body: {},
-        statusCode: 404,
+      esqlQueryMock.mockRejectedValue({
+        statusCode: 400,
+        body: {
+          error: { type: 'verification_exception', reason: 'Unknown index [*test*]' },
+        },
       });
 
       const res = await router.runRequest(mockRequest);
@@ -364,7 +366,40 @@ describe('Enrich policies API', () => {
         },
       });
 
-      expect(searchMock).toHaveBeenCalled();
+      expect(esqlQueryMock).toHaveBeenCalled();
+    });
+
+    it('returns the indices of the documents found by the ES|QL fallback', async () => {
+      const mockRequest: RequestMock = {
+        method: 'post',
+        path: addInternalBasePath('/enrich_policies/get_matching_indices'),
+        body: {
+          pattern: 'test',
+        },
+      };
+
+      getAliasMock.mockResolvedValue({
+        body: {},
+        statusCode: 404,
+      });
+      esqlQueryMock.mockResolvedValue({
+        columns: [
+          { name: 'doc_count', type: 'long' },
+          { name: '_index', type: 'keyword' },
+        ],
+        values: [
+          [5, 'test-b'],
+          [2, 'test-a'],
+        ],
+      });
+
+      const res = await router.runRequest(mockRequest);
+
+      expect(res).toEqual({ body: { indices: ['test-b', 'test-a'] } });
+      expect(esqlQueryMock).toHaveBeenCalledWith({
+        query:
+          'FROM "*test*" METADATA _index | STATS doc_count = COUNT(*) BY _index | SORT doc_count DESC, _index ASC | LIMIT 10',
+      });
     });
   });
 

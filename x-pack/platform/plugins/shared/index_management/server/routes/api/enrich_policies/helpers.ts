@@ -9,8 +9,9 @@ import { forEach, keys, sortBy, reduce, size } from 'lodash';
 import { flatMap, flow, groupBy, values as valuesFP, map, pickBy } from 'lodash/fp';
 
 import type { IScopedClusterClient } from '@kbn/core/server';
-import type { estypes } from '@elastic/elasticsearch';
 import type { FieldCapsResponse } from '@elastic/elasticsearch/lib/api/types';
+
+import { quoteEsqlIndexName } from '../../../lib/quote_esql_index_name';
 
 export type FieldCapsList = FieldCapsResponse['fields'];
 
@@ -37,9 +38,19 @@ interface FieldsPerIndexType {
   fields: FieldItem[];
 }
 
-interface IndicesAggs extends estypes.AggregationsMultiBucketAggregateBase {
-  buckets: Array<{ key: unknown }>;
-}
+/** ES|QL reports a missing concrete index or an unmatched pattern as a 400 `verification_exception`. */
+const isEsqlUnknownIndexError = (error: unknown): boolean => {
+  const { statusCode, body } = (error ?? {}) as {
+    statusCode?: number;
+    body?: { error?: { type?: string; reason?: string } };
+  };
+  return (
+    statusCode === 400 &&
+    body?.error?.type === 'verification_exception' &&
+    typeof body.error.reason === 'string' &&
+    body.error.reason.includes('Unknown index')
+  );
+};
 
 export function getCommonFields(fieldsPerIndex: FieldsPerIndexType[]) {
   return flow(
@@ -116,33 +127,38 @@ export async function getIndices(dataClient: IScopedClusterClient, pattern: stri
 
   // If the indices aliases API fails or returns nothing, we will rely on the indices stats API to
   // get the list of indices.
-  const response = await dataClient.asCurrentUser.search<unknown, { indices: IndicesAggs }>(
-    {
-      index: pattern,
-      size: 0,
-      aggs: {
-        indices: {
-          terms: {
-            field: '_index',
-            size: limit,
-          },
-        },
-      },
-    },
-    {
-      ignore: [404],
-      meta: true,
-    }
-  );
+  // Source names are quoted and escaped: a comma separates the patterns, as it did for the `index` of
+  // the search request. A pattern without any match fails with an `Unknown index` verification error
+  // in ES|QL, where the search request returned no hits.
+  const sources = pattern
+    .split(',')
+    .map((source) => source.trim())
+    .filter((source) => source.length > 0)
+    .map(quoteEsqlIndexName);
 
-  if (response.statusCode === 404 || !response.body.aggregations) {
+  if (sources.length === 0) {
     return [];
   }
 
-  const indices = response.body.aggregations.indices;
+  try {
+    const response = await dataClient.asCurrentUser.esql.query({
+      query: `FROM ${sources.join(
+        ', '
+      )} METADATA _index | STATS doc_count = COUNT(*) BY _index | SORT doc_count DESC, _index ASC | LIMIT ${Math.trunc(
+        limit
+      )}`,
+    });
 
-  return indices.buckets ? indices.buckets.map((bucket) => bucket.key) : [];
+    const indexColumn = response.columns.findIndex((column) => column.name === '_index');
+    return (response.values ?? []).map((row) => row[indexColumn] as string);
+  } catch (error) {
+    if (isEsqlUnknownIndexError(error)) {
+      return [];
+    }
+    throw error;
+  }
 }
+
 export async function getDataStreams(
   dataClient: IScopedClusterClient,
   pattern: string,

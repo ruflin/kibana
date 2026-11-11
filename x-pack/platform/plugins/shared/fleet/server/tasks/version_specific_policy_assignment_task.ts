@@ -19,6 +19,7 @@ import type {
 import { getDeleteTaskRunResult } from '@kbn/task-manager-plugin/server/task';
 import type { LoggerFactory } from '@kbn/core/server';
 import { errors } from '@elastic/elasticsearch';
+import { esql } from '@elastic/esql';
 import type { SearchResponse } from '@elastic/elasticsearch/lib/api/types';
 import { escapeQuotes } from '@kbn/es-query';
 import { coerce } from 'semver';
@@ -28,6 +29,7 @@ import { chunk } from 'lodash';
 import type { AgentPolicy } from '../../common/types';
 import { AGENT_POLICY_SAVED_OBJECT_TYPE } from '../constants';
 import { agentPolicyService, appContextService, packagePolicyService } from '../services';
+import { esqlRows, runEsqlRead } from '../services/esql_read';
 import { getPackageInfo } from '../services/epm/packages';
 import { getAgentTemplateAssetsMap } from '../services/epm/packages/get';
 import {
@@ -539,25 +541,17 @@ export class VersionSpecificPolicyAssignmentTask {
       return [];
     }
     const getUpToDatePolicyIds = async () => {
-      const response = await esClient.search<
-        unknown,
-        { policies: { buckets: Array<{ key: string; max_revision: { value: number | null } }> } }
-      >({
-        index: AGENT_POLICY_INDEX,
-        ignore_unavailable: true,
-        size: 0,
-        query: { terms: { policy_id: policyIds.map(getSentinelVersionPolicyId) } },
-        aggs: {
-          policies: {
-            terms: { field: 'policy_id', size: policyIds.length },
-            aggs: { max_revision: { max: { field: 'revision_idx' } } },
-          },
-        },
+      const response = await runEsqlRead({
+        esClient,
+        query: esql.from([AGENT_POLICY_INDEX]).where`policy_id IN (${{
+          sentinelPolicyIds: policyIds.map(getSentinelVersionPolicyId),
+        }})`.pipe`STATS max_revision = MAX(revision_idx) BY policy_id`.limit(policyIds.length),
+        ignoreUnknownIndex: true,
       });
       const upToDate = new Set<string>();
-      for (const bucket of response.aggregations?.policies?.buckets ?? []) {
-        const { baseId } = splitVersionSuffixFromPolicyId(bucket.key);
-        if ((bucket.max_revision.value ?? 0) >= (revisionByPolicyId.get(baseId) ?? 0)) {
+      for (const row of esqlRows(response)) {
+        const { baseId } = splitVersionSuffixFromPolicyId(row.policy_id as string);
+        if (((row.max_revision as number | null) ?? 0) >= (revisionByPolicyId.get(baseId) ?? 0)) {
           upToDate.add(baseId);
         }
       }
@@ -1069,30 +1063,23 @@ export class VersionSpecificPolicyAssignmentTask {
     // max(@timestamp) sub-aggregation. Driving from .fleet-policies is cheaper than scanning
     // .fleet-agents (one set of docs per policy, not per agent) and correctly cleans up variants
     // even after every agent has moved off them.
-    const policiesResponse = await esClient.search<
-      unknown,
-      {
-        variant_policies: {
-          buckets: Array<{ key: string; last_written: { value: number | null } }>;
-          sum_other_doc_count: number;
-        };
-      }
-    >({
-      index: AGENT_POLICY_INDEX,
-      ignore_unavailable: true,
-      size: 0,
-      aggs: {
-        variant_policies: {
-          terms: { field: 'policy_id', size: MAX_VERSION_SPECIFIC_POLICY_BUCKETS },
-          aggs: {
-            last_written: { max: { field: '@timestamp' } },
-          },
-        },
-      },
+    // ES|QL has no `sum_other_doc_count`: a response with as many rows as the limit may be truncated.
+    const policiesResponse = await runEsqlRead({
+      esClient,
+      query: esql.from([AGENT_POLICY_INDEX])
+        .pipe`STATS last_written = MAX(@timestamp) BY policy_id`.limit(
+        MAX_VERSION_SPECIFIC_POLICY_BUCKETS
+      ),
+      ignoreUnknownIndex: true,
     });
 
-    const variantPoliciesAgg = policiesResponse.aggregations?.variant_policies;
-    const buckets = variantPoliciesAgg?.buckets ?? [];
+    const buckets = esqlRows(policiesResponse).map((row) => ({
+      key: row.policy_id as string,
+      last_written: {
+        value: typeof row.last_written === 'string' ? Date.parse(row.last_written) : null,
+      },
+    }));
+    const mayHaveMoreBuckets = buckets.length >= MAX_VERSION_SPECIFIC_POLICY_BUCKETS;
     // Agents on a versioned `policy_id` without `policy_base_id` (enrolled by a downlevel
     // fleet-server after the last backfill). Their variant document may already be gone, in which
     // case the parent would never be visited via `.fleet-policies` alone.
@@ -1114,7 +1101,7 @@ export class VersionSpecificPolicyAssignmentTask {
     if (buckets.length === 0 && agentOnlyVariantIdsByParent.size === 0) {
       return;
     }
-    if (variantPoliciesAgg?.sum_other_doc_count) {
+    if (mayHaveMoreBuckets) {
       this.logger.warn(
         `[VersionSpecificPolicyAssignmentTask] More than ${MAX_VERSION_SPECIFIC_POLICY_BUCKETS} policies in .fleet-policies; some version-specific policies will be checked for orphaned assignments on a later run`
       );

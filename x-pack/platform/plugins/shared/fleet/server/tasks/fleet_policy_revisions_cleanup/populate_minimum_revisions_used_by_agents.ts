@@ -5,8 +5,11 @@
  * 2.0.
  */
 import { type ElasticsearchClient } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 
 import { AGENTS_INDEX } from '../../../common';
+
+import { esqlRows, runEsqlRead } from '../../services/esql_read';
 
 import type { Context, PoliciesRevisionSummaries } from './types';
 
@@ -15,16 +18,16 @@ export const populateMinimumRevisionsUsedByAgents = async (
   policiesRevisionSummaries: PoliciesRevisionSummaries,
   context: Context
 ) => {
-  const result = await queryMinimumRevisionsUsedByAgents(
+  const rows = await queryMinimumRevisionsUsedByAgents(
     esClient,
     Object.keys(policiesRevisionSummaries),
     context
   );
 
-  result.aggregations?.min_used_revisions_by_policy_id.buckets.forEach((bucket) => {
-    const policySummary = policiesRevisionSummaries[bucket.key];
+  rows.forEach((row) => {
+    const policySummary = policiesRevisionSummaries[row.policyId];
     if (policySummary) {
-      policySummary.minUsedRevision = bucket.min_used_revision.value;
+      policySummary.minUsedRevision = row.minUsedRevision;
     }
   });
 
@@ -36,55 +39,17 @@ const queryMinimumRevisionsUsedByAgents = async (
   policyIds: string[],
   context: Context
 ) => {
-  interface Aggregations {
-    min_used_revisions_by_policy_id: {
-      buckets: Array<{
-        key: string;
-        doc_count: number;
-        min_used_revision: {
-          value: number;
-        };
-      }>;
-    };
-  }
-
-  return await esClient.search<{}, Aggregations>(
-    {
-      index: AGENTS_INDEX,
-      ignore_unavailable: true,
-      size: 0,
-      query: {
-        bool: {
-          filter: [
-            {
-              terms: {
-                policy_id: policyIds,
-              },
-            },
-            {
-              term: {
-                active: true,
-              },
-            },
-          ],
-        },
-      },
-      aggs: {
-        min_used_revisions_by_policy_id: {
-          terms: {
-            field: 'policy_id',
-            size: context.config.maxPolicies,
-          },
-          aggs: {
-            min_used_revision: {
-              min: {
-                field: 'policy_revision_idx',
-              },
-            },
-          },
-        },
-      },
-    },
-    { signal: context.signal }
-  );
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([AGENTS_INDEX]).where`policy_id IN (${{ policyIds }}) AND active == true`
+      .pipe`STATS min_used_revision = MIN(policy_revision_idx) BY policy_id`.limit(
+      context.config.maxPolicies
+    ),
+    ignoreUnknownIndex: true,
+    signal: context.signal,
+  });
+  return esqlRows(response).map((row) => ({
+    policyId: row.policy_id as string,
+    minUsedRevision: row.min_used_revision as number,
+  }));
 };

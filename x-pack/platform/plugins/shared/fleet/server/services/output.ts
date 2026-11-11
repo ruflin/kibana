@@ -8,6 +8,7 @@ import { v5 as uuidv5 } from 'uuid';
 import { escapeQuotes } from '@kbn/es-query';
 import { omit } from 'lodash';
 import { parse } from 'yaml';
+import { esql } from '@elastic/esql';
 import deepEqual from 'fast-deep-equal';
 import { indexBy } from 'lodash/fp';
 
@@ -94,6 +95,7 @@ import { getAgentCountForAgentPolicies } from './agent_policies/agent_policy_age
 import { buildAgentStatusRuntimeField } from './agents/build_status_runtime_field';
 import { packagePolicyService } from './package_policy';
 import { appContextService } from './app_context';
+import { esqlRows, runEsqlRead } from './esql_read';
 import { escapeSearchQueryPhrase } from './saved_object';
 import { auditLoggingService } from './audit_logging';
 import {
@@ -1881,39 +1883,32 @@ class OutputService {
   async getLatestOutputHealth(esClient: ElasticsearchClient, id: string): Promise<OutputHealth> {
     const lastUpdateTime = await this.getOutputLastUpdateTime(id);
 
-    const mustFilter = [];
+    let query = esql.from([OUTPUT_HEALTH_DATA_STREAM], ['@timestamp', 'state', 'message'])
+      .pipe`WHERE output == ${{
+      outputId: id,
+    }}`;
     if (lastUpdateTime) {
-      mustFilter.push({
-        range: {
-          '@timestamp': {
-            gte: lastUpdateTime,
-          },
-        },
-      });
+      query = query.pipe`WHERE @timestamp >= TO_DATETIME(${{ since: lastUpdateTime }})`;
     }
+    // A missing health data stream means no health reported yet (the DSL used `ignore: [404]`).
+    const response = await runEsqlRead({
+      esClient,
+      query: query.pipe`SORT @timestamp DESC NULLS LAST`.limit(1),
+      ignoreUnknownIndex: true,
+    });
+    const [latestHit] = esqlRows(response);
 
-    const response = await esClient.search(
-      {
-        index: OUTPUT_HEALTH_DATA_STREAM,
-        query: { bool: { filter: { term: { output: id } }, must: mustFilter } },
-        sort: { '@timestamp': 'desc' },
-        size: 1,
-      },
-      { ignore: [404] }
-    );
-
-    if (!response.hits || response.hits.hits.length === 0) {
+    if (!latestHit) {
       return {
         state: 'UNKNOWN',
         message: '',
         timestamp: '',
       };
     }
-    const latestHit = response.hits.hits[0]._source as any;
     return {
-      state: latestHit.state,
-      message: latestHit.message ?? '',
-      timestamp: latestHit['@timestamp'],
+      state: latestHit.state as string,
+      message: (latestHit.message as string | null) ?? '',
+      timestamp: latestHit['@timestamp'] as string,
     };
   }
 

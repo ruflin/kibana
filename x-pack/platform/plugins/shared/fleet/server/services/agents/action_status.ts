@@ -5,6 +5,7 @@
  * 2.0.
  */
 import moment from 'moment';
+import { esql } from '@elastic/esql';
 import type { ElasticsearchClient } from '@kbn/core/server';
 
 import { SO_SEARCH_LIMIT } from '../../constants';
@@ -23,6 +24,7 @@ import {
   AGENT_POLICY_INDEX,
 } from '../../../common';
 import { appContextService } from '..';
+import { esqlRows, runEsqlRead } from '../esql_read';
 import { addNamespaceFilteringToQuery } from '../spaces/query_namespaces_filtering';
 import {
   hasVersionSuffix,
@@ -58,48 +60,19 @@ async function getActionResults(
 ): Promise<ActionStatus[]> {
   const actions = await getActions(esClient, options, namespace);
   const cancelledActions = await getCancelledActions(esClient);
-  let acks: any;
-
-  try {
-    acks = await esClient.search({
-      index: AGENT_ACTIONS_RESULTS_INDEX,
-      ignore_unavailable: true,
-      query: {
-        bool: {
-          // There's some perf/caching advantages to using filter over must
-          // See https://www.elastic.co/guide/en/elasticsearch/reference/current/query-filter-context.html#filter-context
-          filter: [{ terms: { action_id: actions.map((a) => a.actionId) } }],
-        },
-      },
-      size: 0,
-      aggs: {
-        ack_counts: {
-          terms: { field: 'action_id', size: actions.length || 10 },
-          aggs: {
-            max_timestamp: { max: { field: '@timestamp' } },
-          },
-        },
-      },
-    });
-  } catch (err) {
-    if (err.statusCode === 404) {
-      // .fleet-actions-results does not yet exist
-      appContextService.getLogger().debug(err);
-    } else {
-      throw err;
-    }
-  }
+  const acks = await getAckCounts(
+    esClient,
+    actions.map((a) => a.actionId)
+  );
 
   const results = [];
 
   for (const action of actions) {
-    const matchingBucket = (acks?.aggregations?.ack_counts as any)?.buckets?.find(
-      (bucket: any) => bucket.key === action.actionId
-    );
+    const matchingAck = acks.get(action.actionId);
     const nbAgentsActioned = action.nbAgentsActioned || action.nbAgentsActionCreated;
-    const docCount = matchingBucket?.doc_count ?? 0;
+    const docCount = matchingAck?.docCount ?? 0;
     const nbAgentsAck = Math.min(docCount, nbAgentsActioned);
-    const completionTime = (matchingBucket?.max_timestamp as any)?.value_as_string;
+    const completionTime = matchingAck?.completionTime ?? undefined;
     const complete = nbAgentsAck >= nbAgentsActioned;
     const cancelledAction = cancelledActions.find((a) => a.actionId === action.actionId);
 
@@ -188,6 +161,34 @@ async function getActionResults(
   }
 
   return results;
+}
+
+/** Number of acks and the latest ack time per action id, from the action results index. */
+async function getAckCounts(
+  esClient: ElasticsearchClient,
+  actionIds: string[]
+): Promise<Map<string, { docCount: number; completionTime: string | null }>> {
+  const acks = new Map<string, { docCount: number; completionTime: string | null }>();
+  if (actionIds.length === 0) {
+    return acks;
+  }
+  // A missing .fleet-actions-results index (not created yet) means no acks, as the DSL
+  // `ignore_unavailable` did.
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([AGENT_ACTIONS_RESULTS_INDEX]).where`action_id IN (${{ actionIds }})`
+      .pipe`STATS doc_count = COUNT(*), max_timestamp = MAX(@timestamp) BY action_id`.limit(
+      actionIds.length
+    ),
+    ignoreUnknownIndex: true,
+  });
+  for (const row of esqlRows(response)) {
+    acks.set(row.action_id as string, {
+      docCount: row.doc_count as number,
+      completionTime: (row.max_timestamp as string | null) ?? null,
+    });
+  }
+  return acks;
 }
 
 export function getPage(options: ActionStatusOptions) {
@@ -355,23 +356,15 @@ export async function getCancelledActions(
 }
 
 async function getHostNames(esClient: ElasticsearchClient, agentIds: string[]) {
-  const agentsRes = await esClient.search({
-    index: AGENTS_INDEX,
-    query: {
-      bool: {
-        filter: {
-          terms: {
-            'agent.id': agentIds,
-          },
-        },
-      },
-    },
-    size: agentIds.length,
-    _source: ['local_metadata.host.name'],
+  const agentsRes = await runEsqlRead({
+    esClient,
+    query: esql.from([AGENTS_INDEX], ['_id']).where`agent.id IN (${{ agentIds }})`
+      .pipe`KEEP _id, local_metadata.host.name`.limit(agentIds.length),
+    ignoreUnknownIndex: true,
   });
-  const hostNames = agentsRes.hits.hits.reduce((acc: { [key: string]: string }, curr) => {
-    if ((curr._source as any).local_metadata?.host?.name) {
-      acc[curr._id!] = (curr._source as any).local_metadata.host.name;
+  const hostNames = esqlRows(agentsRes).reduce((acc: { [key: string]: string }, row) => {
+    if (row['local_metadata.host.name']) {
+      acc[row._id as string] = row['local_metadata.host.name'] as string;
     }
     return acc;
   }, {});

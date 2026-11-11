@@ -41,6 +41,24 @@ const mockedAgentPolicyService = agentPolicyService as jest.Mocked<typeof agentP
 const mockedBulkUpdateAgents = bulkUpdateAgents as jest.MockedFunction<typeof bulkUpdateAgents>;
 const mockedAuditLoggingService = auditLoggingService as jest.Mocked<typeof auditLoggingService>;
 
+const policyIdsResponse = (policyIds: string[]) =>
+  ({
+    columns: [{ name: 'policy_id', type: 'keyword' }],
+    values: policyIds.map((id) => [id]),
+  } as any);
+
+const idsResponse = (ids: string[]) =>
+  ({ columns: [{ name: '_id', type: 'keyword' }], values: ids.map((id) => [id]) } as any);
+
+const actionsResponse = (sources: Array<Record<string, unknown>>) =>
+  ({
+    columns: [
+      { name: '_id', type: 'keyword' },
+      { name: '_source', type: '_source' },
+    ],
+    values: sources.map((source, i) => [`doc-${i}`, source]),
+  } as any);
+
 describe('Agent actions', () => {
   let mockContext: MockedFleetAppContext;
 
@@ -58,20 +76,16 @@ describe('Agent actions', () => {
     it('should call audit logger', async () => {
       const esClientMock = elasticsearchServiceMock.createInternalClient();
 
-      esClientMock.search.mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _source: {
-                action_id: 'action1',
-                agents: ['agent1'],
-                expiration: new Date().toISOString(),
-                type: 'UPGRADE',
-              },
-            },
-          ],
-        },
-      } as any);
+      esClientMock.esql.query.mockResolvedValue(
+        actionsResponse([
+          {
+            action_id: 'action1',
+            agents: ['agent1'],
+            expiration: new Date().toISOString(),
+            type: 'UPGRADE',
+          },
+        ])
+      );
 
       await getAgentsByActionsIds(esClientMock, ['action1']);
 
@@ -421,6 +435,7 @@ describe('Agent actions', () => {
       // 2: look up agent policy_ids from .fleet-agents
       // 3: concurrent-batch re-query
       // 4: look up other pending scheduled UNENROLL batches (cancelPendingBatches)
+      esClient.esql.query.mockResolvedValueOnce(policyIdsResponse(['policy-1', 'policy-1']));
       esClient.search
         .mockResolvedValueOnce({
           hits: {
@@ -435,11 +450,6 @@ describe('Agent actions', () => {
                 },
               },
             ],
-          },
-        } as any)
-        .mockResolvedValueOnce({
-          hits: {
-            hits: [{ _source: { policy_id: 'policy-1' } }, { _source: { policy_id: 'policy-1' } }],
           },
         } as any)
         .mockResolvedValueOnce({
@@ -477,6 +487,7 @@ describe('Agent actions', () => {
 
     it('should NOT call bulkUpdateAgents (updateAgentsToHealthy) when cancelling UNENROLL', async () => {
       const esClient = elasticsearchServiceMock.createInternalClient();
+      esClient.esql.query.mockResolvedValueOnce(policyIdsResponse([])); // no policy_id found
       esClient.search
         .mockResolvedValueOnce({
           hits: {
@@ -492,7 +503,6 @@ describe('Agent actions', () => {
             ],
           },
         } as any)
-        .mockResolvedValueOnce({ hits: { hits: [] } } as any) // agent policy lookup (no policy_id found)
         .mockResolvedValueOnce({
           hits: {
             hits: [
@@ -520,6 +530,7 @@ describe('Agent actions', () => {
     it('should disable unenroll_timeout on the agent policy when cancelling UNENROLL', async () => {
       const esClient = elasticsearchServiceMock.createInternalClient();
       const scheduledActionId = `${SCHEDULED_UNENROLL_ACTION_ID_PREFIX}test-action-1`;
+      esClient.esql.query.mockResolvedValueOnce(policyIdsResponse(['policy-abc']));
       esClient.search
         .mockResolvedValueOnce({
           hits: {
@@ -535,9 +546,6 @@ describe('Agent actions', () => {
               },
             ],
           },
-        } as any)
-        .mockResolvedValueOnce({
-          hits: { hits: [{ _source: { policy_id: 'policy-abc' } }] },
         } as any)
         .mockResolvedValueOnce({
           hits: {
@@ -571,6 +579,7 @@ describe('Agent actions', () => {
 
     it('should cancel other pending scheduled UNENROLL batches for the same policy', async () => {
       const esClient = elasticsearchServiceMock.createInternalClient();
+      esClient.esql.query.mockResolvedValueOnce(policyIdsResponse(['policy-abc']));
       esClient.search
         .mockResolvedValueOnce({
           hits: {
@@ -586,9 +595,6 @@ describe('Agent actions', () => {
               },
             ],
           },
-        } as any)
-        .mockResolvedValueOnce({
-          hits: { hits: [{ _source: { policy_id: 'policy-abc' } }] },
         } as any)
         .mockResolvedValueOnce({
           hits: {
@@ -644,6 +650,7 @@ describe('Agent actions', () => {
       // 1: find UNENROLL action (non-prefixed action_id — manual unenrollment)
       // 2: agent policy lookup
       // 3: concurrent-batch re-query
+      esClient.esql.query.mockResolvedValueOnce(policyIdsResponse(['policy-abc']));
       esClient.search
         .mockResolvedValueOnce({
           hits: {
@@ -658,9 +665,6 @@ describe('Agent actions', () => {
               },
             ],
           },
-        } as any)
-        .mockResolvedValueOnce({
-          hits: { hits: [{ _source: { policy_id: 'policy-abc' } }] },
         } as any)
         .mockResolvedValueOnce({
           hits: {
@@ -693,8 +697,9 @@ describe('Agent actions', () => {
       );
       // Side effects are skipped because the action ID lacks the scheduled prefix
       expect(mockedAgentPolicyService.update).not.toHaveBeenCalled();
-      // Only 3 searches (find action, policy lookup, concurrent re-query) — no cancelPendingBatches searches
-      expect(esClient.search).toHaveBeenCalledTimes(3);
+      // Only 2 searches (find action, concurrent re-query) and the ES|QL policy lookup — no cancelPendingBatches searches
+      expect(esClient.search).toHaveBeenCalledTimes(2);
+      expect(esClient.esql.query).toHaveBeenCalledTimes(1);
     });
 
     it('should NOT call agentPolicyService.update when cancelling UPGRADE', async () => {
@@ -725,48 +730,48 @@ describe('Agent actions', () => {
   describe('getAgentsByActionsIds', () => {
     const esClientMock = elasticsearchServiceMock.createElasticsearchClient();
 
+    beforeEach(() => {
+      esClientMock.esql.query.mockReset();
+    });
+
     it('should find agents by passing actions Ids', async () => {
-      esClientMock.search.mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _source: {
-                action_id: 'action2',
-                agents: ['agent3', 'agent4'],
-                expiration: '2022-05-12T18:16:18.019Z',
-                type: 'UPGRADE',
-              },
-            },
-          ],
-        },
-      } as any);
+      esClientMock.esql.query.mockResolvedValue(
+        actionsResponse([
+          {
+            action_id: 'action2',
+            agents: ['agent3', 'agent4'],
+            expiration: '2022-05-12T18:16:18.019Z',
+            type: 'UPGRADE',
+          },
+        ])
+      );
       const actionsIds = ['action2'];
       expect(await getAgentsByActionsIds(esClientMock, actionsIds)).toEqual(['agent3', 'agent4']);
+
+      const request = esClientMock.esql.query.mock.calls[0][0] as any;
+      expect(request.query).toEqual(
+        'FROM .fleet-actions METADATA _id, _source | WHERE action_id IN (?actionIds) | KEEP _id, _source | LIMIT 10000'
+      );
+      expect(request.params).toEqual([{ actionIds: ['action2'] }]);
     });
 
     it('should find agents by passing multiple actions Ids', async () => {
-      esClientMock.search.mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _source: {
-                action_id: 'action2',
-                agents: ['agent3', 'agent4'],
-                expiration: '2022-05-12T18:16:18.019Z',
-                type: 'UPGRADE',
-              },
-            },
-            {
-              _source: {
-                action_id: 'action3',
-                agents: ['agent5', 'agent6', 'agent7'],
-                expiration: '2022-05-12T18:16:18.019Z',
-                type: 'UNENROLL',
-              },
-            },
-          ],
-        },
-      } as any);
+      esClientMock.esql.query.mockResolvedValue(
+        actionsResponse([
+          {
+            action_id: 'action2',
+            agents: ['agent3', 'agent4'],
+            expiration: '2022-05-12T18:16:18.019Z',
+            type: 'UPGRADE',
+          },
+          {
+            action_id: 'action3',
+            agents: ['agent5', 'agent6', 'agent7'],
+            expiration: '2022-05-12T18:16:18.019Z',
+            type: 'UNENROLL',
+          },
+        ])
+      );
       const actionsIds = ['action2', 'actions3'];
       expect(await getAgentsByActionsIds(esClientMock, actionsIds)).toEqual([
         'agent3',
@@ -778,58 +783,30 @@ describe('Agent actions', () => {
     });
 
     it('should find agents assigned to agent policies when passing agent policy action ids', async () => {
-      esClientMock.search.mockResolvedValue({
-        hits: {
-          hits: [
-            {
-              _id: 'agent1',
-            },
-            {
-              _id: 'agent2',
-            },
-          ],
-        },
-      } as any);
+      esClientMock.esql.query.mockResolvedValue(idsResponse(['agent1', 'agent2']));
       const actionsIds = ['action1:1'];
       expect(await getAgentsByActionsIds(esClientMock, actionsIds)).toEqual(['agent1', 'agent2']);
     });
 
     it('should find agents when passing both agent action and agent policy action ids', async () => {
-      esClientMock.search
-        .mockResolvedValueOnce({
-          hits: {
-            hits: [
-              {
-                _source: {
-                  action_id: 'action2',
-                  agents: ['agent3', 'agent4'],
-                  expiration: '2022-05-12T18:16:18.019Z',
-                  type: 'UPGRADE',
-                },
-              },
-              {
-                _source: {
-                  action_id: 'action3',
-                  agents: ['agent5', 'agent6', 'agent7'],
-                  expiration: '2022-05-12T18:16:18.019Z',
-                  type: 'UNENROLL',
-                },
-              },
-            ],
-          },
-        } as any)
-        .mockResolvedValueOnce({
-          hits: {
-            hits: [
-              {
-                _id: 'agent1',
-              },
-              {
-                _id: 'agent2',
-              },
-            ],
-          },
-        } as any);
+      esClientMock.esql.query
+        .mockResolvedValueOnce(
+          actionsResponse([
+            {
+              action_id: 'action2',
+              agents: ['agent3', 'agent4'],
+              expiration: '2022-05-12T18:16:18.019Z',
+              type: 'UPGRADE',
+            },
+            {
+              action_id: 'action3',
+              agents: ['agent5', 'agent6', 'agent7'],
+              expiration: '2022-05-12T18:16:18.019Z',
+              type: 'UNENROLL',
+            },
+          ])
+        )
+        .mockResolvedValueOnce(idsResponse(['agent1', 'agent2']));
 
       const actionsIds = ['action1:1', 'action2', 'actions3'];
 
@@ -846,47 +823,55 @@ describe('Agent actions', () => {
     });
 
     it('should return an empty array if no actions were found', async () => {
-      esClientMock.search.mockResolvedValue({
-        hits: {
-          hits: [],
-        },
+      esClientMock.esql.query.mockResolvedValue({
+        columns: [{ name: '_id', type: 'keyword' }],
+        values: [],
       } as any);
       const actionsIds = ['action1:1', 'action2'];
       expect(await getAgentsByActionsIds(esClientMock, actionsIds)).toEqual([]);
     });
 
     it('should find agents by passing actions Ids by querying actions results', async () => {
-      esClientMock.search.mockImplementation((params: any) =>
-        params.index === '.fleet-actions'
-          ? ({
-              hits: {
-                hits: [
-                  {
-                    _source: {
-                      action_id: 'action2',
-                      agents: ['agent3'],
-                      total: 2,
-                      expiration: '2022-05-12T18:16:18.019Z',
-                      type: 'UPGRADE',
-                    },
-                  },
-                ],
+      esClientMock.esql.query.mockImplementation(((params: any) =>
+        params.query.startsWith('FROM .fleet-actions ')
+          ? actionsResponse([
+              {
+                action_id: 'action2',
+                agents: ['agent3'],
+                total: 2,
+                expiration: '2022-05-12T18:16:18.019Z',
+                type: 'UPGRADE',
               },
-            } as any)
+            ])
           : {
-              hits: {
-                hits: [
-                  {
-                    _source: {
-                      agent_id: 'agent4',
-                    },
-                  },
-                ],
-              },
-            }
-      );
+              columns: [{ name: 'agent_id', type: 'keyword' }],
+              values: [['agent4']],
+            }) as any);
       const actionsIds = ['action2'];
       expect(await getAgentsByActionsIds(esClientMock, actionsIds)).toEqual(['agent3', 'agent4']);
+
+      const resultsRequest = esClientMock.esql.query.mock.calls[1][0] as any;
+      expect(resultsRequest.query).toEqual(
+        'FROM .fleet-actions-results | WHERE (action_id IN (?actionIds)) AND error IS NOT NULL | KEEP agent_id | LIMIT 10000'
+      );
+    });
+
+    it('should ignore a missing actions results index', async () => {
+      esClientMock.esql.query.mockImplementation((async (params: any) => {
+        if (params.query.startsWith('FROM .fleet-actions ')) {
+          return actionsResponse([{ action_id: 'action2', agents: ['agent3'], total: 2 }]);
+        }
+        throw {
+          statusCode: 400,
+          body: {
+            error: {
+              type: 'verification_exception',
+              reason: 'Found 1 problem\nline 1:1: Unknown index [.fleet-actions-results]',
+            },
+          },
+        };
+      }) as any);
+      expect(await getAgentsByActionsIds(esClientMock, ['action2'])).toEqual(['agent3']);
     });
   });
 

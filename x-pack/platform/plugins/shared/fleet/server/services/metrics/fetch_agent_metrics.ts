@@ -7,6 +7,7 @@
 
 import type { ElasticsearchClient } from '@kbn/core-elasticsearch-server';
 import type { CoreSetup } from '@kbn/core/server';
+import { esql } from '@elastic/esql';
 
 import { AGENTS_INDEX } from '../../../common';
 
@@ -15,6 +16,10 @@ import { getAgentUsage } from '../../collectors/agent_collectors';
 import { getInternalClients } from '../../collectors/helpers';
 import { appContextService } from '../app_context';
 import { retryTransientEsErrors } from '../epm/elasticsearch/retry';
+import { esqlRows, runEsqlRead } from '../esql_read';
+
+// The default size of the DSL `terms` aggregations these counts came from
+const TOP_BUCKETS = 10;
 
 export interface AgentMetrics {
   agents: AgentUsage;
@@ -73,34 +78,23 @@ export const getAgentsPerVersion = async (
   signal: AbortSignal
 ): Promise<AgentPerVersion[]> => {
   try {
+    // The 10 most common versions, as the default size of the DSL `terms` aggregation did.
     const response = await retryTransientEsErrors(() =>
-      esClient.search(
-        {
-          index: AGENTS_INDEX,
-          query: {
-            bool: {
-              filter: [
-                {
-                  term: {
-                    active: 'true',
-                  },
-                },
-              ],
-            },
-          },
-          size: 0,
-          aggs: {
-            versions: {
-              terms: { field: 'agent.version' },
-            },
-          },
-        },
-        { signal }
-      )
+      runEsqlRead({
+        esClient,
+        query: esql.from([AGENTS_INDEX]).where`active == TRUE AND agent.version IS NOT NULL`
+          .pipe`STATS doc_count = COUNT(*) BY agent.version`
+          .pipe`SORT doc_count DESC, agent.version ASC`.limit(TOP_BUCKETS),
+        ignoreUnknownIndex: true,
+        signal,
+      })
     );
-    return ((response?.aggregations?.versions as any).buckets ?? []).map((bucket: any) => ({
-      version: bucket.key,
-      count: bucket.doc_count,
+    if (!response) {
+      appContextService.getLogger().debug('Index .fleet-agents does not exist yet.');
+    }
+    return esqlRows(response).map((row) => ({
+      version: row['agent.version'] as string,
+      count: row.doc_count as number,
     }));
   } catch (error) {
     if (error.statusCode === 404) {
@@ -129,58 +123,46 @@ export const getUpgradingSteps = async (
   };
   try {
     const response = await retryTransientEsErrors(() =>
-      esClient.search(
-        {
-          index: AGENTS_INDEX,
-          query: {
-            bool: {
-              filter: [
-                {
-                  term: {
-                    active: 'true',
-                  },
-                },
-              ],
-            },
-          },
-          size: 0,
-          aggs: {
-            upgrade_details: {
-              terms: { field: 'upgrade_details.state' },
-            },
-          },
-        },
-        { signal }
-      )
+      runEsqlRead({
+        esClient,
+        query: esql.from([AGENTS_INDEX]).where`active == TRUE AND upgrade_details.state IS NOT NULL`
+          .pipe`STATS doc_count = COUNT(*) BY upgrade_details.state`
+          .pipe`SORT doc_count DESC, upgrade_details.state ASC`.limit(TOP_BUCKETS),
+        ignoreUnknownIndex: true,
+        signal,
+      })
     );
-    ((response?.aggregations?.upgrade_details as any).buckets ?? []).forEach((bucket: any) => {
-      switch (bucket.key) {
+    if (!response) {
+      appContextService.getLogger().debug('Index .fleet-agents does not exist yet.');
+    }
+    esqlRows(response).forEach((bucket) => {
+      switch (bucket['upgrade_details.state']) {
         case 'UPG_REQUESTED':
-          upgradingSteps.requested = bucket.doc_count;
+          upgradingSteps.requested = bucket.doc_count as number;
           break;
         case 'UPG_SCHEDULED':
-          upgradingSteps.scheduled = bucket.doc_count;
+          upgradingSteps.scheduled = bucket.doc_count as number;
           break;
         case 'UPG_DOWNLOADING':
-          upgradingSteps.downloading = bucket.doc_count;
+          upgradingSteps.downloading = bucket.doc_count as number;
           break;
         case 'UPG_EXTRACTING':
-          upgradingSteps.extracting = bucket.doc_count;
+          upgradingSteps.extracting = bucket.doc_count as number;
           break;
         case 'UPG_REPLACING':
-          upgradingSteps.replacing = bucket.doc_count;
+          upgradingSteps.replacing = bucket.doc_count as number;
           break;
         case 'UPG_RESTARTING':
-          upgradingSteps.restarting = bucket.doc_count;
+          upgradingSteps.restarting = bucket.doc_count as number;
           break;
         case 'UPG_WATCHING':
-          upgradingSteps.watching = bucket.doc_count;
+          upgradingSteps.watching = bucket.doc_count as number;
           break;
         case 'UPG_ROLLBACK':
-          upgradingSteps.rollback = bucket.doc_count;
+          upgradingSteps.rollback = bucket.doc_count as number;
           break;
         case 'UPG_FAILED':
-          upgradingSteps.failed = bucket.doc_count;
+          upgradingSteps.failed = bucket.doc_count as number;
           break;
         default:
           break;
@@ -208,29 +190,28 @@ export const getUnhealthyReason = async (
   };
   try {
     const response = await retryTransientEsErrors(() =>
-      esClient.search(
-        {
-          index: AGENTS_INDEX,
-          size: 0,
-          aggs: {
-            unhealthy_reason: {
-              terms: { field: 'unhealthy_reason' },
-            },
-          },
-        },
-        { signal }
-      )
+      runEsqlRead({
+        esClient,
+        query: esql.from([AGENTS_INDEX]).where`unhealthy_reason IS NOT NULL`
+          .pipe`STATS doc_count = COUNT(*) BY unhealthy_reason`
+          .pipe`SORT doc_count DESC, unhealthy_reason ASC`.limit(TOP_BUCKETS),
+        ignoreUnknownIndex: true,
+        signal,
+      })
     );
-    ((response?.aggregations?.unhealthy_reason as any)?.buckets ?? []).forEach((bucket: any) => {
-      switch (bucket.key) {
+    if (!response) {
+      appContextService.getLogger().debug('Index .fleet-agents does not exist yet.');
+    }
+    esqlRows(response).forEach((bucket) => {
+      switch (bucket.unhealthy_reason) {
         case 'input':
-          unhealthyReason.input = bucket.doc_count;
+          unhealthyReason.input = bucket.doc_count as number;
           break;
         case 'output':
-          unhealthyReason.output = bucket.doc_count;
+          unhealthyReason.output = bucket.doc_count as number;
           break;
         case 'other':
-          unhealthyReason.other = bucket.doc_count;
+          unhealthyReason.other = bucket.doc_count as number;
           break;
         default:
           break;

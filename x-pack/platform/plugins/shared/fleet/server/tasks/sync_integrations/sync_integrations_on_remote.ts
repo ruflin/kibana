@@ -10,9 +10,11 @@ import semverEq from 'semver/functions/eq';
 import semverGte from 'semver/functions/gte';
 
 import { uniq } from 'lodash';
+import { esql } from '@elastic/esql';
 
 import type { PackageClient } from '../../services';
 import { outputService } from '../../services';
+import { esqlSources, runEsqlRead } from '../../services/esql_read';
 
 import { FleetError, PackageNotFoundError } from '../../errors';
 import { FLEET_SYNCED_INTEGRATIONS_CCR_INDEX_PREFIX } from '../../services/setup/fleet_synced_integrations';
@@ -64,17 +66,17 @@ const getSyncedIntegrationsCCRDoc = async (
   const index = await getFollowerIndex(esClient, signal);
   if (!index) return undefined;
 
-  const response = await esClient.search(
-    {
-      index,
-    },
-    { signal }
-  );
-  if (response.hits.hits.length === 0) {
+  const response = await runEsqlRead({
+    esClient,
+    query: esql.from([index], ['_source']).keep('_source').limit(1),
+    signal,
+  });
+  const [syncDoc] = esqlSources<SyncIntegrationsData>(response);
+  if (!syncDoc) {
     logger.warn(`getSyncedIntegrationsCCRDoc - Sync integration doc not found`);
     return undefined;
   }
-  return response.hits.hits[0]._source as SyncIntegrationsData;
+  return syncDoc;
 };
 
 async function getSyncIntegrationsEnabled(
